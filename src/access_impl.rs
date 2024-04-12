@@ -121,3 +121,9 @@ impl<'a> SeqLockGuarded<'a, Optimistic, [u8]> {
         }
     }
 }
+
+impl<'a> SeqLockGuarded<'a, Exclusive, [u8]> {
+    pub fn store(&mut self, src: &[u8]) {
+        self.0.copy_from_slice(src);
+    }
+}
