@@ -15,6 +15,8 @@ pub fn optimistic_release(lock: &AtomicU64, expected: u64) -> Result<(), ()> {
 pub struct Exclusive;
 
 pub struct Optimistic;
+impl Sealed for Exclusive {}
+impl Sealed for Optimistic {}
 
 unsafe impl SeqLockMode for Optimistic {
     type Access<'a, T: 'a + ?Sized> = *const T;

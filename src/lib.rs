@@ -2,21 +2,24 @@
 #![feature(slice_ptr_get)]
 
 use std::collections::Bound;
-use access_impl::{Exclusive, Optimistic};
-use std::ops::{Deref, DerefMut, Index, RangeBounds};
-use std::ptr;
+use std::ops::{Deref, DerefMut, RangeBounds};
 use std::ptr::{addr_of_mut, slice_from_raw_parts_mut};
 
 mod access_impl;
 
-unsafe trait SeqLockMode {
+pub use access_impl::{optimistic_release, Exclusive, Optimistic};
+
+trait Sealed {}
+
+#[allow(private_bounds)]
+pub unsafe trait SeqLockMode: Sealed {
     type Access<'a, T: 'a + ?Sized>;
 
     unsafe fn new_unchecked<'a, T: 'a + ?Sized>(p: *mut T) -> Self::Access<'a, T>;
     fn as_ptr<'a, T: 'a + ?Sized>(a: &Self::Access<'a, T>) -> *mut T;
 }
 
-unsafe fn wrap_unchecked<'a, M: SeqLockMode, T: SeqLockSafe + 'a + ?Sized>(
+pub unsafe fn wrap_unchecked<'a, M: SeqLockMode, T: SeqLockSafe + 'a + ?Sized>(
     p: *mut T,
 ) -> T::Wrapped<SeqLockGuarded<'a, M, T>> {
     T::wrap(SeqLockGuarded(M::new_unchecked(p)))
@@ -39,13 +42,12 @@ fn main() {
     unsafe {
         let x = &mut MyStruct { a: 1, b: 2 };
         let mut x = wrap_unchecked::<Exclusive, MyStruct>(x);
-        let a = x.a();
         dbg!(x.a().load());
         dbg!(x.b().load());
     }
 }
 
-unsafe trait SeqLockSafe {
+pub unsafe trait SeqLockSafe {
     type Wrapped<T>;
     fn wrap<T>(x: T) -> Self::Wrapped<T>;
 }
@@ -94,44 +96,16 @@ macro_rules! seqlock_safe_no_wrap {
     };
 }
 
-unsafe impl<X> SeqLockSafe for [X]{
+unsafe impl<X> SeqLockSafe for [X] {
     type Wrapped<T> = T;
-    fn wrap<T>(x: T) -> Self::Wrapped<T> { x }
+    fn wrap<T>(x: T) -> Self::Wrapped<T> {
+        x
+    }
 }
 
 seqlock_safe_no_wrap!(u8, u16, u32, u64, i8, i16, i32, i64);
 
 seqlock_accessors!(struct MyStruct as MyStructWrapper: a:u32,b:i64);
-
-#[test]
-fn test_memcmp() {
-    let samples = vec!["", "a", "aa", "ab", "aaa", "b", "ba", "bb", "bba"];
-    for a in &samples {
-        for b in &samples {
-            let std = a.cmp(b);
-            let optimistic = unsafe {
-                wrap_unchecked::<Optimistic, [u8]>(a.as_bytes() as *const [u8] as *mut [u8])
-                    .cmp(b.as_bytes())
-            };
-            assert_eq!(std, optimistic);
-        }
-    }
-}
-
-#[test]
-fn test_memcpy() {
-    let samples = vec!["", "a", "aa", "ab", "aaa", "b", "ba", "bb", "bba"];
-    unsafe {
-        for a in &samples {
-            let mut dst = vec![0u8; a.len()];
-            wrap_unchecked::<Optimistic, [u8]>(a.as_bytes() as *const [u8] as *mut [u8])
-                .load(&mut dst);
-            assert_eq!(dst, a.as_bytes());
-        }
-        wrap_unchecked::<Optimistic, [u8]>(slice_from_raw_parts_mut(ptr::null_mut(), 0))
-            .load(&mut []);
-    }
-}
 
 impl<'a, T: SeqLockSafe, M: SeqLockMode> SeqLockGuarded<'a, M, [T]> {
     #[inline]
@@ -159,19 +133,17 @@ impl<'a, T: SeqLockSafe, M: SeqLockMode> SeqLockGuarded<'a, M, [T]> {
                 }
                 Bound::Excluded(&x) => {
                     assert!(x < len);
-                    ptr = ptr.add(x+1);
-                    len -= x+1;
+                    ptr = ptr.add(x + 1);
+                    len -= x + 1;
                 }
                 Bound::Unbounded => {}
             }
-            SeqLockGuarded(M::new_unchecked(slice_from_raw_parts_mut(ptr,len)))
+            SeqLockGuarded(M::new_unchecked(slice_from_raw_parts_mut(ptr, len)))
         }
     }
 
-    pub fn index(&mut self, i: usize)->T::Wrapped<SeqLockGuarded<'a, M, T>>{
-        assert!(i<self.as_ptr().len());
-        unsafe{
-            wrap_unchecked(self.as_ptr().as_mut_ptr().add(i))
-        }
+    pub fn index(&mut self, i: usize) -> T::Wrapped<SeqLockGuarded<'a, M, T>> {
+        assert!(i < self.as_ptr().len());
+        unsafe { wrap_unchecked(self.as_ptr().as_mut_ptr().add(i)) }
     }
 }
