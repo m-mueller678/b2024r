@@ -2,7 +2,8 @@
 
 use access_impl::{Exclusive, Optimistic};
 use std::ops::{Deref, DerefMut};
-use std::ptr::addr_of_mut;
+use std::ptr;
+use std::ptr::{addr_of_mut, slice_from_raw_parts_mut};
 
 mod access_impl;
 
@@ -107,5 +108,20 @@ fn test_memcmp() {
             };
             assert_eq!(std, optimistic);
         }
+    }
+}
+
+#[test]
+fn test_memcpy() {
+    let samples = vec!["", "a", "aa", "ab", "aaa", "b", "ba", "bb", "bba"];
+    unsafe {
+        for a in &samples {
+            let mut dst = vec![0u8; a.len()];
+            wrap_unchecked::<Optimistic, [u8]>(a.as_bytes() as *const [u8] as *mut [u8])
+                .load(&mut dst);
+            assert_eq!(dst, a.as_bytes());
+        }
+        wrap_unchecked::<Optimistic, [u8]>(slice_from_raw_parts_mut(ptr::null_mut(), 0))
+            .load(&mut []);
     }
 }

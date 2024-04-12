@@ -108,4 +108,16 @@ impl<'a> SeqLockGuarded<'a, Optimistic, [u8]> {
             }
         }
     }
+
+    pub fn load(&self, dest: &mut [u8]) {
+        assert_eq!(self.to_ptr().len(), dest.len());
+        unsafe {
+            core::arch::asm!(
+            "rep movsb",
+            in("si") self.to_ptr() as *mut u8,
+            in("di") dest.as_ptr(),
+            in("cx") dest.len(),
+            );
+        }
+    }
 }
