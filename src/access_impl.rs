@@ -85,27 +85,24 @@ seqlock_primitive!(
 impl<'a> SeqLockGuarded<'a, Optimistic, [u8]> {
     pub fn cmp(&self, other: &[u8]) -> Ordering {
         let cmp_len = self.to_ptr().len().min(other.len());
-        if cmp_len == 0 {
-            self.to_ptr().len().cmp(&other.len())
-        } else {
-            let result: i8;
-            unsafe {
-                core::arch::asm!(
-                "repe cmpsb",
-                "sete {result}",
-                "setb {neg}",
-                "xor {result}, 1",
-                "shl {neg}, 1",
-                "sub {result}, {neg}",
-                in("si") self.to_ptr() as *mut u8,
-                in("di") other.as_ptr(),
-                in("cx") cmp_len,
-                neg = lateout(reg_byte) _,
-                result = lateout(reg_byte) result,
-                );
-                let result = std::mem::transmute::<i8, Ordering>(result);
-                result.then(self.to_ptr().len().cmp(&other.len()))
-            }
+        let result: i8;
+        unsafe {
+            core::arch::asm!(
+            "cmp eax, eax", // clear flags in case len==0
+            "repe cmpsb",
+            "sete {result}",
+            "setb {neg}",
+            "xor {result}, 1",
+            "shl {neg}, 1",
+            "sub {result}, {neg}",
+            in("si") self.to_ptr() as *mut u8,
+            in("di") other.as_ptr(),
+            in("cx") cmp_len,
+            neg = lateout(reg_byte) _,
+            result = lateout(reg_byte) result,
+            );
+            let result = std::mem::transmute::<i8, Ordering>(result);
+            result.then(self.to_ptr().len().cmp(&other.len()))
         }
     }
 
