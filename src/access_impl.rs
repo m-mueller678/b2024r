@@ -52,7 +52,8 @@ macro_rules! seqlock_primitive {
                     core::arch::asm!(
                         concat!("mov ({addr:r}),{dst",$reg_f,"}"),
                         addr = in(reg) self.0,
-                        dst = lateout($reg) dst
+                        dst = lateout($reg) dst,
+                        options(readonly,preserves_flags,nostack)
                     );
                 }
                 dst
@@ -100,6 +101,7 @@ impl<'a> SeqLockGuarded<'a, Optimistic, [u8]> {
             in("cx") cmp_len,
             neg = lateout(reg_byte) _,
             result = lateout(reg_byte) result,
+            options(readonly,nostack)
             );
             let result = std::mem::transmute::<i8, Ordering>(result);
             result.then(self.to_ptr().len().cmp(&other.len()))
@@ -114,6 +116,7 @@ impl<'a> SeqLockGuarded<'a, Optimistic, [u8]> {
             in("si") self.to_ptr() as *mut u8,
             in("di") dest.as_ptr(),
             in("cx") dest.len(),
+            options(nostack,preserves_flags)
             );
         }
     }
