@@ -94,3 +94,18 @@ macro_rules! seqlock_safe_no_wrap {
 seqlock_safe_no_wrap!([u8], u8, u16, u32, u64, i8, i16, i32, i64);
 
 seqlock_accessors!(struct MyStruct as MyStructWrapper: a:u32,b:i64);
+
+#[test]
+fn test_memcmp() {
+    let samples = vec!["", "a", "aa", "ab", "aaa", "b", "ba", "bb", "bba"];
+    for a in &samples {
+        for b in &samples {
+            let std = a.cmp(b);
+            let optimistic = unsafe {
+                wrap_unchecked::<Optimistic, [u8]>(a.as_bytes() as *const [u8] as *mut [u8])
+                    .cmp(b.as_bytes())
+            };
+            assert_eq!(std, optimistic);
+        }
+    }
+}

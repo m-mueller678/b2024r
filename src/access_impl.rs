@@ -83,28 +83,27 @@ seqlock_primitive!(
 );
 
 impl<'a> SeqLockGuarded<'a, Optimistic, [u8]> {
-    fn cmp(&self, other: &[u8]) -> Ordering {
+    pub fn cmp(&self, other: &[u8]) -> Ordering {
         let cmp_len = self.to_ptr().len().min(other.len());
         if cmp_len == 0 {
             self.to_ptr().len().cmp(&other.len())
-        }else{
-            let result:i8;
+        } else {
+            let result: i8;
             unsafe {
                 core::arch::asm!(
                 "repe cmpsb",
                 "sete {result}",
-                "setcf {neg}",
+                "setb {neg}",
                 "xor {result}, 1",
-                "sub {result} {neg}",
+                "shl {neg}, 1",
+                "sub {result}, {neg}",
                 in("si") self.to_ptr() as *mut u8,
                 in("di") other.as_ptr(),
                 in("cx") cmp_len,
                 neg = lateout(reg_byte) _,
                 result = lateout(reg_byte) result,
                 );
-                dbg!(result);
-                debug_assert!((-1 ..= 1).contains(&result));
-                let result = std::mem::transmute::<i8,Ordering>(result);
+                let result = std::mem::transmute::<i8, Ordering>(result);
                 result.then(self.to_ptr().len().cmp(&other.len()))
             }
         }
