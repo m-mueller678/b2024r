@@ -8,6 +8,17 @@ use std::slice::from_raw_parts_mut;
 use std::sync::atomic::{AtomicU64, compiler_fence, Ordering};
 use std::sync::atomic::Ordering::Relaxed;
 
+unsafe trait SeqLockGuardedInner{
+    type T;
+    unsafe fn new_unchecked(p: *mut Self::T) -> Self;
+    fn to_ptr(&self)->*mut Self::T;
+}
+
+pub struct SeqLockGuarded<G:SeqLockGuardedInner>{
+    g:G,
+}
+
+
 struct MyStruct {
     a: u32,
     b: i64,
@@ -36,7 +47,6 @@ pub struct SeqLockGuardedExclusive<'a, T: SeqLockSafe + ?Sized> {
     p: &'a mut T,
 }
 
-
 #[repr(transparent)]
 pub struct SeqLockGuardedOptimistic<'a, T: ?Sized> {
     p: *const T,
@@ -61,25 +71,27 @@ impl<'a> SeqLockGuardedOptimistic<'a, [u8]> {
     }
 }
 
-impl<'a, T: SeqLockSafe> SeqLockGuardedExclusive<'a, T> {
-    pub unsafe fn new_unchecked(p: *mut T) -> Self {
+unsafe impl<'a, T: SeqLockSafe> SeqLockGuardedInner for SeqLockGuardedExclusive<'a, T> {
+    type T=T;
+    unsafe fn new_unchecked(p: *mut T) -> Self {
         Self { p: &mut *p }
     }
 
-    pub fn as_bytes_mut(&mut self) -> SeqLockGuardedExclusive<'_, [u8]> {
-        unsafe {
-            SeqLockGuardedExclusive { p: from_raw_parts_mut(self.p as *mut T as *mut u8, size_of::<T>()) }
-        }
+    fn to_ptr(&self) -> *mut Self::T {
+        self.p
     }
 }
 
-impl<'a, T: SeqLockSafe> SeqLockGuardedOptimistic<'a, T> {
-    pub unsafe fn new_unchecked(p: *const T) -> Self {
+
+unsafe impl<'a, T: SeqLockSafe> SeqLockGuardedInner for SeqLockGuardedOptimistic<'a, T> {
+    type T = T;
+
+    unsafe fn new_unchecked(p: *const T) -> Self {
         Self { p, _p: PhantomData }
     }
 
-    pub fn as_bytes(&self) -> SeqLockGuardedOptimistic<'_, [u8]> {
-        SeqLockGuardedOptimistic { p: slice_from_raw_parts(self.p as *const u8, size_of::<T>()), _p: PhantomData }
+    fn to_ptr(&self) -> *mut Self::T {
+        self.p as *mut T
     }
 }
 
