@@ -1,7 +1,9 @@
 #![feature(slice_ptr_len)]
+#![feature(slice_ptr_get)]
 
+use std::collections::Bound;
 use access_impl::{Exclusive, Optimistic};
-use std::ops::{Deref, DerefMut};
+use std::ops::{Deref, DerefMut, Index, RangeBounds};
 use std::ptr;
 use std::ptr::{addr_of_mut, slice_from_raw_parts_mut};
 
@@ -92,7 +94,12 @@ macro_rules! seqlock_safe_no_wrap {
     };
 }
 
-seqlock_safe_no_wrap!([u8], u8, u16, u32, u64, i8, i16, i32, i64);
+unsafe impl<X> SeqLockSafe for [X]{
+    type Wrapped<T> = T;
+    fn wrap<T>(x: T) -> Self::Wrapped<T> { x }
+}
+
+seqlock_safe_no_wrap!(u8, u16, u32, u64, i8, i16, i32, i64);
 
 seqlock_accessors!(struct MyStruct as MyStructWrapper: a:u32,b:i64);
 
@@ -123,5 +130,48 @@ fn test_memcpy() {
         }
         wrap_unchecked::<Optimistic, [u8]>(slice_from_raw_parts_mut(ptr::null_mut(), 0))
             .load(&mut []);
+    }
+}
+
+impl<'a, T: SeqLockSafe, M: SeqLockMode> SeqLockGuarded<'a, M, [T]> {
+    #[inline]
+    pub fn slice(&mut self, i: impl RangeBounds<usize>) -> SeqLockGuarded<'a, M, [T]> {
+        let array = self.to_ptr();
+        let mut ptr = array.as_mut_ptr();
+        let mut len = array.len();
+        match i.end_bound() {
+            Bound::Included(&x) => {
+                assert!(x < len);
+                len = x + 1;
+            }
+            Bound::Excluded(&x) => {
+                assert!(x <= len);
+                len = x;
+            }
+            Bound::Unbounded => {}
+        }
+        unsafe {
+            match i.start_bound() {
+                Bound::Included(&x) => {
+                    assert!(x <= len);
+                    ptr = ptr.add(x);
+                    len -= x;
+                }
+                Bound::Excluded(&x) => {
+                    assert!(x < len);
+                    ptr = ptr.add(x+1);
+                    len -= x+1;
+                }
+                Bound::Unbounded => {}
+            }
+            SeqLockGuarded(M::new_unchecked(slice_from_raw_parts_mut(ptr,len)))
+        }
+    }
+
+    pub fn index(&mut self, i: usize)->T::Wrapped<SeqLockGuarded<'a, M, T>>{
+        assert!(i<self.to_ptr().len());
+        unsafe{
+            wrap_unchecked(self.to_ptr().as_mut_ptr().add(i))
+        }
     }
 }

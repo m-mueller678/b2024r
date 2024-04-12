@@ -96,7 +96,7 @@ impl<'a> SeqLockGuarded<'a, Optimistic, [u8]> {
             "xor {result}, 1",
             "shl {neg}, 1",
             "sub {result}, {neg}",
-            in("si") self.to_ptr() as *mut u8,
+            in("si") self.to_ptr().as_mut_ptr(),
             in("di") other.as_ptr(),
             in("cx") cmp_len,
             neg = lateout(reg_byte) _,
@@ -113,7 +113,7 @@ impl<'a> SeqLockGuarded<'a, Optimistic, [u8]> {
         unsafe {
             core::arch::asm!(
             "rep movsb",
-            in("si") self.to_ptr() as *mut u8,
+            in("si") self.to_ptr().as_mut_ptr(),
             in("di") dest.as_ptr(),
             in("cx") dest.len(),
             options(nostack,preserves_flags)
