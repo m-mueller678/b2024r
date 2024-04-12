@@ -8,13 +8,16 @@ use std::slice::from_raw_parts_mut;
 use std::sync::atomic::{AtomicU64, compiler_fence, Ordering};
 use std::sync::atomic::Ordering::Relaxed;
 
-unsafe trait SeqLockGuardedInner{
-    type T;
+unsafe trait SeqLockGuardedInner:Sized{
+    type T:SeqLockSafe+?Sized;
     unsafe fn new_unchecked(p: *mut Self::T) -> Self;
     fn to_ptr(&self)->*mut Self::T;
+    unsafe fn wrap_unsafe(p:*mut Self::T)-><Self::T as SeqLockSafe>::Wrapped<Self>{
+        <Self::T as SeqLockSafe>::wrap(Self::new_unchecked(p))
+    }
 }
 
-pub struct SeqLockGuarded<G:SeqLockGuardedInner>{
+pub struct SeqLockGuarded<G:SeqLockGuardedInner+?Sized>{
     g:G,
 }
 
@@ -24,16 +27,19 @@ struct MyStruct {
     b: i64,
 }
 
-unsafe impl SeqLockSafe for MyStruct {}
-
 fn main() {
-    dbg!();
+    unsafe{
+        let x=&mut MyStruct{a:1,b:2};
+        let mut x= SeqLockGuardedExclusive::wrap_unsafe(x);
+        dbg!(x.a().load());
+        dbg!(x.b().load());
+    }
 }
 
-unsafe trait SeqLockSafe {}
-
-unsafe impl SeqLockSafe for [u8] {}
-
+unsafe trait SeqLockSafe {
+    type Wrapped<T>;
+    fn wrap<T>(x:T)->Self::Wrapped<T>;
+}
 
 #[cfg(target_arch = "x86_64")]
 pub fn optimistic_release(lock: &AtomicU64, expected: u64) -> Result<(), ()> {
@@ -53,40 +59,40 @@ pub struct SeqLockGuardedOptimistic<'a, T: ?Sized> {
     _p: PhantomData<&'a T>,
 }
 
-impl<'a> SeqLockGuardedOptimistic<'a, [u8]> {
+impl<'a> SeqLockGuarded<SeqLockGuardedOptimistic<'a,[u8]>>{
     fn cmp(&self, other: &[u8]) -> Ordering {
-        let cmp_len = self.p.len().min(other.len());
-        if cmp_len == 0 || {
-            unsafe {
-                core::arch::asm!(
-                "repe cmpsb",
-                in("si") self.p as *mut u8,
-                in("di") other.as_ptr(),
-                in("cx") cmp_len,
-                );
-            }
-        } {}
+        // let cmp_len = self.g.p.len().min(other.len());
+        // if cmp_len == 0 || {
+        //     unsafe {
+        //         core::arch::asm!(
+        //         "repe cmpsb",
+        //         in("si") self.g.p as *mut u8,
+        //         in("di") other.as_ptr(),
+        //         in("cx") cmp_len,
+        //         );
+        //     }
+        // } {}
 
         todo!()
     }
 }
 
-unsafe impl<'a, T: SeqLockSafe> SeqLockGuardedInner for SeqLockGuardedExclusive<'a, T> {
+unsafe impl<'a, T: SeqLockSafe+?Sized> SeqLockGuardedInner for SeqLockGuardedExclusive<'a, T> {
     type T=T;
     unsafe fn new_unchecked(p: *mut T) -> Self {
         Self { p: &mut *p }
     }
 
     fn to_ptr(&self) -> *mut Self::T {
-        self.p
+        self.p as *const Self::T as *mut Self::T
     }
 }
 
 
-unsafe impl<'a, T: SeqLockSafe> SeqLockGuardedInner for SeqLockGuardedOptimistic<'a, T> {
+unsafe impl<'a, T: SeqLockSafe+?Sized> SeqLockGuardedInner for SeqLockGuardedOptimistic<'a, T> {
     type T = T;
 
-    unsafe fn new_unchecked(p: *const T) -> Self {
+    unsafe fn new_unchecked(p: *mut T) -> Self {
         Self { p, _p: PhantomData }
     }
 
@@ -96,19 +102,44 @@ unsafe impl<'a, T: SeqLockSafe> SeqLockGuardedInner for SeqLockGuardedOptimistic
 }
 
 macro_rules! seqlock_accessors {
-    (struct $This:ty: $($vis:vis $name:ident : $T:ty),*) => {
+    (struct $This:ty as $ThisWrapper:ident: $($vis:vis $name:ident : $T:ty),*) => {
+        struct $ThisWrapper<T>(pub T);
+
+        impl<T> Deref for $ThisWrapper<T>{
+            type Target = T;
+
+        fn deref(&self) -> &Self::Target {
+                &self.0
+            }
+        }
+
+         impl<T> DerefMut for $ThisWrapper<T>{
+
+        fn deref_mut(&mut self) -> &mut Self::Target {
+                &mut self.0
+            }
+        }
+
+        unsafe impl SeqLockSafe for $This{type Wrapped<T> = $ThisWrapper<T>;
+
+fn wrap<T>(x: T) -> Self::Wrapped<T> {
+        $ThisWrapper(x)
+    }
+
+        }
+
         impl<'a> SeqLockGuardedExclusive<'a,$This>{
-            $($vis fn $name<'b>(&'b mut self)->SeqLockGuardedExclusive<'b,$T>{
+            $($vis fn $name<'b>(&'b mut self)-><$T as SeqLockSafe>::Wrapped<SeqLockGuardedExclusive<'b,$T>>{
                 unsafe{
-                    SeqLockGuardedExclusive::new_unchecked(&mut self.p.$name)
+                    <$T as SeqLockSafe>::wrap(SeqLockGuardedExclusive::new_unchecked(&mut self.p.$name))
                 }
             })*
         }
 
         impl<'a> SeqLockGuardedOptimistic<'a,$This>{
-            $($vis fn $name<'b>(&'b self)->SeqLockGuardedOptimistic<'b,$T>{
+            $($vis fn $name<'b>(&'b self)-><$T as SeqLockSafe>::Wrapped<SeqLockGuardedOptimistic<'b,$T>>{
                 unsafe{
-                    SeqLockGuardedOptimistic::new_unchecked(std::ptr::addr_of!((*self.p).$name))
+                    <$T as SeqLockSafe>::wrap(SeqLockGuardedOptimistic::new_unchecked(std::ptr::addr_of!((*self.p).$name) as *mut $T))
                 }
             })*
         }
@@ -133,14 +164,21 @@ macro_rules! seqlock_primitive {
             }
         }
 
-        unsafe impl SeqLockSafe for $T{}
+        unsafe impl SeqLockSafe for $T{
+            type Wrapped<T> = T;
+
+fn wrap<T>(x: T) -> Self::Wrapped<T> {
+        x
+    }
+
+        }
 
         impl SeqLockGuardedExclusive<'_,$T>{
             pub fn store(&mut self,v:$T){
-                unsafe{*self.p=v;}
+                *self.p=v;
             }
             pub fn load(&self)->$T{
-                unsafe{*self.p}
+                *self.p
             }
         }
         )*
@@ -158,4 +196,19 @@ seqlock_primitive!(
     (i64) reg=reg
 );
 
-seqlock_accessors!(struct MyStruct: a:u32,b:i64);
+macro_rules! seqlock_safe_no_wrap {
+    ($($T:ty),*) => {
+        $(unsafe impl SeqLockSafe for $T{
+            type Wrapped<T> = T;
+
+fn wrap<T>(x: T) -> Self::Wrapped<T> {
+        x
+    }
+
+        })*
+    };
+}
+
+seqlock_safe_no_wrap!([u8]);
+
+seqlock_accessors!(struct MyStruct as MyStructWrapper: a:u32,b:i64);
