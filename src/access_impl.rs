@@ -23,7 +23,7 @@ unsafe impl SeqLockMode for Optimistic {
         p
     }
 
-    fn to_ptr<'a, T: 'a + ?Sized>(a: &Self::Access<'a, T>) -> *mut T {
+    fn as_ptr<'a, T: 'a + ?Sized>(a: &Self::Access<'a, T>) -> *mut T {
         *a as *mut T
     }
 }
@@ -35,7 +35,7 @@ unsafe impl SeqLockMode for Exclusive {
         &mut *p
     }
 
-    fn to_ptr<'a, T: 'a + ?Sized>(a: &Self::Access<'a, T>) -> *mut T {
+    fn as_ptr<'a, T: 'a + ?Sized>(a: &Self::Access<'a, T>) -> *mut T {
         *a as *const T as *mut T
     }
 }
@@ -85,7 +85,7 @@ seqlock_primitive!(
 
 impl<'a> SeqLockGuarded<'a, Optimistic, [u8]> {
     pub fn cmp(&self, other: &[u8]) -> Ordering {
-        let cmp_len = self.to_ptr().len().min(other.len());
+        let cmp_len = self.as_ptr().len().min(other.len());
         let result: i8;
         unsafe {
             core::arch::asm!(
@@ -96,7 +96,7 @@ impl<'a> SeqLockGuarded<'a, Optimistic, [u8]> {
             "xor {result}, 1",
             "shl {neg}, 1",
             "sub {result}, {neg}",
-            in("si") self.to_ptr().as_mut_ptr(),
+            in("si") self.as_ptr().as_mut_ptr(),
             in("di") other.as_ptr(),
             in("cx") cmp_len,
             neg = lateout(reg_byte) _,
@@ -104,16 +104,16 @@ impl<'a> SeqLockGuarded<'a, Optimistic, [u8]> {
             options(readonly,nostack)
             );
             let result = std::mem::transmute::<i8, Ordering>(result);
-            result.then(self.to_ptr().len().cmp(&other.len()))
+            result.then(self.as_ptr().len().cmp(&other.len()))
         }
     }
 
     pub fn load(&self, dest: &mut [u8]) {
-        assert_eq!(self.to_ptr().len(), dest.len());
+        assert_eq!(self.as_ptr().len(), dest.len());
         unsafe {
             core::arch::asm!(
             "rep movsb",
-            in("si") self.to_ptr().as_mut_ptr(),
+            in("si") self.as_ptr().as_mut_ptr(),
             in("di") dest.as_ptr(),
             in("cx") dest.len(),
             options(nostack,preserves_flags)

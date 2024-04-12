@@ -13,7 +13,7 @@ unsafe trait SeqLockMode {
     type Access<'a, T: 'a + ?Sized>;
 
     unsafe fn new_unchecked<'a, T: 'a + ?Sized>(p: *mut T) -> Self::Access<'a, T>;
-    fn to_ptr<'a, T: 'a + ?Sized>(a: &Self::Access<'a, T>) -> *mut T;
+    fn as_ptr<'a, T: 'a + ?Sized>(a: &Self::Access<'a, T>) -> *mut T;
 }
 
 unsafe fn wrap_unchecked<'a, M: SeqLockMode, T: SeqLockSafe + 'a + ?Sized>(
@@ -25,8 +25,8 @@ unsafe fn wrap_unchecked<'a, M: SeqLockMode, T: SeqLockSafe + 'a + ?Sized>(
 pub struct SeqLockGuarded<'a, M: SeqLockMode, T: 'a + ?Sized>(M::Access<'a, T>);
 
 impl<'a, M: SeqLockMode, T: 'a + ?Sized> SeqLockGuarded<'a, M, T> {
-    fn to_ptr(&self) -> *mut T {
-        M::to_ptr(&self.0)
+    fn as_ptr(&self) -> *mut T {
+        M::as_ptr(&self.0)
     }
 }
 
@@ -79,7 +79,7 @@ macro_rules! seqlock_accessors {
 
         impl<'a,M:SeqLockMode> $ThisWrapper<SeqLockGuarded<'a,M,$This>>{
             $($vis fn $name<'b>(&'b mut self)-><$T as SeqLockSafe>::Wrapped<SeqLockGuarded<'b,M,$T>>{
-                unsafe{wrap_unchecked::<M,$T>(addr_of_mut!((*self.0.to_ptr()).$name))}
+                unsafe{wrap_unchecked::<M,$T>(addr_of_mut!((*self.0.as_ptr()).$name))}
             })*
         }
     };
@@ -136,7 +136,7 @@ fn test_memcpy() {
 impl<'a, T: SeqLockSafe, M: SeqLockMode> SeqLockGuarded<'a, M, [T]> {
     #[inline]
     pub fn slice(&mut self, i: impl RangeBounds<usize>) -> SeqLockGuarded<'a, M, [T]> {
-        let array = self.to_ptr();
+        let array = self.as_ptr();
         let mut ptr = array.as_mut_ptr();
         let mut len = array.len();
         match i.end_bound() {
@@ -169,9 +169,9 @@ impl<'a, T: SeqLockSafe, M: SeqLockMode> SeqLockGuarded<'a, M, [T]> {
     }
 
     pub fn index(&mut self, i: usize)->T::Wrapped<SeqLockGuarded<'a, M, T>>{
-        assert!(i<self.to_ptr().len());
+        assert!(i<self.as_ptr().len());
         unsafe{
-            wrap_unchecked(self.to_ptr().as_mut_ptr().add(i))
+            wrap_unchecked(self.as_ptr().as_mut_ptr().add(i))
         }
     }
 }
