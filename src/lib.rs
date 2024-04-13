@@ -2,8 +2,8 @@
 #![feature(slice_ptr_get)]
 
 use std::collections::Bound;
-use std::ops::{Deref, DerefMut, RangeBounds};
-use std::ptr::{addr_of_mut, slice_from_raw_parts_mut};
+use std::ops::RangeBounds;
+use std::ptr::slice_from_raw_parts_mut;
 
 mod access_impl;
 
@@ -28,22 +28,8 @@ pub unsafe fn wrap_unchecked<'a, M: SeqLockMode, T: SeqLockSafe + 'a + ?Sized>(
 pub struct SeqLockGuarded<'a, M: SeqLockMode, T: 'a + ?Sized>(M::Access<'a, T>);
 
 impl<'a, M: SeqLockMode, T: 'a + ?Sized> SeqLockGuarded<'a, M, T> {
-    fn as_ptr(&self) -> *mut T {
+    pub fn as_ptr(&self) -> *mut T {
         M::as_ptr(&self.0)
-    }
-}
-
-struct MyStruct {
-    a: u32,
-    b: i64,
-}
-
-fn main() {
-    unsafe {
-        let x = &mut MyStruct { a: 1, b: 2 };
-        let mut x = wrap_unchecked::<Exclusive, MyStruct>(x);
-        dbg!(x.a().load());
-        dbg!(x.b().load());
     }
 }
 
@@ -52,11 +38,12 @@ pub unsafe trait SeqLockSafe {
     fn wrap<T>(x: T) -> Self::Wrapped<T>;
 }
 
+#[macro_export]
 macro_rules! seqlock_accessors {
-    (struct $This:ty as $ThisWrapper:ident: $($vis:vis $name:ident : $T:ty),*) => {
-        struct $ThisWrapper<T>(pub T);
+    (struct $This:ty as $WrapVis:vis $ThisWrapper:ident: $($vis:vis $name:ident : $T:ty),*) => {
+        $WrapVis struct $ThisWrapper<T>($WrapVis T);
 
-        impl<T> Deref for $ThisWrapper<T>{
+        impl<T> core::ops::Deref for $ThisWrapper<T>{
             type Target = T;
 
         fn deref(&self) -> &Self::Target {
@@ -64,14 +51,14 @@ macro_rules! seqlock_accessors {
             }
         }
 
-         impl<T> DerefMut for $ThisWrapper<T>{
+         impl<T> core::ops::DerefMut for $ThisWrapper<T>{
 
         fn deref_mut(&mut self) -> &mut Self::Target {
                 &mut self.0
             }
         }
 
-        unsafe impl SeqLockSafe for $This{
+        unsafe impl $crate::SeqLockSafe for $This{
             type Wrapped<T> = $ThisWrapper<T>;
 
             fn wrap<T>(x: T) -> Self::Wrapped<T> {
@@ -79,9 +66,9 @@ macro_rules! seqlock_accessors {
                 }
         }
 
-        impl<'a,M:SeqLockMode> $ThisWrapper<SeqLockGuarded<'a,M,$This>>{
-            $($vis fn $name<'b>(&'b mut self)-><$T as SeqLockSafe>::Wrapped<SeqLockGuarded<'b,M,$T>>{
-                unsafe{wrap_unchecked::<M,$T>(addr_of_mut!((*self.0.as_ptr()).$name))}
+        impl<'a,M:$crate::SeqLockMode> $ThisWrapper<$crate::SeqLockGuarded<'a,M,$This>>{
+            $($vis fn $name<'b>(&'b mut self)-><$T as $crate::SeqLockSafe>::Wrapped<$crate::SeqLockGuarded<'b,M,$T>>{
+                unsafe{$crate::wrap_unchecked::<M,$T>(core::ptr::addr_of_mut!((*self.0.as_ptr()).$name))}
             })*
         }
     };
@@ -104,8 +91,6 @@ unsafe impl<X> SeqLockSafe for [X] {
 }
 
 seqlock_safe_no_wrap!(u8, u16, u32, u64, i8, i16, i32, i64);
-
-seqlock_accessors!(struct MyStruct as MyStructWrapper: a:u32,b:i64);
 
 impl<'a, T: SeqLockSafe, M: SeqLockMode> SeqLockGuarded<'a, M, [T]> {
     #[inline]

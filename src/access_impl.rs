@@ -52,7 +52,7 @@ macro_rules! seqlock_primitive {
                 unsafe{
                     #[cfg(target_arch = "x86_64")]
                     core::arch::asm!(
-                        concat!("mov ({addr:r}),{dst",$reg_f,"}"),
+                        concat!("mov [{addr:r}],{dst",$reg_f,"}"),
                         addr = in(reg) self.0,
                         dst = lateout($reg) dst,
                         options(readonly,preserves_flags,nostack)

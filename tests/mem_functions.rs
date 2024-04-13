@@ -1,4 +1,4 @@
-use b2024r::{wrap_unchecked, Optimistic};
+use b2024r::{seqlock_accessors, wrap_unchecked, Exclusive, Optimistic};
 use std::ptr::slice_from_raw_parts_mut;
 #[test]
 fn test_memcmp() {
@@ -25,7 +25,35 @@ fn test_memcpy() {
                 .load(&mut dst);
             assert_eq!(dst, a.as_bytes());
         }
-        wrap_unchecked::<Optimistic, [u8]>(slice_from_raw_parts_mut(ptr::null_mut(), 0))
+        wrap_unchecked::<Optimistic, [u8]>(slice_from_raw_parts_mut(core::ptr::NonNull::dangling().as_ptr(), 0))
             .load(&mut []);
+    }
+}
+
+#[test]
+fn test_load() {
+    unsafe {
+        let a = 0x12345678u32;
+        let g = wrap_unchecked::<Optimistic, u32>(&a as *const u32 as *mut u32);
+        assert_eq!(a, g.load());
+    }
+}
+
+struct MyStruct {
+    a: u32,
+    b: i64,
+}
+
+mod macro_impl {
+    super::seqlock_accessors!(struct super::MyStruct as pub MyStructWrapper: pub a:u32,pub b:i64);
+}
+
+#[test]
+fn struct_access() {
+    unsafe {
+        let x = &mut MyStruct { a: 1, b: 2 };
+        let mut x = wrap_unchecked::<Exclusive, MyStruct>(x);
+        assert_eq!(x.a().load(), 1);
+        assert_eq!(x.b().load(), 2);
     }
 }
