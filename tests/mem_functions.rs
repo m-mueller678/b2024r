@@ -25,8 +25,11 @@ fn test_memcpy() {
                 .load(&mut dst);
             assert_eq!(dst, a.as_bytes());
         }
-        wrap_unchecked::<Optimistic, [u8]>(slice_from_raw_parts_mut(core::ptr::NonNull::dangling().as_ptr(), 0))
-            .load(&mut []);
+        wrap_unchecked::<Optimistic, [u8]>(slice_from_raw_parts_mut(
+            core::ptr::NonNull::dangling().as_ptr(),
+            0,
+        ))
+        .load(&mut []);
     }
 }
 

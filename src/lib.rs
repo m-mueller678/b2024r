@@ -33,6 +33,12 @@ impl<'a, M: SeqLockMode, T: 'a + ?Sized> SeqLockGuarded<'a, M, T> {
     }
 }
 
+impl<'a, T: 'a + ?Sized + SeqLockSafe> SeqLockGuarded<'a, Exclusive, T> {
+    pub fn optimistic(&self) -> T::Wrapped<SeqLockGuarded<'a, Optimistic, T>> {
+        unsafe { wrap_unchecked(self.as_ptr()) }
+    }
+}
+
 pub unsafe trait SeqLockSafe {
     type Wrapped<T>;
     fn wrap<T>(x: T) -> Self::Wrapped<T>;
