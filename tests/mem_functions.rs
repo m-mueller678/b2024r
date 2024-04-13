@@ -1,14 +1,15 @@
 use b2024r::{seqlock_accessors, wrap_unchecked, Exclusive, Optimistic};
+use std::cell::UnsafeCell;
 use std::ptr::slice_from_raw_parts_mut;
 #[test]
 fn test_memcmp() {
     let samples = vec!["", "a", "aa", "ab", "aaa", "b", "ba", "bb", "bba"];
     for a in &samples {
+        let mut a = a.as_bytes().to_vec();
         for b in &samples {
-            let std = a.cmp(b);
+            let std = (*a).cmp(b.as_bytes());
             let optimistic = unsafe {
-                wrap_unchecked::<Optimistic, [u8]>(a.as_bytes() as *const [u8] as *mut [u8])
-                    .cmp(b.as_bytes())
+                wrap_unchecked::<Optimistic, [u8]>(&mut *a as *mut [u8]).cmp(b.as_bytes())
             };
             assert_eq!(std, optimistic);
         }
@@ -20,10 +21,10 @@ fn test_memcpy() {
     let samples = vec!["", "a", "aa", "ab", "aaa", "b", "ba", "bb", "bba"];
     unsafe {
         for a in &samples {
+            let mut a = a.as_bytes().to_vec();
             let mut dst = vec![0u8; a.len()];
-            wrap_unchecked::<Optimistic, [u8]>(a.as_bytes() as *const [u8] as *mut [u8])
-                .load(&mut dst);
-            assert_eq!(dst, a.as_bytes());
+            wrap_unchecked::<Optimistic, [u8]>(&mut *a as *mut [u8]).load(&mut dst);
+            assert_eq!(&dst, &a);
         }
         wrap_unchecked::<Optimistic, [u8]>(slice_from_raw_parts_mut(
             core::ptr::NonNull::dangling().as_ptr(),
@@ -36,9 +37,10 @@ fn test_memcpy() {
 #[test]
 fn test_load() {
     unsafe {
-        let a = 0x12345678u32;
-        let g = wrap_unchecked::<Optimistic, u32>(&a as *const u32 as *mut u32);
-        assert_eq!(a, g.load());
+        let v = 0x12345678u32;
+        let a = UnsafeCell::new(v);
+        let g = wrap_unchecked::<Optimistic, u32>(a.get());
+        assert_eq!(g.load(), v);
     }
 }
 

@@ -5,9 +5,20 @@ use std::collections::Bound;
 use std::ops::RangeBounds;
 use std::ptr::slice_from_raw_parts_mut;
 
+#[cfg(all(feature = "asm_read", target_arch = "x86_64", not(miri)))]
+#[path = "asm_x86_impl.rs"]
+mod access_impl;
+#[cfg(any(miri, feature = "atomic_byte"))]
+#[path = "atomic_byte_impl.rs"]
 mod access_impl;
 
-pub use access_impl::{optimistic_release, Exclusive, Optimistic};
+pub use access_impl::optimistic_release;
+
+pub struct Exclusive;
+
+pub struct Optimistic;
+impl Sealed for Exclusive {}
+impl Sealed for Optimistic {}
 
 trait Sealed {}
 

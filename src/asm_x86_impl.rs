@@ -1,22 +1,16 @@
 use super::*;
 use std::cmp::Ordering;
-use std::sync::atomic::{compiler_fence, AtomicU64, Ordering::*};
+use std::mem::{size_of, MaybeUninit};
+use std::sync::atomic::{compiler_fence, fence, AtomicU64, AtomicU8, Ordering::*};
 
-#[cfg(target_arch = "x86_64")]
 pub fn optimistic_release(lock: &AtomicU64, expected: u64) -> Result<(), ()> {
-    compiler_fence(Acquire);
+    fence(Acquire);
     if lock.load(Relaxed) == expected {
         Ok(())
     } else {
         Err(())
     }
 }
-
-pub struct Exclusive;
-
-pub struct Optimistic;
-impl Sealed for Exclusive {}
-impl Sealed for Optimistic {}
 
 unsafe impl SeqLockMode for Optimistic {
     type Access<'a, T: 'a + ?Sized> = *const T;
@@ -50,7 +44,6 @@ macro_rules! seqlock_primitive {
             pub fn load(&self)->$T{
                 let dst;
                 unsafe{
-                    #[cfg(target_arch = "x86_64")]
                     core::arch::asm!(
                         concat!("mov [{addr:r}],{dst",$reg_f,"}"),
                         addr = in(reg) self.0,
