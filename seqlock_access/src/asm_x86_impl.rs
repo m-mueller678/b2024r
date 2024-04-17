@@ -3,12 +3,12 @@ use std::cmp::Ordering;
 use std::mem::{size_of, MaybeUninit};
 use std::sync::atomic::{compiler_fence, fence, AtomicU64, AtomicU8, Ordering::*};
 
-pub fn optimistic_release(lock: &AtomicU64, expected: u64) -> Result<(), ()> {
+pub fn optimistic_release(lock: &AtomicU64, expected: u64) -> Result<(), OptimisticLockError> {
     fence(Acquire);
     if lock.load(Relaxed) == expected {
         Ok(())
     } else {
-        Err(())
+        Err(OptimisticLockError(()))
     }
 }
 

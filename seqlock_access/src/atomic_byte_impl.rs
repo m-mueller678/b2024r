@@ -1,14 +1,14 @@
-use crate::{Exclusive, Optimistic, SeqLockGuarded, SeqLockMode};
+use crate::{Exclusive, Optimistic, OptimisticLockError, SeqLockGuarded, SeqLockMode};
 use core::mem::{size_of, MaybeUninit};
 use std::cmp::Ordering;
 use std::sync::atomic::{compiler_fence, AtomicU64, AtomicU8, Ordering::*};
 
-pub fn optimistic_release(lock: &AtomicU64, expected: u64) -> Result<(), ()> {
+pub fn optimistic_release(lock: &AtomicU64, expected: u64) -> Result<(), OptimisticLockError> {
     compiler_fence(Acquire);
     if lock.load(Relaxed) == expected {
         Ok(())
     } else {
-        Err(())
+        Err(OptimisticLockError(()))
     }
 }
 

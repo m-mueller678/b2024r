@@ -11,3 +11,5 @@ atomic_byte=[]
 asm_read=[]
 
 [dependencies]
+as_base = "0.1.3"
+bytemuck = "1.15.0"

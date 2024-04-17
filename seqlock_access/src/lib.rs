@@ -12,9 +12,14 @@ mod access_impl;
 #[path = "atomic_byte_impl.rs"]
 mod access_impl;
 
+mod lock;
+
 pub use access_impl::optimistic_release;
+use crate::lock::LockState;
 
 pub struct Exclusive;
+
+pub struct OptimisticLockError(());
 
 pub struct Optimistic;
 impl Sealed for Exclusive {}
@@ -22,8 +27,16 @@ impl Sealed for Optimistic {}
 
 trait Sealed {}
 
+pub unsafe trait SeqLockModeBase:Sealed{
+    type GuardData;
+    type ReleaseErrorType;
+
+    fn acquire(&LockState);
+    fn release(&LockState,d:Self::GuardData)->Result<(),Self::ErrorType>;
+}
+
 #[allow(private_bounds)]
-pub unsafe trait SeqLockMode: Sealed {
+pub unsafe trait SeqLockMode: SeqLockModeBase {
     type Access<'a, T: 'a + ?Sized>;
 
     unsafe fn new_unchecked<'a, T: 'a + ?Sized>(p: *mut T) -> Self::Access<'a, T>;
