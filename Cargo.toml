@@ -1,13 +1,6 @@
-[package]
-name = "b2024r"
-version = "0.1.0"
-edition = "2021"
+[workspace]
+resolver = "2"
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
-
-[features]
-default = ["asm_read"]
-atomic_byte=[]
-asm_read=[]
-
-[dependencies]
+members = [
+    "seqlock_access",
+]
