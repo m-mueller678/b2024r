@@ -1,4 +1,4 @@
-use crate::{Exclusive, Optimistic, OptimisticLockError, SeqLockGuarded, SeqLockMode};
+use crate::{Exclusive, Optimistic, OptimisticLockError, SeqLockGuarded, SeqLockModeImpl};
 use core::mem::{size_of, MaybeUninit};
 use std::cmp::Ordering;
 use std::sync::atomic::{compiler_fence, AtomicU64, AtomicU8, Ordering::*};
@@ -12,7 +12,7 @@ pub fn optimistic_release(lock: &AtomicU64, expected: u64) -> Result<(), Optimis
     }
 }
 
-unsafe impl SeqLockMode for Optimistic {
+unsafe impl SeqLockModeImpl for Optimistic {
     type Access<'a, T: 'a + ?Sized> = *const T;
 
     unsafe fn new_unchecked<'a, T: 'a + ?Sized>(p: *mut T) -> Self::Access<'a, T> {
@@ -24,7 +24,7 @@ unsafe impl SeqLockMode for Optimistic {
     }
 }
 
-unsafe impl SeqLockMode for Exclusive {
+unsafe impl SeqLockModeImpl for Exclusive {
     type Access<'a, T: 'a + ?Sized> = *const T;
 
     unsafe fn new_unchecked<'a, T: 'a + ?Sized>(p: *mut T) -> Self::Access<'a, T> {

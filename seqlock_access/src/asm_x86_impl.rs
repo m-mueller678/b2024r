@@ -11,7 +11,7 @@ pub fn optimistic_release(lock: &AtomicU64, expected: u64) -> Result<(), Optimis
     }
 }
 
-unsafe impl SeqLockMode for Optimistic {
+unsafe impl SeqLockModeImpl for Optimistic {
     type Access<'a, T: 'a + ?Sized> = *const T;
 
     unsafe fn new_unchecked<'a, T: 'a + ?Sized>(p: *mut T) -> Self::Access<'a, T> {
@@ -23,7 +23,7 @@ unsafe impl SeqLockMode for Optimistic {
     }
 }
 
-unsafe impl SeqLockMode for Exclusive {
+unsafe impl SeqLockModeImpl for Exclusive {
     type Access<'a, T: 'a + ?Sized> = &'a mut T;
 
     unsafe fn new_unchecked<'a, T: 'a + ?Sized>(p: *mut T) -> Self::Access<'a, T> {

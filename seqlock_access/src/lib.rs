@@ -26,12 +26,7 @@ pub struct Exclusive;
 pub struct OptimisticLockError(());
 
 pub struct Optimistic;
-impl Sealed for Exclusive {}
-impl Sealed for Optimistic {}
-
-trait Sealed {}
-
-pub unsafe trait SeqLockModeBase: Sealed {
+unsafe trait SeqLockModeBase {
     type GuardData;
     type ReleaseErrorType;
     type ReleaseData;
@@ -44,12 +39,17 @@ pub unsafe trait SeqLockModeBase: Sealed {
 }
 
 #[allow(private_bounds)]
-pub unsafe trait SeqLockMode: SeqLockModeBase {
+unsafe trait SeqLockModeImpl: SeqLockModeBase {
     type Access<'a, T: 'a + ?Sized>;
 
     unsafe fn new_unchecked<'a, T: 'a + ?Sized>(p: *mut T) -> Self::Access<'a, T>;
     fn as_ptr<'a, T: 'a + ?Sized>(a: &Self::Access<'a, T>) -> *mut T;
 }
+
+#[allow(private_bounds)]
+pub trait SeqLockMode: SeqLockModeBase + SeqLockModeImpl {}
+impl SeqLockMode for Exclusive {}
+impl SeqLockMode for Optimistic {}
 
 pub unsafe fn wrap_unchecked<'a, M: SeqLockMode, T: SeqLockSafe + 'a + ?Sized>(
     p: *mut T,

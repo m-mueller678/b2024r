@@ -1,6 +1,6 @@
 use crate::{
     optimistic_release, wrap_unchecked, Exclusive, Optimistic, OptimisticLockError, SeqLockGuarded,
-    SeqLockMode, SeqLockModeBase, SeqLockSafe,
+    SeqLockMode, SeqLockModeBase, SeqLockModeImpl, SeqLockSafe,
 };
 use std::cell::UnsafeCell;
 use std::mem::forget;
@@ -66,7 +66,7 @@ unsafe impl SeqLockModeBase for Optimistic {
 }
 
 pub struct SeqLock<T> {
-    s: LockState,
+    lock: LockState,
     data: UnsafeCell<T>,
 }
 
@@ -80,9 +80,9 @@ impl Drop for NoDrop {
 
 impl<T: SeqLockSafe> SeqLock<T> {
     pub fn lock<M: SeqLockMode>(&self) -> Guard<M, T> {
-        let guard_data = M::acquire(&self.s);
+        let guard_data = M::acquire(&self.lock);
         Guard {
-            l: &self.s,
+            lock: &self.lock,
             guard_data,
             access: unsafe { wrap_unchecked::<M, T>(self.data.get()) },
             _no_drop: NoDrop,
@@ -91,7 +91,7 @@ impl<T: SeqLockSafe> SeqLock<T> {
 }
 
 pub struct Guard<'a, M: SeqLockMode, T: SeqLockSafe> {
-    l: &'a LockState,
+    lock: &'a LockState,
     guard_data: M::GuardData,
     access: T::Wrapped<SeqLockGuarded<'a, M, T>>,
     _no_drop: NoDrop,
@@ -99,19 +99,19 @@ pub struct Guard<'a, M: SeqLockMode, T: SeqLockSafe> {
 
 impl<'a, T: SeqLockSafe> Guard<'a, Optimistic, T> {
     pub fn release(self) -> Result<(), OptimisticLockError> {
-        Optimistic::release(self.l, self.guard_data).map(|_| ())
+        Optimistic::release(self.lock, self.guard_data).map(|_| ())
     }
 
     pub fn upgrade(self) -> Result<Guard<'a, Exclusive, T>, OptimisticLockError> {
         forget(self._no_drop);
         if self
-            .l
+            .lock
             .version
             .compare_exchange(self.guard_data, self.guard_data + 1, Acquire, Relaxed)
             .is_ok()
         {
             Ok(Guard {
-                l: self.l,
+                lock: self.lock,
                 guard_data: (),
                 access: unsafe {
                     wrap_unchecked(Optimistic::as_ptr(&T::unwrap_ref(&self.access).0))
@@ -127,7 +127,7 @@ impl<'a, T: SeqLockSafe> Guard<'a, Optimistic, T> {
 impl<'a, T: SeqLockSafe> Clone for Guard<'a, Optimistic, T> {
     fn clone(&self) -> Self {
         Guard {
-            l: self.l,
+            lock: self.lock,
             guard_data: self.guard_data,
             access: unsafe { wrap_unchecked(Optimistic::as_ptr(&T::unwrap_ref(&self.access).0)) },
             _no_drop: NoDrop,
@@ -137,18 +137,18 @@ impl<'a, T: SeqLockSafe> Clone for Guard<'a, Optimistic, T> {
 
 impl<'a, T: SeqLockSafe> Guard<'a, Exclusive, T> {
     pub fn release(self) {
-        Exclusive::release(self.l, ()).unwrap();
+        Exclusive::release(self.lock, ()).unwrap();
         forget(self);
     }
 
     pub fn downgrade(self) -> Guard<'a, Optimistic, T> {
-        let v = Exclusive::release(self.l, ()).unwrap();
-        let l = self.l;
+        let guard_data = Exclusive::release(self.lock, ()).unwrap();
+        let lock = self.lock;
         let ptr = Exclusive::as_ptr(&T::unwrap_ref(&self.access).0);
         forget(self);
         Guard {
-            l,
-            guard_data: v,
+            lock,
+            guard_data,
             access: unsafe { wrap_unchecked(ptr) },
             _no_drop: NoDrop,
         }
