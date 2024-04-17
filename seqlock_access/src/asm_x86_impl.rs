@@ -78,6 +78,7 @@ seqlock_primitive!(
 );
 
 impl<'a> SeqLockGuarded<'a, Optimistic, [u8]> {
+    #[allow(clippy::should_implement_trait)]
     pub fn cmp(&self, other: &[u8]) -> Ordering {
         let cmp_len = self.as_ptr().len().min(other.len());
         let result: i8;
