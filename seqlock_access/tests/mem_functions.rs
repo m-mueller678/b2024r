@@ -40,6 +40,8 @@ fn test_load() {
         let v = 0x12345678u32;
         let a = UnsafeCell::new(v);
         let g = wrap_unchecked::<Optimistic, u32>(a.get());
+        let l = g.load();
+        eprintln!("l: {l:x}");
         assert_eq!(g.load(), v);
     }
 }

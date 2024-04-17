@@ -45,7 +45,7 @@ macro_rules! seqlock_primitive {
                 let dst;
                 unsafe{
                     core::arch::asm!(
-                        concat!("mov [{addr:r}],{dst",$reg_f,"}"),
+                        concat!("mov {dst",$reg_f,"}, [{addr:r}]"),
                         addr = in(reg) self.0,
                         dst = lateout($reg) dst,
                         options(readonly,preserves_flags,nostack)
