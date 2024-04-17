@@ -1,9 +1,6 @@
-use seqlock::{
-    seqlock_accessors, seqlock_wrapper, wrap_unchecked, Exclusive, Optimistic, SeqLockSafe,
-};
+use seqlock::{seqlock_wrapper, wrap_unchecked, Exclusive, Optimistic, SeqLockSafe};
 use seqlock_macros::SeqlockAccessors;
 use std::cell::UnsafeCell;
-use std::fmt::Display;
 use std::ops::Deref;
 use std::ptr::slice_from_raw_parts_mut;
 
@@ -67,8 +64,10 @@ struct MyStructGeneric<T: Deref + SeqLockSafe, U>
 where
     T::Target: Deref,
 {
+    #[allow(dead_code)]
     x: T,
     #[seq_lock_skip_accessor]
+    #[allow(dead_code)]
     u: U,
 }
 

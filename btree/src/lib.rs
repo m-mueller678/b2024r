@@ -20,7 +20,7 @@ pub struct BasicNode<V: BasicNodeVariant> {
     hints: [u32; 16],
     upper: V::Upper,
     _pad: u16,
-    _data: [u32; (PAGE_SIZE - PAGE_HEAD_SIZE - size_of::<CommonNodeHead>() - 6 * 2 - 16 * 4)],
+    _data: [u32; PAGE_SIZE - PAGE_HEAD_SIZE - size_of::<CommonNodeHead>() - 6 * 2 - 16 * 4],
 }
 
 trait BasicNodeVariant {

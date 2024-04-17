@@ -2,9 +2,7 @@ use itertools::Itertools;
 use proc_macro::TokenStream as TokenStream1;
 use proc_macro2::TokenStream;
 use quote::quote;
-use syn::{
-    parse_macro_input, Attribute, Data, DataStruct, DeriveInput, Expr, Meta, MetaNameValue, Path,
-};
+use syn::{parse_macro_input, Attribute, Data, DeriveInput, Meta, Path};
 
 fn seqlock_crate() -> TokenStream {
     quote! {seqlock}
@@ -64,8 +62,7 @@ pub fn derive_seqlock_safe(input: TokenStream1) -> TokenStream1 {
     };
     let name = input.ident;
     let generic_params = input.generics.params.clone();
-    let (mut impl_generics, impl_type_generics, impl_generics_where) =
-        input.generics.split_for_impl();
+    let (impl_generics, impl_type_generics, impl_generics_where) = input.generics.split_for_impl();
 
     let out = quote! {
         unsafe impl #impl_generics #seqlock::SeqLockSafe for #name #impl_type_generics #impl_generics_where{
