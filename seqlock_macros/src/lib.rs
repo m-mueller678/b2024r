@@ -10,19 +10,14 @@ fn seqlock_crate() -> TokenStream {
     quote! {seqlock}
 }
 
+fn path_is_ident(p: &Path, ident: &str) -> bool {
+    p.get_ident().map(|x| x.to_string()).as_deref() == Some(ident)
+}
+
 fn extract_wrapper_attr(x: &[Attribute]) -> impl Iterator<Item = Path> + '_ {
     dbg!(x.len());
     x.iter().filter_map(|x| match &x.meta {
-        Meta::List(x)
-            if x.path
-                .get_ident()
-                .map(|x| {
-                    dbg!(x);
-                    x.to_string()
-                })
-                .as_deref()
-                == Some("seq_lock_wrapper") =>
-        {
+        Meta::List(x) if path_is_ident(&x.path, "seq_lock_wrapper") => {
             let tokens: TokenStream1 = (x.tokens.clone()).into();
             let path = syn::parse::<Path>(tokens).unwrap();
             // let path:Path=parse_macro_input!(tokens as Path);
@@ -32,7 +27,7 @@ fn extract_wrapper_attr(x: &[Attribute]) -> impl Iterator<Item = Path> + '_ {
     })
 }
 
-#[proc_macro_derive(SeqlockAccessors, attributes(seq_lock_wrapper))]
+#[proc_macro_derive(SeqlockAccessors, attributes(seq_lock_wrapper, seq_lock_skip_accessor))]
 pub fn derive_seqlock_safe(input: TokenStream1) -> TokenStream1 {
     let input = parse_macro_input!(input as DeriveInput);
     let wrapper_path = extract_wrapper_attr(&input.attrs)
@@ -42,7 +37,16 @@ pub fn derive_seqlock_safe(input: TokenStream1) -> TokenStream1 {
     let seqlock = seqlock_crate();
     let accessors = match &input.data {
         Data::Struct(s) => {
-            s.fields.iter().map(|field| {
+            s.fields.iter()
+                .filter(|field|{
+                    !field.attrs.iter().any(|attr|{
+                        match &attr.meta {
+                            Meta::Path(x) => path_is_ident(x,"seq_lock_skip_accessor"),
+                            _=>false
+                        }
+                    })
+                })
+                .map(|field| {
                 let name = field.ident.as_ref().unwrap();
                 let ty = &field.ty;
                 let vis = &field.vis;

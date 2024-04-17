@@ -63,11 +63,13 @@ struct MyStruct {
 
 #[derive(SeqlockAccessors)]
 #[seq_lock_wrapper(MyWrapper)]
-struct MyStructGeneric<T: Deref + SeqLockSafe>
+struct MyStructGeneric<T: Deref + SeqLockSafe, U>
 where
     T::Target: Deref,
 {
     x: T,
+    #[seq_lock_skip_accessor]
+    u: U,
 }
 
 #[test]
