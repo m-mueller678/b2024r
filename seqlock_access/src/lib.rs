@@ -1,5 +1,7 @@
 #![feature(slice_ptr_len)]
 #![feature(slice_ptr_get)]
+#![feature(never_type)]
+#![allow(clippy::missing_safety_doc)]
 
 use std::collections::Bound;
 use std::ops::RangeBounds;
@@ -14,8 +16,10 @@ mod access_impl;
 
 mod lock;
 
-pub use access_impl::optimistic_release;
+pub use lock::{Guard, SeqLock};
+
 use crate::lock::LockState;
+pub use access_impl::optimistic_release;
 
 pub struct Exclusive;
 
@@ -27,12 +31,16 @@ impl Sealed for Optimistic {}
 
 trait Sealed {}
 
-pub unsafe trait SeqLockModeBase:Sealed{
+pub unsafe trait SeqLockModeBase: Sealed {
     type GuardData;
     type ReleaseErrorType;
+    type ReleaseData;
 
-    fn acquire(&LockState);
-    fn release(&LockState,d:Self::GuardData)->Result<(),Self::ErrorType>;
+    fn acquire(s: &LockState) -> Self::GuardData;
+    fn release(
+        s: &LockState,
+        d: Self::GuardData,
+    ) -> Result<Self::ReleaseData, Self::ReleaseErrorType>;
 }
 
 #[allow(private_bounds)]
@@ -66,6 +74,7 @@ impl<'a, T: 'a + ?Sized + SeqLockSafe> SeqLockGuarded<'a, Exclusive, T> {
 pub unsafe trait SeqLockSafe {
     type Wrapped<T>;
     fn wrap<T>(x: T) -> Self::Wrapped<T>;
+    fn unwrap_ref<T>(x: &Self::Wrapped<T>) -> &T;
 }
 
 #[macro_export]
@@ -92,8 +101,14 @@ macro_rules! seqlock_accessors {
             type Wrapped<T> = $ThisWrapper<T>;
 
             fn wrap<T>(x: T) -> Self::Wrapped<T> {
-                    $ThisWrapper(x)
-                }
+                $ThisWrapper(x)
+            }
+
+            fn unwrap_ref<T>(x: &Self::Wrapped<T>) -> &T {
+                &x.0
+            }
+
+
         }
 
         impl<'a,M:$crate::SeqLockMode> $ThisWrapper<$crate::SeqLockGuarded<'a,M,$This>>{
@@ -109,6 +124,7 @@ macro_rules! seqlock_safe_no_wrap {
         $(unsafe impl SeqLockSafe for $T{
             type Wrapped<T> = T;
             fn wrap<T>(x: T) -> Self::Wrapped<T> { x }
+            fn unwrap_ref<T>(x: &Self::Wrapped<T>) -> &T { x }
         })*
     };
 }
@@ -116,6 +132,10 @@ macro_rules! seqlock_safe_no_wrap {
 unsafe impl<X> SeqLockSafe for [X] {
     type Wrapped<T> = T;
     fn wrap<T>(x: T) -> Self::Wrapped<T> {
+        x
+    }
+
+    fn unwrap_ref<T>(x: &Self::Wrapped<T>) -> &T {
         x
     }
 }

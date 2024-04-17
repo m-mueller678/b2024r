@@ -1,7 +1,6 @@
 use super::*;
 use std::cmp::Ordering;
-use std::mem::{size_of, MaybeUninit};
-use std::sync::atomic::{compiler_fence, fence, AtomicU64, AtomicU8, Ordering::*};
+use std::sync::atomic::{fence, AtomicU64, Ordering::*};
 
 pub fn optimistic_release(lock: &AtomicU64, expected: u64) -> Result<(), OptimisticLockError> {
     fence(Acquire);
