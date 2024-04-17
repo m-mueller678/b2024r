@@ -1,6 +1,12 @@
-use seqlock::{seqlock_accessors, wrap_unchecked, Exclusive, Optimistic};
+use seqlock::{
+    seqlock_accessors, seqlock_wrapper, wrap_unchecked, Exclusive, Optimistic, SeqLockSafe,
+};
+use seqlock_macros::SeqlockAccessors;
 use std::cell::UnsafeCell;
+use std::fmt::Display;
+use std::ops::Deref;
 use std::ptr::slice_from_raw_parts_mut;
+
 #[test]
 fn test_memcmp() {
     let samples = vec!["", "a", "aa", "ab", "aaa", "b", "ba", "bb", "bba"];
@@ -46,13 +52,22 @@ fn test_load() {
     }
 }
 
+seqlock_wrapper!(MyWrapper);
+
+#[derive(SeqlockAccessors)]
+#[seq_lock_wrapper(MyWrapper)]
 struct MyStruct {
     a: u32,
     b: i64,
 }
 
-mod macro_impl {
-    super::seqlock_accessors!(struct super::MyStruct as pub MyStructWrapper: pub a:u32,pub b:i64);
+#[derive(SeqlockAccessors)]
+#[seq_lock_wrapper(MyWrapper)]
+struct MyStructGeneric<T: Deref + SeqLockSafe>
+where
+    T::Target: Deref,
+{
+    x: T,
 }
 
 #[test]

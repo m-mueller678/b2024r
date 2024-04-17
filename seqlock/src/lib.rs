@@ -20,6 +20,7 @@ pub use lock::{Guard, SeqLock};
 
 use crate::lock::LockState;
 pub use access_impl::optimistic_release;
+pub use seqlock_macros::SeqlockAccessors;
 
 pub struct Exclusive;
 
@@ -78,25 +79,27 @@ pub unsafe trait SeqLockSafe {
 }
 
 #[macro_export]
-macro_rules! seqlock_accessors {
-    (struct $This:ty as $WrapVis:vis $ThisWrapper:ident: $($vis:vis $name:ident : $T:ty),*) => {
-        $WrapVis struct $ThisWrapper<T>($WrapVis T);
+macro_rules! seqlock_wrapper {
+    ($v:vis $T:ident) => {
+        $v struct $T<T>($v T);
 
-        impl<T> core::ops::Deref for $ThisWrapper<T>{
+        impl<T> core::ops::Deref for $T<T>{
             type Target = T;
-
-        fn deref(&self) -> &Self::Target {
+            fn deref(&self) -> &Self::Target {
                 &self.0
             }
         }
-
-         impl<T> core::ops::DerefMut for $ThisWrapper<T>{
-
-        fn deref_mut(&mut self) -> &mut Self::Target {
+        impl<T> core::ops::DerefMut for $T<T>{
+            fn deref_mut(&mut self) -> &mut Self::Target {
                 &mut self.0
             }
         }
+    };
+}
 
+#[macro_export]
+macro_rules! seqlock_accessors {
+    (struct $This:ty as $ThisWrapper:ident: $($vis:vis $name:ident : $T:ty),*) => {
         unsafe impl $crate::SeqLockSafe for $This{
             type Wrapped<T> = $ThisWrapper<T>;
 
@@ -107,8 +110,6 @@ macro_rules! seqlock_accessors {
             fn unwrap_ref<T>(x: &Self::Wrapped<T>) -> &T {
                 &x.0
             }
-
-
         }
 
         impl<'a,M:$crate::SeqLockMode> $ThisWrapper<$crate::SeqLockGuarded<'a,M,$This>>{
