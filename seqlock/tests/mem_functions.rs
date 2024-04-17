@@ -1,4 +1,4 @@
-use b2024r::{seqlock_accessors, wrap_unchecked, Exclusive, Optimistic};
+use seqlock::{seqlock_accessors, wrap_unchecked, Exclusive, Optimistic};
 use std::cell::UnsafeCell;
 use std::ptr::slice_from_raw_parts_mut;
 #[test]
