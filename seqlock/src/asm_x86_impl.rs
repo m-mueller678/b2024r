@@ -1,6 +1,6 @@
 use super::*;
 use std::cmp::Ordering;
-use std::mem::size_of;
+use std::mem::{size_of, transmute};
 use std::sync::atomic::{fence, AtomicU64, Ordering::*};
 
 pub fn optimistic_release(lock: &AtomicU64, expected: u64) -> Result<(), OptimisticLockError> {
@@ -24,11 +24,7 @@ unsafe impl SeqLockModeImpl for Optimistic {
     }
 
     unsafe fn load_primitive<P: SeqLockPrimitive>(p: *const P) -> P {
-        unsafe{
-            match size_of::<P>(){
-                1=>
-            }
-        }
+        P::asm_load(p)
     }
 }
 
@@ -43,27 +39,15 @@ unsafe impl SeqLockModeImpl for Exclusive {
         *a as *const T as *mut T
     }
 
-    fn load_primitive<P: SeqLockPrimitive>(p: *const P) ->P{
-        unsafe{*p}
+    unsafe fn load_primitive<P: SeqLockPrimitive>(p: *const P) -> P {
+        unsafe { *p }
     }
 }
 
-macro_rules! seqlock_primitive_store {
-    ($($T:ty)*) => {
-        $(
-        impl SeqLockGuarded<'_,Exclusive,$T>{
-            pub fn store(&mut self,v:$T){
-                *self.0=v;
-            }
-        }
-        )*
-    };
-}
-
-macro_rules! seqlock_primitive_load{
+macro_rules! seqlock_primitive{
     ($(($T:ident) reg=$reg:ident reg_f=$reg_f:literal),*) =>{
-        impl SeqLockGuarded<'_,Optimistic,$T>{
-            fn std::concat_idents!(load_,$T)(addr:*const $T)->$T{
+        $(impl SeqLockPrimitive for $T{
+            fn asm_load(addr:*const $T)->$T{
                 let dst;
                 unsafe{
                     core::arch::asm!(
@@ -76,6 +60,12 @@ macro_rules! seqlock_primitive_load{
                 dst
             }
         }
+
+        impl SeqLockGuarded<'_,Exclusive,$T>{
+            pub fn store(&mut self,v:$T){
+                *self.0=v;
+            }
+        })*
     }
 }
 

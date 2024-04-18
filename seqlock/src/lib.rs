@@ -32,12 +32,9 @@ pub unsafe trait SeqLockModeBase {
     type ReleaseError;
     type ReleaseData;
 
-    fn release_error()->Self::ReleaseError;
+    fn release_error() -> Self::ReleaseError;
     fn acquire(s: &LockState) -> Self::GuardData;
-    fn release(
-        s: &LockState,
-        d: Self::GuardData,
-    ) -> Result<Self::ReleaseData, Self::ReleaseError>;
+    fn release(s: &LockState, d: Self::GuardData) -> Result<Self::ReleaseData, Self::ReleaseError>;
 }
 
 #[allow(private_bounds)]
@@ -47,7 +44,7 @@ pub unsafe trait SeqLockModeImpl {
     unsafe fn new_unchecked<'a, T: 'a + ?Sized>(p: *mut T) -> Self::Access<'a, T>;
     fn as_ptr<'a, T: 'a + ?Sized>(a: &Self::Access<'a, T>) -> *mut T;
 
-    unsafe fn load_primitive<P:SeqLockPrimitive>(p:*const P)->P;
+    unsafe fn load_primitive<P: SeqLockPrimitive>(p: *const P) -> P;
 }
 
 #[allow(private_bounds)]
@@ -176,10 +173,13 @@ unsafe impl<E, const N: usize> SeqLockSafe for [E; N] {
     }
 }
 
-impl<'a,M:SeqLockMode,T:SeqLockPrimitive> SeqLockGuarded<'a,M,T>{
-    pub fn load(&self)->T{
-        M::load_primitive(self.as_ptr())
+impl<'a, M: SeqLockMode, T: SeqLockPrimitive> SeqLockGuarded<'a, M, T> {
+    pub fn load(&self) -> T {
+        unsafe { M::load_primitive(self.as_ptr()) }
     }
 }
 
-trait SeqLockPrimitive{}
+pub trait SeqLockPrimitive: Copy {
+    #[doc(hidden)]
+    fn asm_load(p: *const Self) -> Self;
+}
