@@ -3,6 +3,7 @@
 #![feature(never_type)]
 #![allow(clippy::missing_safety_doc)]
 
+use std::cmp::Ordering;
 use std::collections::Bound;
 use std::ops::RangeBounds;
 use std::ptr::slice_from_raw_parts_mut;
@@ -45,6 +46,7 @@ pub unsafe trait SeqLockModeImpl {
     fn as_ptr<'a, T: 'a + ?Sized>(a: &Self::Access<'a, T>) -> *mut T;
 
     unsafe fn load_primitive<P: SeqLockPrimitive>(p: *const P) -> P;
+    unsafe fn cmp_bytes(this:*const [u8],other:&[u8])->Ordering;
 }
 
 #[allow(private_bounds)]
@@ -159,6 +161,10 @@ impl<'a, T: SeqLockSafe, M: SeqLockMode> SeqLockGuarded<'a, M, [T]> {
         assert!(i < self.as_ptr().len());
         unsafe { wrap_unchecked(self.as_ptr().as_mut_ptr().add(i)) }
     }
+
+    pub fn len(&self)->usize{
+        self.as_ptr().len()
+    }
 }
 
 unsafe impl<E, const N: usize> SeqLockSafe for [E; N] {
@@ -176,5 +182,11 @@ unsafe impl<E, const N: usize> SeqLockSafe for [E; N] {
 impl<'a, M: SeqLockMode, T: SeqLockPrimitive> SeqLockGuarded<'a, M, T> {
     pub fn load(&self) -> T {
         unsafe { M::load_primitive(self.as_ptr()) }
+    }
+}
+
+impl<'a,M:SeqLockMode> SeqLockGuarded<'a,M,[u8]>{
+    pub fn cmp_bytes(&self,other:&[u8])->Ordering{
+        unsafe{M::cmp_bytes(self.as_ptr(),other)}
     }
 }

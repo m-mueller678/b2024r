@@ -26,6 +26,30 @@ unsafe impl SeqLockModeImpl for Optimistic {
     unsafe fn load_primitive<P: SeqLockPrimitive>(p: *const P) -> P {
         P::asm_load(p)
     }
+
+    unsafe fn cmp_bytes(this: *const [u8], other: &[u8]) -> Ordering {
+        let cmp_len = this.len().min(other.len());
+        let result: i8;
+        unsafe {
+            core::arch::asm!(
+            "cmp eax, eax", // clear flags in case len==0
+            "repe cmpsb",
+            "sete {result}",
+            "setb {neg}",
+            "xor {result}, 1",
+            "shl {neg}, 1",
+            "sub {result}, {neg}",
+            in("si") this.as_ptr(),
+            in("di") other.as_ptr(),
+            in("cx") cmp_len,
+            neg = lateout(reg_byte) _,
+            result = lateout(reg_byte) result,
+            options(readonly,nostack)
+            );
+            let result = transmute::<i8, Ordering>(result);
+            result.then(this.len().cmp(&other.len()))
+        }
+    }
 }
 
 unsafe impl SeqLockModeImpl for Exclusive {
@@ -41,6 +65,10 @@ unsafe impl SeqLockModeImpl for Exclusive {
 
     unsafe fn load_primitive<P: SeqLockPrimitive>(p: *const P) -> P {
         unsafe { *p }
+    }
+
+    unsafe fn cmp_bytes(this: *const [u8], other: &[u8]) -> Ordering {
+        Optimistic::cmp_bytes(this,other)
     }
 }
 
@@ -81,31 +109,6 @@ seqlock_primitive!(
 );
 
 impl<'a> SeqLockGuarded<'a, Optimistic, [u8]> {
-    #[allow(clippy::should_implement_trait)]
-    pub fn cmp(&self, other: &[u8]) -> Ordering {
-        let cmp_len = self.as_ptr().len().min(other.len());
-        let result: i8;
-        unsafe {
-            core::arch::asm!(
-            "cmp eax, eax", // clear flags in case len==0
-            "repe cmpsb",
-            "sete {result}",
-            "setb {neg}",
-            "xor {result}, 1",
-            "shl {neg}, 1",
-            "sub {result}, {neg}",
-            in("si") self.as_ptr().as_mut_ptr(),
-            in("di") other.as_ptr(),
-            in("cx") cmp_len,
-            neg = lateout(reg_byte) _,
-            result = lateout(reg_byte) result,
-            options(readonly,nostack)
-            );
-            let result = std::mem::transmute::<i8, Ordering>(result);
-            result.then(self.as_ptr().len().cmp(&other.len()))
-        }
-    }
-
     pub fn load(&self, dest: &mut [u8]) {
         assert_eq!(self.as_ptr().len(), dest.len());
         unsafe {

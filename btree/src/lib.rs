@@ -61,13 +61,13 @@ impl<'a, N: Node, M: SeqLockMode> Wrapper<SeqLockGuarded<'a, M, N>> {
     }
 }
 
-fn head_split(k: &[u8]) -> (u32, &[u8]) {
+fn key_head(k: &[u8]) -> u32 {
     let mut h = 0u32;
     for i in 0..4 {
         h <<= 8;
         h |= k[i] as u32;
     }
-    (h, &k[k.len().min(4)..])
+    h
 }
 
 impl<'a, V: BasicNodeVariant, M: SeqLockMode> Wrapper<SeqLockGuarded<'a, M, BasicNode<V>>> {
@@ -88,7 +88,7 @@ impl<'a, V: BasicNodeVariant, M: SeqLockMode> Wrapper<SeqLockGuarded<'a, M, Basi
         )
     }
 
-    fn key_tail(
+    fn key(
         &mut self,
         unchecked_record_offset: usize,
     ) -> Result<SeqLockGuarded<'a, M, [u8]>, M::ReleaseError> {
@@ -111,21 +111,22 @@ impl<'a, V: BasicNodeVariant, M: SeqLockMode> Wrapper<SeqLockGuarded<'a, M, Basi
             return Err(M::release_error());
         }
         let truncated = &key[prefix_len..];
+        let needle_head = key_head(truncated);
         let mut heads = self.heads()?;
         let matching_head_range = (0..=heads.len() - 1).binary_all(|i| {
-            heads.index(i).cmp(head);
+            heads.index(i).load().cmp(&needle_head)
         });
         if matching_head_range.is_empty() {
             return Ok(Err(matching_head_range.start));
         }
         let slots = self.slots()?;
-        if slots.len().len() != heads.len() {
+        if slots.len() != heads.len() {
             return Err(M::release_error());
         }
-        (matching_head_range.start..=matching_head_range.end - 1).binary_by(|i| {
-            let key = self.key_tail(i)?;
-            todo!()
+        let key_position = (matching_head_range.start..=matching_head_range.end - 1).binary_by(|i| {
+            let Ok(key) = self.key(i) else{return Ordering::Equal};
+            key.cmp_bytes(truncated)
         });
-        todo!()
+        Ok(key_position)
     }
 }

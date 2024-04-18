@@ -12,7 +12,7 @@ fn test_memcmp() {
         for b in &samples {
             let std = (*a).cmp(b.as_bytes());
             let optimistic = unsafe {
-                wrap_unchecked::<Optimistic, [u8]>(&mut *a as *mut [u8]).cmp(b.as_bytes())
+                wrap_unchecked::<Optimistic, [u8]>(&mut *a as *mut [u8]).cmp_bytes(b.as_bytes())
             };
             assert_eq!(std, optimistic);
         }
