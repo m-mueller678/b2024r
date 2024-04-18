@@ -27,24 +27,27 @@ pub struct Exclusive;
 pub struct OptimisticLockError(());
 
 pub struct Optimistic;
-unsafe trait SeqLockModeBase {
+pub unsafe trait SeqLockModeBase {
     type GuardData;
-    type ReleaseErrorType;
+    type ReleaseError;
     type ReleaseData;
 
+    fn release_error()->Self::ReleaseError;
     fn acquire(s: &LockState) -> Self::GuardData;
     fn release(
         s: &LockState,
         d: Self::GuardData,
-    ) -> Result<Self::ReleaseData, Self::ReleaseErrorType>;
+    ) -> Result<Self::ReleaseData, Self::ReleaseError>;
 }
 
 #[allow(private_bounds)]
-unsafe trait SeqLockModeImpl: SeqLockModeBase {
+pub unsafe trait SeqLockModeImpl {
     type Access<'a, T: 'a + ?Sized>;
 
     unsafe fn new_unchecked<'a, T: 'a + ?Sized>(p: *mut T) -> Self::Access<'a, T>;
     fn as_ptr<'a, T: 'a + ?Sized>(a: &Self::Access<'a, T>) -> *mut T;
+
+    unsafe fn load_primitive<P:SeqLockPrimitive>(p:*const P)->P;
 }
 
 #[allow(private_bounds)]
@@ -172,3 +175,11 @@ unsafe impl<E, const N: usize> SeqLockSafe for [E; N] {
         x
     }
 }
+
+impl<'a,M:SeqLockMode,T:SeqLockPrimitive> SeqLockGuarded<'a,M,T>{
+    pub fn load(&self)->T{
+        M::load_primitive(self.as_ptr())
+    }
+}
+
+trait SeqLockPrimitive{}

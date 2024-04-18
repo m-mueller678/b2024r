@@ -1,5 +1,6 @@
 use super::*;
 use std::cmp::Ordering;
+use std::mem::size_of;
 use std::sync::atomic::{fence, AtomicU64, Ordering::*};
 
 pub fn optimistic_release(lock: &AtomicU64, expected: u64) -> Result<(), OptimisticLockError> {
@@ -21,6 +22,14 @@ unsafe impl SeqLockModeImpl for Optimistic {
     fn as_ptr<'a, T: 'a + ?Sized>(a: &Self::Access<'a, T>) -> *mut T {
         *a as *mut T
     }
+
+    unsafe fn load_primitive<P: SeqLockPrimitive>(p: *const P) -> P {
+        unsafe{
+            match size_of::<P>(){
+                1=>
+            }
+        }
+    }
 }
 
 unsafe impl SeqLockModeImpl for Exclusive {
@@ -33,19 +42,33 @@ unsafe impl SeqLockModeImpl for Exclusive {
     fn as_ptr<'a, T: 'a + ?Sized>(a: &Self::Access<'a, T>) -> *mut T {
         *a as *const T as *mut T
     }
+
+    fn load_primitive<P: SeqLockPrimitive>(p: *const P) ->P{
+        unsafe{*p}
+    }
 }
 
-macro_rules! seqlock_primitive {
-    ($(($T:ty) reg=$reg:ident reg_f=$reg_f:literal),*) => {
+macro_rules! seqlock_primitive_store {
+    ($($T:ty)*) => {
         $(
+        impl SeqLockGuarded<'_,Exclusive,$T>{
+            pub fn store(&mut self,v:$T){
+                *self.0=v;
+            }
+        }
+        )*
+    };
+}
 
+macro_rules! seqlock_primitive_load{
+    ($(($T:ident) reg=$reg:ident reg_f=$reg_f:literal),*) =>{
         impl SeqLockGuarded<'_,Optimistic,$T>{
-            pub fn load(&self)->$T{
+            fn std::concat_idents!(load_,$T)(addr:*const $T)->$T{
                 let dst;
                 unsafe{
                     core::arch::asm!(
                         concat!("mov {dst",$reg_f,"}, [{addr:r}]"),
-                        addr = in(reg) self.0,
+                        addr = in(reg) addr,
                         dst = lateout($reg) dst,
                         options(readonly,preserves_flags,nostack)
                     );
@@ -53,17 +76,7 @@ macro_rules! seqlock_primitive {
                 dst
             }
         }
-
-        impl SeqLockGuarded<'_,Exclusive,$T>{
-            pub fn store(&mut self,v:$T){
-                *self.0=v;
-            }
-            pub fn load(&self)->$T{
-                *self.0
-            }
-        }
-        )*
-    };
+    }
 }
 
 seqlock_primitive!(

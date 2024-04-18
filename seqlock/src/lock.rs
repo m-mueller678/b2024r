@@ -15,8 +15,12 @@ pub struct LockState {
 
 unsafe impl SeqLockModeBase for Exclusive {
     type GuardData = ();
-    type ReleaseErrorType = !;
+    type ReleaseError = !;
     type ReleaseData = u64;
+
+    fn release_error() -> Self::ReleaseError {
+        unreachable!();
+    }
 
     fn acquire(lock: &LockState) -> Self::GuardData {
         loop {
@@ -35,7 +39,7 @@ unsafe impl SeqLockModeBase for Exclusive {
         }
     }
 
-    fn release(lock: &LockState, (): ()) -> Result<Self::ReleaseData, Self::ReleaseErrorType> {
+    fn release(lock: &LockState, (): ()) -> Result<Self::ReleaseData, Self::ReleaseError> {
         let prev = lock.version.fetch_add(1, Release);
         Ok(prev + 1)
     }
@@ -43,8 +47,12 @@ unsafe impl SeqLockModeBase for Exclusive {
 
 unsafe impl SeqLockModeBase for Optimistic {
     type GuardData = u64;
-    type ReleaseErrorType = OptimisticLockError;
+    type ReleaseError = OptimisticLockError;
     type ReleaseData = ();
+
+    fn release_error() -> Self::ReleaseError {
+        OptimisticLockError(())
+    }
 
     fn acquire(lock: &LockState) -> Self::GuardData {
         loop {
@@ -60,7 +68,7 @@ unsafe impl SeqLockModeBase for Optimistic {
     fn release(
         lock: &LockState,
         guard: Self::GuardData,
-    ) -> Result<Self::ReleaseData, Self::ReleaseErrorType> {
+    ) -> Result<Self::ReleaseData, Self::ReleaseError> {
         optimistic_release(&lock.version, guard)
     }
 }

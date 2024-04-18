@@ -34,7 +34,14 @@ pub trait BasicNodeVariant {
 }
 
 impl<V: BasicNodeVariant> BasicNode<V> {
-    fn find<M: SeqLockMode>(this: SeqLockGuarded<M, Self>, key: &[u8]) -> Result<usize, usize> {
+    fn heads<M:SeqLockMode>(mut this:Wrapper<SeqLockGuarded<M,Self>>)->Result<SeqLockGuarded<M,[u32]>,M::ReleaseError>{
+        let count = this.common().count().load();
+        this._data().as_ptr();
+
+        todo!()
+    }
+
+    fn find<M: SeqLockMode>(this: Wrapper<SeqLockGuarded<M,Self>>, key: &[u8]) -> Result<usize, usize> {
         todo!()
     }
 }
