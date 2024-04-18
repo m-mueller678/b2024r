@@ -1,9 +1,13 @@
-use seqlock::{SeqLockGuarded, SeqLockMode};
+use seqlock::{seqlock_wrapper, SeqLockGuarded, SeqLockMode, SeqLockSafe, SeqlockAccessors};
 use std::mem::size_of;
 
-const PAGE_SIZE: usize = 1 << 12;
-const PAGE_HEAD_SIZE: usize = 8;
+pub const PAGE_SIZE: usize = 1 << 12;
+pub const PAGE_HEAD_SIZE: usize = 8;
 
+seqlock_wrapper!(pub Wrapper);
+
+#[derive(SeqlockAccessors)]
+#[seq_lock_wrapper(Wrapper)]
 pub struct CommonNodeHead {
     prefix_len: u16,
     count: u16,
@@ -11,8 +15,10 @@ pub struct CommonNodeHead {
     upper_fence_len: u16,
 }
 
-struct PageId([u16; 3]);
+pub struct PageId([u16; 3]);
 
+#[derive(SeqlockAccessors)]
+#[seq_lock_wrapper(Wrapper)]
 pub struct BasicNode<V: BasicNodeVariant> {
     common: CommonNodeHead,
     heap_bump: u16,
@@ -23,8 +29,8 @@ pub struct BasicNode<V: BasicNodeVariant> {
     _data: [u32; PAGE_SIZE - PAGE_HEAD_SIZE - size_of::<CommonNodeHead>() - 6 * 2 - 16 * 4],
 }
 
-trait BasicNodeVariant {
-    type Upper;
+pub trait BasicNodeVariant {
+    type Upper: SeqLockSafe;
 }
 
 impl<V: BasicNodeVariant> BasicNode<V> {

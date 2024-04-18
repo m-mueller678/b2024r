@@ -13,7 +13,6 @@ fn path_is_ident(p: &Path, ident: &str) -> bool {
 }
 
 fn extract_wrapper_attr(x: &[Attribute]) -> impl Iterator<Item = Path> + '_ {
-    dbg!(x.len());
     x.iter().filter_map(|x| match &x.meta {
         Meta::List(x) if path_is_ident(&x.path, "seq_lock_wrapper") => {
             let tokens: TokenStream1 = (x.tokens.clone()).into();

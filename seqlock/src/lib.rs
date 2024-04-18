@@ -97,29 +97,6 @@ macro_rules! seqlock_wrapper {
     };
 }
 
-#[macro_export]
-macro_rules! seqlock_accessors {
-    (struct $This:ty as $ThisWrapper:ident: $($vis:vis $name:ident : $T:ty),*) => {
-        unsafe impl $crate::SeqLockSafe for $This{
-            type Wrapped<T> = $ThisWrapper<T>;
-
-            fn wrap<T>(x: T) -> Self::Wrapped<T> {
-                $ThisWrapper(x)
-            }
-
-            fn unwrap_ref<T>(x: &Self::Wrapped<T>) -> &T {
-                &x.0
-            }
-        }
-
-        impl<'a,M:$crate::SeqLockMode> $ThisWrapper<$crate::SeqLockGuarded<'a,M,$This>>{
-            $($vis fn $name<'b>(&'b mut self)-><$T as $crate::SeqLockSafe>::Wrapped<$crate::SeqLockGuarded<'b,M,$T>>{
-                unsafe{$crate::wrap_unchecked::<M,$T>(core::ptr::addr_of_mut!((*self.0.as_ptr()).$name))}
-            })*
-        }
-    };
-}
-
 macro_rules! seqlock_safe_no_wrap {
     ($($T:ty),*) => {
         $(unsafe impl SeqLockSafe for $T{
@@ -181,5 +158,17 @@ impl<'a, T: SeqLockSafe, M: SeqLockMode> SeqLockGuarded<'a, M, [T]> {
     pub fn index(&mut self, i: usize) -> T::Wrapped<SeqLockGuarded<'a, M, T>> {
         assert!(i < self.as_ptr().len());
         unsafe { wrap_unchecked(self.as_ptr().as_mut_ptr().add(i)) }
+    }
+}
+
+unsafe impl<E, const N: usize> SeqLockSafe for [E; N] {
+    type Wrapped<T> = T;
+
+    fn wrap<T>(x: T) -> Self::Wrapped<T> {
+        x
+    }
+
+    fn unwrap_ref<T>(x: &Self::Wrapped<T>) -> &T {
+        x
     }
 }
