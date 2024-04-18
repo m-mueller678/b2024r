@@ -22,6 +22,10 @@ unsafe impl SeqLockModeImpl for Optimistic {
     fn as_ptr<'a, T: 'a + ?Sized>(a: &Self::Access<'a, T>) -> *mut T {
         *a as *mut T
     }
+
+    unsafe fn load_primitive<P: crate::SeqLockPrimitive>(p: *const P) -> P {
+        load_primitive(p)
+    }
 }
 
 unsafe impl SeqLockModeImpl for Exclusive {
@@ -34,23 +38,27 @@ unsafe impl SeqLockModeImpl for Exclusive {
     fn as_ptr<'a, T: 'a + ?Sized>(a: &Self::Access<'a, T>) -> *mut T {
         *a as *mut T
     }
+
+    unsafe fn load_primitive<P: crate::SeqLockPrimitive>(p: *const P) -> P {
+        load_primitive(p)
+    }
+}
+
+unsafe fn load_primitive<P: crate::SeqLockPrimitive>(p: *const P) -> P {
+    unsafe {
+        let mut ret = MaybeUninit::<P>::uninit();
+        for i in 0..size_of::<P>() {
+            (ret.as_mut_ptr() as *mut u8)
+                .add(i)
+                .write((*(p as *const AtomicU8).add(i)).load(Relaxed))
+        }
+        ret.assume_init()
+    }
 }
 
 macro_rules! seqlock_primitive {
     ($(($T:ty) reg=$reg:ident reg_f=$reg_f:literal),*) => {
         $(
-
-        impl SeqLockGuarded<'_,Optimistic,$T>{
-            pub fn load(&self)->$T{
-                unsafe{
-                    let mut ret = MaybeUninit::<$T>::uninit();
-                    for i in 0..size_of::<$T>(){
-                        (ret.as_mut_ptr() as *mut u8).add(i).write((*(self.0 as *const AtomicU8).add(i)).load(Relaxed))
-                    }
-                    ret.assume_init()
-                }
-            }
-        }
 
         impl SeqLockGuarded<'_,Exclusive,$T>{
             pub fn store(&mut self,v:$T){
@@ -60,10 +68,9 @@ macro_rules! seqlock_primitive {
                 }
                 }
             }
-            pub fn load(&self)->$T{
-                self.optimistic().load()
-            }
         }
+
+        impl SeqLockPrimitive for $T{}
         )*
     };
 }
@@ -107,3 +114,5 @@ impl<'a> SeqLockGuarded<'a, Exclusive, [u8]> {
         }
     }
 }
+
+pub trait SeqLockPrimitive: Copy {}

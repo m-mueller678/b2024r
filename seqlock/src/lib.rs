@@ -19,7 +19,7 @@ mod lock;
 pub use lock::{Guard, SeqLock};
 
 use crate::lock::LockState;
-pub use access_impl::optimistic_release;
+pub use access_impl::{optimistic_release, SeqLockPrimitive};
 pub use seqlock_macros::SeqlockAccessors;
 
 pub struct Exclusive;
@@ -177,9 +177,4 @@ impl<'a, M: SeqLockMode, T: SeqLockPrimitive> SeqLockGuarded<'a, M, T> {
     pub fn load(&self) -> T {
         unsafe { M::load_primitive(self.as_ptr()) }
     }
-}
-
-pub trait SeqLockPrimitive: Copy {
-    #[doc(hidden)]
-    fn asm_load(p: *const Self) -> Self;
 }

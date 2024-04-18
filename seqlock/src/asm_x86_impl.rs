@@ -125,3 +125,8 @@ impl<'a> SeqLockGuarded<'a, Exclusive, [u8]> {
         self.0.copy_from_slice(src);
     }
 }
+
+pub trait SeqLockPrimitive: Copy {
+    #[doc(hidden)]
+    fn asm_load(p: *const Self) -> Self;
+}
