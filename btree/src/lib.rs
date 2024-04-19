@@ -7,8 +7,9 @@ use seqlock::{
     SeqLockSafe, SeqlockAccessors,
 };
 use std::cmp::Ordering;
-use std::mem::{offset_of, size_of};
+use std::mem::{offset_of, size_of, MaybeUninit};
 use std::ptr::slice_from_raw_parts_mut;
+use std::slice::from_raw_parts_mut;
 
 pub const PAGE_SIZE: usize = 1 << 12;
 pub const PAGE_HEAD_SIZE: usize = 8;
@@ -39,9 +40,23 @@ pub struct BasicNode<V: BasicNodeVariant> {
     _data: [u32; PAGE_SIZE - PAGE_HEAD_SIZE - size_of::<CommonNodeHead>() - 6 * 2 - 16 * 4],
 }
 
-pub trait BasicNodeVariant {
+pub trait BasicNodeVariant: 'static {
     type Upper: SeqLockPrimitive + SeqLockSafe;
-    const RECORD_TO_KEY_OFFSET: usize;
+    const IS_LEAF: bool;
+    const RECORD_TO_KEY_OFFSET: usize = if Self::IS_LEAF { 4 } else { 8 };
+}
+
+struct BasicNodeLeaf;
+
+impl BasicNodeVariant for BasicNodeLeaf {
+    type Upper = ();
+    const IS_LEAF: bool = true;
+}
+
+struct BasicNodeInner;
+impl BasicNodeVariant for BasicNodeInner {
+    type Upper = PageId;
+    const IS_LEAF: bool = false;
 }
 
 unsafe trait Node {}
@@ -90,23 +105,112 @@ impl<'a, V: BasicNodeVariant> Wrapper<SeqLockGuarded<'a, Exclusive, BasicNode<V>
         V::Upper::unwrap_mut(&mut self.upper()).store(upper);
     }
 }
+impl<'a, V: BasicNodeVariant> Wrapper<SeqLockGuarded<'a, Exclusive, BasicNode<V>>> {
+    fn compactify(&mut self) {
+        unsafe {
+            let mut buffer = &mut [0u8; size_of::<Self>()];
+            let fence_offset = size_of::<Self>()
+                - self.common().lower_fence_len().load() as usize
+                - self.common().upper_fence_len().load() as usize;
+            let mut dst_offset = fence_offset;
+            for i in 0..self.common().count().load() as usize {
+                let offset = self.slots().unwrap().index(i).load() as usize;
+                let mut lens = self.slice::<u16>(offset, 2).unwrap();
+                let record_len = V::RECORD_TO_KEY_OFFSET
+                    + Self::round_up(
+                        lens.index(0).load() as usize
+                            + if V::IS_LEAF {
+                                lens.index(1).load() as usize
+                            } else {
+                                0
+                            },
+                    );
+                dst_offset -= record_len;
+                self.slice(offset, record_len)
+                    .unwrap()
+                    .load_slice(&mut buffer[dst_offset..][..record_len]);
+                self.slots().unwrap().index(i).store(dst_offset as u16);
+            }
+            self.slice::<u8>(dst_offset, fence_offset - dst_offset)
+                .unwrap()
+                .store_slice(&buffer[dst_offset..fence_offset]);
+            debug_assert_eq!(
+                self.heap_bump().load() + self.heap_freed().load(),
+                dst_offset as u16
+            );
+            self.heap_freed().store(0);
+            self.heap_bump().store(dst_offset as u16);
+        }
+    }
+}
+impl<'a> Wrapper<SeqLockGuarded<'a, Exclusive, BasicNode<BasicNodeLeaf>>> {
+    pub fn insert_leaf(&mut self, key: &[u8], val: &[u8]) -> Result<(), ()> {
+        loop {
+            let insert_pos = self.find(key).unwrap();
+            let key = &key[self.common().prefix_len().load() as usize..];
+            let record_len = Self::round_up(key.len() + val.len());
+            let count = self.common().count().load() as usize;
+            let heap_start = Self::DATA_OFFSET + Self::reserved_head_count(count) * 4 + count * 2;
+            let free_space = self.heap_bump().load() as usize - heap_start;
+            match insert_pos {
+                Ok(existing) => {
+                    if record_len + 4 <= free_space {
+                        let record_pos = self.heap_bump().load() as usize - record_len - 4;
+                        self.heap_bump().store(record_pos as u16);
+                        self.slots()
+                            .unwrap()
+                            .index(existing)
+                            .store(record_pos as u16);
+                        let mut lens = self.slice::<u16>(record_pos, 2).unwrap();
+                        lens.index(0).store(key.len() as u16);
+                        lens.index(1).store(val.len() as u16);
+                        self.slice(record_pos + 4, key.len())
+                            .unwrap()
+                            .store_slice(key);
+                        self.slice(record_pos + 4 + key.len(), val.len())
+                            .unwrap()
+                            .store_slice(val);
+                        return Ok(());
+                    }
+                    let old_offset = self.slots().unwrap().index(existing).load() as usize;
+                    let mut lens = self.slice::<u16>(old_offset, 2).unwrap();
+                    let old_record_len = 4 + Self::round_up(
+                        lens.index(0).load() as usize + lens.index(1).load() as usize,
+                    );
+                    if free_space + old_record_len + (self.heap_freed().load() as usize)
+                        < record_len
+                    {
+                        return Err(());
+                    }
+                    lens.index(0).store(0);
+                    lens.index(1).store(0);
+                    self.compactify();
+                    continue;
+                }
+                Err(insert_at) => todo!(),
+            }
+        }
+    }
+}
 
 impl<'a, V: BasicNodeVariant, M: SeqLockMode> Wrapper<SeqLockGuarded<'a, M, BasicNode<V>>> {
+    fn round_up(x: usize) -> usize {
+        x + (1 - (x & 1))
+    }
+    const DATA_OFFSET: usize = offset_of!(BasicNode<V>, _data);
+
     fn heads(&mut self) -> Result<SeqLockGuarded<'a, M, [u32]>, M::ReleaseError> {
         let count = self.common().count().load() as usize;
-        self.slice(offset_of!(BasicNode<V>, _data), count)
+        self.slice(Self::DATA_OFFSET + 4 * 0, count)
     }
 
     fn reserved_head_count(count: usize) -> usize {
         count.next_multiple_of(8)
     }
-
-    fn slots(&mut self) -> Result<SeqLockGuarded<'a, M, [u32]>, M::ReleaseError> {
+    fn slots(&mut self) -> Result<SeqLockGuarded<'a, M, [u16]>, M::ReleaseError> {
         let count = self.common().count().load() as usize;
-        self.slice(
-            offset_of!(BasicNode<V>, _data) + size_of::<u32>() * Self::reserved_head_count(count),
-            count,
-        )
+        let i = Self::reserved_head_count(count);
+        self.slice(Self::DATA_OFFSET + 4 * i, count)
     }
 
     fn key(

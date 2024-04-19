@@ -198,3 +198,5 @@ impl<'a, M: SeqLockMode> SeqLockGuarded<'a, M, [u8]> {
         unsafe { M::cmp_bytes(self.as_ptr(), other) }
     }
 }
+
+seqlock_safe_no_wrap!(());

@@ -4,6 +4,8 @@ use std::cmp::Ordering;
 use std::mem::{transmute, MaybeUninit};
 use std::sync::atomic::{fence, AtomicU64, Ordering::*};
 
+// TODO load arrays to uninit
+
 pub fn optimistic_release(lock: &AtomicU64, expected: u64) -> Result<(), OptimisticLockError> {
     fence(Acquire);
     if lock.load(Relaxed) == expected {
@@ -162,4 +164,8 @@ impl<'a> SeqLockGuarded<'a, Exclusive, [u8]> {
 pub trait SeqLockPrimitive: Pod {
     #[doc(hidden)]
     fn asm_load(p: *const Self) -> Self;
+}
+
+impl SeqLockPrimitive for () {
+    fn asm_load(_: *const Self) -> Self {}
 }
