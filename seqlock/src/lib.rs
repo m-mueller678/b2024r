@@ -69,7 +69,7 @@ impl<'a, M: SeqLockMode, T: 'a + ?Sized> SeqLockGuarded<'a, M, T> {
 }
 
 impl<'a, T: 'a + ?Sized + SeqLockSafe> SeqLockGuarded<'a, Exclusive, T> {
-    pub fn optimistic(&self) -> T::Wrapped<SeqLockGuarded<'a, Optimistic, T>> {
+    pub fn optimistic<'b>(&self) -> T::Wrapped<SeqLockGuarded<'b, Optimistic, T>> {
         unsafe { wrap_unchecked(self.as_ptr()) }
     }
 }
@@ -129,7 +129,7 @@ seqlock_safe_no_wrap!(u8, u16, u32, u64, i8, i16, i32, i64);
 
 impl<'a, T: SeqLockSafe, M: SeqLockMode> SeqLockGuarded<'a, M, [T]> {
     #[inline]
-    pub fn slice(&mut self, i: impl RangeBounds<usize>) -> SeqLockGuarded<'a, M, [T]> {
+    pub fn slice<'b>(&'b mut self, i: impl RangeBounds<usize>) -> SeqLockGuarded<'b, M, [T]> {
         let array = self.as_ptr();
         let mut ptr = array.as_mut_ptr();
         let mut len = array.len();
@@ -162,7 +162,7 @@ impl<'a, T: SeqLockSafe, M: SeqLockMode> SeqLockGuarded<'a, M, [T]> {
         }
     }
 
-    pub fn index(&mut self, i: usize) -> T::Wrapped<SeqLockGuarded<'a, M, T>> {
+    pub fn index<'b>(&mut self, i: usize) -> T::Wrapped<SeqLockGuarded<'b, M, T>> {
         assert!(i < self.as_ptr().len());
         unsafe { wrap_unchecked(self.as_ptr().as_mut_ptr().add(i)) }
     }
