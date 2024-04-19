@@ -112,7 +112,7 @@ seqlock_primitive!(
 macro_rules! asm_memcpy{
     ($align_var:expr,$len:expr,$src:expr,$dst:expr;$($align:expr,$inst:literal;)*)=>{
         $(
-        if $align >= $align_var{
+        if $align_var >= $align {
              core::arch::asm!(
                 std::concat!("rep ",$inst),
                 in("si") $src as *const u8,
