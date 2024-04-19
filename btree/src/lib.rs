@@ -1,11 +1,14 @@
 mod byte_slice;
 
+use crate::byte_slice::common_prefix;
 use indxvec::Search;
-use seqlock::{seqlock_wrapper, wrap_unchecked, SeqLockGuarded, SeqLockMode, SeqLockSafe, SeqlockAccessors, Exclusive, SeqLockPrimitive};
+use seqlock::{
+    seqlock_wrapper, wrap_unchecked, Exclusive, SeqLockGuarded, SeqLockMode, SeqLockPrimitive,
+    SeqLockSafe, SeqlockAccessors,
+};
 use std::cmp::Ordering;
 use std::mem::{offset_of, size_of};
-use std::ptr::{slice_from_raw_parts, slice_from_raw_parts_mut};
-use crate::byte_slice::common_prefix;
+use std::ptr::slice_from_raw_parts_mut;
 
 pub const PAGE_SIZE: usize = 1 << 12;
 pub const PAGE_HEAD_SIZE: usize = 8;
@@ -21,7 +24,7 @@ pub struct CommonNodeHead {
     upper_fence_len: u16,
 }
 
-pub struct PageId([u16; 3]);
+pub type PageId = [u16; 3];
 
 #[derive(SeqlockAccessors)]
 #[repr(align(8))]
@@ -37,7 +40,7 @@ pub struct BasicNode<V: BasicNodeVariant> {
 }
 
 pub trait BasicNodeVariant {
-    type Upper: SeqLockPrimitive+SeqLockSafe;
+    type Upper: SeqLockPrimitive + SeqLockSafe;
     const RECORD_TO_KEY_OFFSET: usize;
 }
 
@@ -65,23 +68,26 @@ impl<'a, N: Node, M: SeqLockMode> Wrapper<SeqLockGuarded<'a, M, N>> {
 
 fn key_head(k: &[u8]) -> u32 {
     let mut h = 0u32;
-    for i in 0..4 {
+    for x in k {
         h <<= 8;
-        h |= k[i] as u32;
+        h |= *x as u32;
     }
     h
 }
 
-impl<'a, V:BasicNodeVariant> Wrapper<SeqLockGuarded<'a,Exclusive,BasicNode<V>>>{
-    pub fn init(&mut self,lf:&[u8],uf:&[u8],upper:V::Upper){
+impl<'a, V: BasicNodeVariant> Wrapper<SeqLockGuarded<'a, Exclusive, BasicNode<V>>> {
+    pub fn init(&mut self, lf: &[u8], uf: &[u8], upper: V::Upper) {
         assert_eq!(size_of::<BasicNode<V>>(), PAGE_SIZE - PAGE_HEAD_SIZE);
         self.common().count().store(0);
-        self.common().prefix_len().store(common_prefix(lf,uf) as u16);
+        self.common()
+            .prefix_len()
+            .store(common_prefix(lf, uf) as u16);
         self.common().lower_fence_len().store(lf.len() as u16);
         self.common().upper_fence_len().store(uf.len() as u16);
-        self.heap_bump().store( (size_of::<BasicNode<V>>() - lf.len() - uf.len()) as u16  );
+        self.heap_bump()
+            .store((size_of::<BasicNode<V>>() - lf.len() - uf.len()) as u16);
         self.heap_freed().store(0);
-        self.upper().store(upper);
+        V::Upper::unwrap_mut(&mut self.upper()).store(upper);
     }
 }
 
@@ -128,9 +134,8 @@ impl<'a, V: BasicNodeVariant, M: SeqLockMode> Wrapper<SeqLockGuarded<'a, M, Basi
         let truncated = &key[prefix_len..];
         let needle_head = key_head(truncated);
         let mut heads = self.heads()?;
-        let matching_head_range = (0..=heads.len() - 1).binary_all(|i| {
-            heads.index(i).load().cmp(&needle_head)
-        });
+        let matching_head_range =
+            (0..=heads.len() - 1).binary_all(|i| heads.index(i).load().cmp(&needle_head));
         if matching_head_range.is_empty() {
             return Ok(Err(matching_head_range.start));
         }
@@ -138,10 +143,13 @@ impl<'a, V: BasicNodeVariant, M: SeqLockMode> Wrapper<SeqLockGuarded<'a, M, Basi
         if slots.len() != heads.len() {
             return Err(M::release_error());
         }
-        let key_position = (matching_head_range.start..=matching_head_range.end - 1).binary_by(|i| {
-            let Ok(key) = self.key(i) else{return Ordering::Equal};
-            key.cmp_bytes(truncated)
-        });
+        let key_position =
+            (matching_head_range.start..=matching_head_range.end - 1).binary_by(|i| {
+                let Ok(key) = self.key(i) else {
+                    return Ordering::Equal;
+                };
+                key.cmp_bytes(truncated)
+            });
         Ok(key_position)
     }
 }

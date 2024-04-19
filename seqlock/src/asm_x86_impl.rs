@@ -1,8 +1,8 @@
 use super::*;
-use std::cmp::Ordering;
-use std::mem::{align_of, MaybeUninit, size_of, transmute};
-use std::sync::atomic::{fence, AtomicU64, Ordering::*};
 use bytemuck::Pod;
+use std::cmp::Ordering;
+use std::mem::{transmute, MaybeUninit};
+use std::sync::atomic::{fence, AtomicU64, Ordering::*};
 
 pub fn optimistic_release(lock: &AtomicU64, expected: u64) -> Result<(), OptimisticLockError> {
     fence(Acquire);
@@ -69,7 +69,7 @@ unsafe impl SeqLockModeImpl for Exclusive {
     }
 
     unsafe fn cmp_bytes(this: *const [u8], other: &[u8]) -> Ordering {
-        Optimistic::cmp_bytes(this,other)
+        Optimistic::cmp_bytes(this, other)
     }
 }
 
@@ -88,13 +88,13 @@ macro_rules! seqlock_primitive{
                 }
                 dst
             }
-        }
-
-        impl SeqLockGuarded<'_,Exclusive,$T>{
-            pub fn store(&mut self,v:$T){
-                *self.0=v;
-            }
         })*
+    }
+}
+
+impl<T: SeqLockPrimitive> SeqLockGuarded<'_, Exclusive, T> {
+    pub fn store(&mut self, v: T) {
+        *self.0 = v;
     }
 }
 
@@ -126,27 +126,26 @@ macro_rules! asm_memcpy{
     }
 }
 
-unsafe fn asm_memcpy<T>(src:*const [T],dst:*const [T]){
-    assert_eq!(src.len(),dst.len());
-    let len=std::mem::size_of::<T>()*src.len();
-    let align= std::mem::align_of::<T>();
+unsafe fn asm_memcpy<T>(src: *const [T], dst: *const [T]) {
+    assert_eq!(src.len(), dst.len());
+    let len = std::mem::size_of::<T>() * src.len();
+    let align = std::mem::align_of::<T>();
     asm_memcpy!(align,len,src,dst;8,"movsb";4,"movsb";2,"movsb";1,"movsb";);
 }
 
-
-impl<'a,M:SeqLockMode,T:Pod> SeqLockGuarded<'a, M, [T]> {
+impl<'a, M: SeqLockMode, T: Pod> SeqLockGuarded<'a, M, [T]> {
     pub fn load_slice(&self, dst: &mut [T]) {
-        unsafe{
-            asm_memcpy(self.as_ptr(),dst);
+        unsafe {
+            asm_memcpy(self.as_ptr(), dst);
         }
     }
 }
 
-impl<T:SeqLockPrimitive,const N:usize> SeqLockPrimitive for [T;N]{
+impl<T: SeqLockPrimitive, const N: usize> SeqLockPrimitive for [T; N] {
     fn asm_load(p: *const Self) -> Self {
-        unsafe{
-            let mut dst=MaybeUninit::<[T;N]>::uninit();
-            asm_memcpy(p,dst.as_ptr());
+        unsafe {
+            let dst = MaybeUninit::<[T; N]>::uninit();
+            asm_memcpy(p, dst.as_ptr());
             dst.assume_init()
         }
     }
@@ -154,8 +153,8 @@ impl<T:SeqLockPrimitive,const N:usize> SeqLockPrimitive for [T;N]{
 
 impl<'a> SeqLockGuarded<'a, Exclusive, [u8]> {
     pub fn store_slice(&mut self, src: &[u8]) {
-        unsafe{
-            asm_memcpy(src,self.as_ptr());
+        unsafe {
+            asm_memcpy(src, self.as_ptr());
         }
     }
 }

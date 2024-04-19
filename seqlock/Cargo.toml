@@ -12,5 +12,5 @@ asm_read=[]
 
 [dependencies]
 as_base = "0.1.3"
-bytemuck = "1.15.0"
+bytemuck = { version = "1.15.0",features = ["min_const_generics"] }
 seqlock_macros = {path = "../seqlock_macros"}

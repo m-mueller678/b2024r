@@ -74,6 +74,10 @@ pub fn derive_seqlock_safe(input: TokenStream1) -> TokenStream1 {
             fn unwrap_ref<WrappedParam>(x: &Self::Wrapped<WrappedParam>) -> &WrappedParam {
                 &x.0
             }
+
+            fn unwrap_mut<WrappedParam>(x: &mut Self::Wrapped<WrappedParam>) -> &mut WrappedParam {
+                &mut x.0
+            }
         }
 
         impl<'wrapped_guard,SeqLockModeParam:#seqlock::SeqLockMode,#generic_params>

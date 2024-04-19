@@ -46,7 +46,7 @@ pub unsafe trait SeqLockModeImpl {
     fn as_ptr<'a, T: 'a + ?Sized>(a: &Self::Access<'a, T>) -> *mut T;
 
     unsafe fn load_primitive<P: SeqLockPrimitive>(p: *const P) -> P;
-    unsafe fn cmp_bytes(this:*const [u8],other:&[u8])->Ordering;
+    unsafe fn cmp_bytes(this: *const [u8], other: &[u8]) -> Ordering;
 }
 
 #[allow(private_bounds)]
@@ -78,6 +78,7 @@ pub unsafe trait SeqLockSafe {
     type Wrapped<T>;
     fn wrap<T>(x: T) -> Self::Wrapped<T>;
     fn unwrap_ref<T>(x: &Self::Wrapped<T>) -> &T;
+    fn unwrap_mut<T>(x: &mut Self::Wrapped<T>) -> &mut T;
 }
 
 #[macro_export]
@@ -105,6 +106,7 @@ macro_rules! seqlock_safe_no_wrap {
             type Wrapped<T> = T;
             fn wrap<T>(x: T) -> Self::Wrapped<T> { x }
             fn unwrap_ref<T>(x: &Self::Wrapped<T>) -> &T { x }
+            fn unwrap_mut<T>(x: &mut Self::Wrapped<T>) -> &mut T { x }
         })*
     };
 }
@@ -116,6 +118,9 @@ unsafe impl<X> SeqLockSafe for [X] {
     }
 
     fn unwrap_ref<T>(x: &Self::Wrapped<T>) -> &T {
+        x
+    }
+    fn unwrap_mut<T>(x: &mut Self::Wrapped<T>) -> &mut T {
         x
     }
 }
@@ -162,7 +167,7 @@ impl<'a, T: SeqLockSafe, M: SeqLockMode> SeqLockGuarded<'a, M, [T]> {
         unsafe { wrap_unchecked(self.as_ptr().as_mut_ptr().add(i)) }
     }
 
-    pub fn len(&self)->usize{
+    pub fn len(&self) -> usize {
         self.as_ptr().len()
     }
 }
@@ -177,6 +182,9 @@ unsafe impl<E, const N: usize> SeqLockSafe for [E; N] {
     fn unwrap_ref<T>(x: &Self::Wrapped<T>) -> &T {
         x
     }
+    fn unwrap_mut<T>(x: &mut Self::Wrapped<T>) -> &mut T {
+        x
+    }
 }
 
 impl<'a, M: SeqLockMode, T: SeqLockPrimitive> SeqLockGuarded<'a, M, T> {
@@ -185,8 +193,8 @@ impl<'a, M: SeqLockMode, T: SeqLockPrimitive> SeqLockGuarded<'a, M, T> {
     }
 }
 
-impl<'a,M:SeqLockMode> SeqLockGuarded<'a,M,[u8]>{
-    pub fn cmp_bytes(&self,other:&[u8])->Ordering{
-        unsafe{M::cmp_bytes(self.as_ptr(),other)}
+impl<'a, M: SeqLockMode> SeqLockGuarded<'a, M, [u8]> {
+    pub fn cmp_bytes(&self, other: &[u8]) -> Ordering {
+        unsafe { M::cmp_bytes(self.as_ptr(), other) }
     }
 }
