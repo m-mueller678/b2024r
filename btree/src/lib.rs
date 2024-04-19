@@ -1,10 +1,11 @@
+mod byte_slice;
+
 use indxvec::Search;
-use seqlock::{
-    seqlock_wrapper, wrap_unchecked, SeqLockGuarded, SeqLockMode, SeqLockSafe, SeqlockAccessors,
-};
+use seqlock::{seqlock_wrapper, wrap_unchecked, SeqLockGuarded, SeqLockMode, SeqLockSafe, SeqlockAccessors, Exclusive, SeqLockPrimitive};
 use std::cmp::Ordering;
 use std::mem::{offset_of, size_of};
 use std::ptr::{slice_from_raw_parts, slice_from_raw_parts_mut};
+use crate::byte_slice::common_prefix;
 
 pub const PAGE_SIZE: usize = 1 << 12;
 pub const PAGE_HEAD_SIZE: usize = 8;
@@ -23,6 +24,7 @@ pub struct CommonNodeHead {
 pub struct PageId([u16; 3]);
 
 #[derive(SeqlockAccessors)]
+#[repr(align(8))]
 #[seq_lock_wrapper(Wrapper)]
 pub struct BasicNode<V: BasicNodeVariant> {
     common: CommonNodeHead,
@@ -35,7 +37,7 @@ pub struct BasicNode<V: BasicNodeVariant> {
 }
 
 pub trait BasicNodeVariant {
-    type Upper: SeqLockSafe;
+    type Upper: SeqLockPrimitive+SeqLockSafe;
     const RECORD_TO_KEY_OFFSET: usize;
 }
 
@@ -68,6 +70,19 @@ fn key_head(k: &[u8]) -> u32 {
         h |= k[i] as u32;
     }
     h
+}
+
+impl<'a, V:BasicNodeVariant> Wrapper<SeqLockGuarded<'a,Exclusive,BasicNode<V>>>{
+    pub fn init(&mut self,lf:&[u8],uf:&[u8],upper:V::Upper){
+        assert_eq!(size_of::<BasicNode<V>>(), PAGE_SIZE - PAGE_HEAD_SIZE);
+        self.common().count().store(0);
+        self.common().prefix_len().store(common_prefix(lf,uf) as u16);
+        self.common().lower_fence_len().store(lf.len() as u16);
+        self.common().upper_fence_len().store(uf.len() as u16);
+        self.heap_bump().store( (size_of::<BasicNode<V>>() - lf.len() - uf.len()) as u16  );
+        self.heap_freed().store(0);
+        self.upper().store(upper);
+    }
 }
 
 impl<'a, V: BasicNodeVariant, M: SeqLockMode> Wrapper<SeqLockGuarded<'a, M, BasicNode<V>>> {

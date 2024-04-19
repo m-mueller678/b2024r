@@ -26,14 +26,14 @@ fn test_memcpy() {
         for a in &samples {
             let mut a = a.as_bytes().to_vec();
             let mut dst = vec![0u8; a.len()];
-            wrap_unchecked::<Optimistic, [u8]>(&mut *a as *mut [u8]).load(&mut dst);
+            wrap_unchecked::<Optimistic, [u8]>(&mut *a as *mut [u8]).load_slice(&mut dst);
             assert_eq!(&dst, &a);
         }
         wrap_unchecked::<Optimistic, [u8]>(slice_from_raw_parts_mut(
             core::ptr::NonNull::dangling().as_ptr(),
             0,
         ))
-        .load(&mut []);
+        .load_slice(&mut []);
     }
 }
 

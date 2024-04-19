@@ -1,7 +1,8 @@
 use super::*;
 use std::cmp::Ordering;
-use std::mem::{size_of, transmute};
+use std::mem::{align_of, MaybeUninit, size_of, transmute};
 use std::sync::atomic::{fence, AtomicU64, Ordering::*};
+use bytemuck::Pod;
 
 pub fn optimistic_release(lock: &AtomicU64, expected: u64) -> Result<(), OptimisticLockError> {
     fence(Acquire);
@@ -108,28 +109,58 @@ seqlock_primitive!(
     (i64) reg=reg reg_f=":r"
 );
 
-impl<'a> SeqLockGuarded<'a, Optimistic, [u8]> {
-    pub fn load(&self, dest: &mut [u8]) {
-        assert_eq!(self.as_ptr().len(), dest.len());
-        unsafe {
-            core::arch::asm!(
-            "rep movsb",
-            in("si") self.as_ptr().as_mut_ptr(),
-            in("di") dest.as_ptr(),
-            in("cx") dest.len(),
-            options(nostack,preserves_flags)
+macro_rules! asm_memcpy{
+    ($align_var:expr,$len:expr,$src:expr,$dst:expr;$($align:expr,$inst:literal;)*)=>{
+        $(
+        if $align >= $align_var{
+             core::arch::asm!(
+                std::concat!("rep ",$inst),
+                in("si") $src as *const u8,
+                in("di") $dst as *const u8,
+                in("cx") $len/$align,
+                options(nostack,preserves_flags),
             );
+            return;
+        }
+        )*
+    }
+}
+
+unsafe fn asm_memcpy<T>(src:*const [T],dst:*const [T]){
+    assert_eq!(src.len(),dst.len());
+    let len=std::mem::size_of::<T>()*src.len();
+    let align= std::mem::align_of::<T>();
+    asm_memcpy!(align,len,src,dst;8,"movsb";4,"movsb";2,"movsb";1,"movsb";);
+}
+
+
+impl<'a,M:SeqLockMode,T:Pod> SeqLockGuarded<'a, M, [T]> {
+    pub fn load_slice(&self, dst: &mut [T]) {
+        unsafe{
+            asm_memcpy(self.as_ptr(),dst);
+        }
+    }
+}
+
+impl<T:SeqLockPrimitive,const N:usize> SeqLockPrimitive for [T;N]{
+    fn asm_load(p: *const Self) -> Self {
+        unsafe{
+            let mut dst=MaybeUninit::<[T;N]>::uninit();
+            asm_memcpy(p,dst.as_ptr());
+            dst.assume_init()
         }
     }
 }
 
 impl<'a> SeqLockGuarded<'a, Exclusive, [u8]> {
-    pub fn store(&mut self, src: &[u8]) {
-        self.0.copy_from_slice(src);
+    pub fn store_slice(&mut self, src: &[u8]) {
+        unsafe{
+            asm_memcpy(src,self.as_ptr());
+        }
     }
 }
 
-pub trait SeqLockPrimitive: Copy {
+pub trait SeqLockPrimitive: Pod {
     #[doc(hidden)]
     fn asm_load(p: *const Self) -> Self;
 }

@@ -5,4 +5,4 @@ edition = "2021"
 
 [dependencies]
 seqlock = {path = "../seqlock"}
-indxvec = "1.8.9"
+indxvec = "1.9"
