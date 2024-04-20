@@ -7,7 +7,6 @@ extern crate core;
 
 use bytemuck::Pod;
 use std::cmp::Ordering;
-use std::hint::assert_unchecked;
 use std::marker::PhantomData;
 use std::mem::{align_of, align_of_val_raw, size_of, transmute, MaybeUninit};
 use std::ptr::slice_from_raw_parts_mut;
@@ -22,13 +21,13 @@ pub use wrappable::SeqLockWrappable;
 pub enum Never {}
 
 impl From<Never> for OptimisticLockError {
-    fn from(value: Never) -> Self {
+    fn from(_: Never) -> Self {
         unreachable!()
     }
 }
 
 impl From<Never> for () {
-    fn from(value: Never) -> Self {
+    fn from(_: Never) -> Self {
         unreachable!()
     }
 }

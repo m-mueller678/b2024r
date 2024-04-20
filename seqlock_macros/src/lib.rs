@@ -4,10 +4,9 @@ use proc_macro2::{Ident, TokenStream};
 use quote::{format_ident, quote};
 use syn::parse::{Parse, ParseStream};
 use syn::punctuated::Punctuated;
-use syn::token::Token;
 use syn::{
-    parse_macro_input, Attribute, Data, DeriveInput, Expr, ExprField, ExprPath, Index, Member,
-    Meta, Path, Token, Type, Visibility,
+    parse_macro_input, Attribute, Data, DeriveInput, Index, Member, Meta, Path, Token, Type,
+    Visibility,
 };
 
 fn seqlock_crate() -> TokenStream {
@@ -33,9 +32,9 @@ fn extract_wrapper_attr(x: &[Attribute]) -> impl Iterator<Item = Path> + '_ {
 struct AccessorSpec {
     vis: Visibility,
     name: Ident,
-    colon_token: Token![:],
+    _colon_token: Token![:],
     ty: Type,
-    eq_token: Token![=],
+    _eq_token: Token![=],
     expr: Punctuated<Member, Token![.]>,
 }
 
@@ -44,9 +43,9 @@ impl Parse for AccessorSpec {
         Ok(AccessorSpec {
             vis: input.parse()?,
             name: input.parse()?,
-            colon_token: input.parse()?,
+            _colon_token: input.parse()?,
             ty: input.parse()?,
-            eq_token: input.parse()?,
+            _eq_token: input.parse()?,
             expr: Punctuated::parse_separated_nonempty(input)?,
         })
     }
@@ -85,9 +84,9 @@ pub fn derive_seqlock_safe(input: TokenStream1) -> TokenStream1 {
                     AccessorSpec {
                         vis: field.vis.clone(),
                         name,
-                        colon_token: field.colon_token.unwrap_or_default(),
+                        _colon_token: field.colon_token.unwrap_or_default(),
                         ty: field.ty.clone(),
-                        eq_token: Default::default(),
+                        _eq_token: Default::default(),
                         expr: std::iter::once(member).collect(),
                     }
                 });
@@ -98,13 +97,13 @@ pub fn derive_seqlock_safe(input: TokenStream1) -> TokenStream1 {
                 _ => None,
             });
             default_accessors.chain(custom_accessors)
-                .flat_map(|AccessorSpec { vis, name, ty, expr, .. }| {
+                .flat_map(|AccessorSpec {  name, ty, expr, vis,.. }| {
                     let versions = [
                         (format_ident!("{name}_mut"), quote!(mut), quote!(SeqLockModeParam)),
                         (name,quote!(),quote!(SeqLockModeParam::SharedDowngrade)),
                     ];
                     versions.map(|(name,mutable,return_mode)|quote!(
-                        pub fn #name<'b>(&'b #mutable self)-><#ty as #seqlock::SeqLockWrappable>::Wrapper<#seqlock::Guarded<'b,#return_mode,#ty>> {
+                        #vis fn #name<'b>(&'b #mutable self)-><#ty as #seqlock::SeqLockWrappable>::Wrapper<#seqlock::Guarded<'b,#return_mode,#ty>> {
                             unsafe{
                                 #seqlock::Guarded::wrap_unchecked(
                                     core::ptr::addr_of_mut!((*self.0.as_ptr()).#expr)
