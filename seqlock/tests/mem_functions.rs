@@ -79,7 +79,7 @@ fn struct_access() {
         let mut x = Guarded::<Exclusive, MyStruct>::wrap_unchecked(x);
         assert_eq!(x.a_mut().load(), 1);
         assert_eq!(x.b_mut().load(), 2);
-        assert_eq!(x.shared().a().load(), 1);
+        assert_eq!(x.s().a().load(), 1);
         assert_eq!(x.optimistic().a_mut().load(), 1);
     }
 }

@@ -8,7 +8,7 @@ use seqlock::{
 };
 use std::cmp::Ordering;
 use std::marker::PhantomData;
-use std::mem::{offset_of, size_of, MaybeUninit, align_of};
+use std::mem::{align_of, offset_of, size_of, MaybeUninit};
 use std::ptr::{addr_of_mut, slice_from_raw_parts_mut};
 use std::slice::from_raw_parts_mut;
 
@@ -36,9 +36,11 @@ struct BasicNodeData {
     heap_bump: u16,
     heap_freed: u16,
     hints: [u32; 16],
-    _data: [u32; PAGE_SIZE - PAGE_HEAD_SIZE - size_of::<CommonNodeHead>() - 6 * 2 - 16 * 4],
-    _upper: PhantomData<V::Upper>,
+    _data: [u32; BASIC_NODE_DATA_SIZE],
 }
+
+const BASIC_NODE_DATA_SIZE: usize =
+    (PAGE_SIZE - PAGE_HEAD_SIZE - size_of::<CommonNodeHead>() - 2 * 2 - 16 * 4) / 4;
 
 #[repr(transparent)]
 #[derive(Clone, Copy, Zeroable, SeqlockAccessors)]
@@ -85,13 +87,14 @@ unsafe trait Node: SeqLockWrappable + Pod {}
 unsafe impl<V: BasicNodeVariant> Node for BasicNode<V> {}
 
 impl<'a, N: Node, M: SeqLockMode> Wrapper<Guarded<'a, M, N>> {
-    fn slice<'b, T: SeqLockWrappable + Pod>(
-        &mut self,
+    fn slice<T: SeqLockWrappable + Pod>(
+        self,
         offset: usize,
         count: usize,
-    ) -> Result<Guarded<'b, M, [T]>, M::ReleaseError> {
+    ) -> Result<Guarded<'a, M, [T]>, M::ReleaseError> {
         const SIZE: usize = PAGE_SIZE - PAGE_HEAD_SIZE;;
         Ok(self
+            .0
             .cast::<[u8; SIZE]>()
             .as_slice()
             .slice(offset, count * size_of::<T>())
@@ -118,19 +121,19 @@ impl<'a, V: BasicNodeVariant> Wrapper<Guarded<'a, Exclusive, BasicNode<V>>> {
         self.heap_bump_mut()
             .store((size_of::<BasicNode<V>>() - lf.len() - uf.len()) as u16);
         self.heap_freed_mut().store(0);
-        V::Upper::get_mut(&mut self.upper()).store(upper);
+        V::Upper::get_mut(&mut self.b().upper()).store(upper);
     }
 
     fn compactify(&mut self) {
         unsafe {
             let mut buffer = &mut [0u8; size_of::<Self>()];
             let fence_offset = size_of::<Self>()
-                - self.lower_fence_len().load() as usize
-                - self.upper_fence_len().load() as usize;
+                - self.s().lower_fence_len().load() as usize
+                - self.s().upper_fence_len().load() as usize;
             let mut dst_offset = fence_offset;
-            for i in 0..self.count().load() as usize {
-                let offset = self.slots().unwrap().index(i).load() as usize;
-                let mut lens = self.slice::<u16>(offset, 2).unwrap();
+            for i in 0..self.s().count().load() as usize {
+                let offset = self.s().slots().unwrap().index(i).load() as usize;
+                let mut lens = self.s().slice::<u16>(offset, 2).unwrap();
                 let record_len = V::RECORD_TO_KEY_OFFSET
                     + Self::round_up(
                         lens.index(0).load() as usize
@@ -141,12 +144,14 @@ impl<'a, V: BasicNodeVariant> Wrapper<Guarded<'a, Exclusive, BasicNode<V>>> {
                             },
                     );
                 dst_offset -= record_len;
-                self.slice(offset, record_len)
+                self.s()
+                    .slice(offset, record_len)
                     .unwrap()
                     .load_slice(&mut buffer[dst_offset..][..record_len]);
-                self.slots().unwrap().index(i).store(dst_offset as u16);
+                self.b().slots().unwrap().index(i).store(dst_offset as u16);
             }
-            self.slice::<u8>(dst_offset, fence_offset - dst_offset)
+            self.b()
+                .slice::<u8>(dst_offset, fence_offset - dst_offset)
                 .unwrap()
                 .store_slice(&buffer[dst_offset..fence_offset]);
             debug_assert_eq!(
@@ -161,7 +166,7 @@ impl<'a, V: BasicNodeVariant> Wrapper<Guarded<'a, Exclusive, BasicNode<V>>> {
 impl<'a> Wrapper<Guarded<'a, Exclusive, BasicNode<BasicNodeLeaf>>> {
     pub fn insert_leaf(&mut self, key: &[u8], val: &[u8]) -> Result<(), ()> {
         loop {
-            let insert_pos = self.find(key).unwrap();
+            let insert_pos = self.s().find(key).unwrap();
             let key = &key[self.prefix_len().load() as usize..];
             let record_len = Self::round_up(key.len() + val.len());
             let count = self.count().load() as usize;
@@ -172,33 +177,31 @@ impl<'a> Wrapper<Guarded<'a, Exclusive, BasicNode<BasicNodeLeaf>>> {
                     if record_len + 4 <= free_space {
                         let record_pos = self.heap_bump().load() as usize - record_len - 4;
                         self.heap_bump_mut().store(record_pos as u16);
-                        self.slots()
-                            .unwrap()
-                            .index(existing)
-                            .store(record_pos as u16);
-                        let mut lens = self.slice::<u16>(record_pos, 2).unwrap();
-                        lens.index(0).store(key.len() as u16);
-                        lens.index(1).store(val.len() as u16);
-                        self.slice(record_pos + 4, key.len())
+                        self.b().slots()?.index(existing).store(record_pos as u16);
+                        self.b().u16(record_pos)?.store(key.len() as u16);
+                        self.b().u16(record_pos + 2)?.store(val.len() as u16);
+                        self.b()
+                            .slice(record_pos + 4, key.len())
                             .unwrap()
                             .store_slice(key);
-                        self.slice(record_pos + 4 + key.len(), val.len())
+                        self.b()
+                            .slice(record_pos + 4 + key.len(), val.len())
                             .unwrap()
                             .store_slice(val);
                         return Ok(());
                     }
-                    let old_offset = self.slots().unwrap().index(existing).load() as usize;
-                    let mut lens = self.slice::<u16>(old_offset, 2).unwrap();
+                    let old_offset = self.b().slots().unwrap().index(existing).load() as usize;
                     let old_record_len = 4 + Self::round_up(
-                        lens.index(0).load() as usize + lens.index(1).load() as usize,
+                        self.s().u16(old_offset)?.load() as usize
+                            + self.s().u16(old_offset + 2)?.load() as usize,
                     );
-                    if free_space + old_record_len + (self.heap_freed().load() as usize)
+                    if free_space + old_record_len + (self.s().heap_freed().load() as usize)
                         < record_len
                     {
                         return Err(());
                     }
-                    lens.index(0).store(0);
-                    lens.index(1).store(0);
+                    self.b().u16(old_offset)?.store(0);
+                    self.b().u16(old_offset + 2)?.store(0);
                     self.compactify();
                     continue;
                 }
@@ -209,10 +212,14 @@ impl<'a> Wrapper<Guarded<'a, Exclusive, BasicNode<BasicNodeLeaf>>> {
 }
 
 impl<'a, V: BasicNodeVariant, M: SeqLockMode> Wrapper<Guarded<'a, M, BasicNode<V>>> {
-    fn upper(&mut self)-><V::Upper as SeqLockWrappable>::Wrapper<Guarded<'_,M,V::Upper>>{
+    fn u16(self, offset: usize) -> Result<Guarded<'a, M, u16>, M::ReleaseError> {
+        Ok(self.slice::<u16>(offset, 1)?.index(0))
+    }
+    fn upper(self) -> <V::Upper as SeqLockWrappable>::Wrapper<Guarded<'a, M, V::Upper>> {
         assert_eq!(4 % align_of::<V::Upper>(), 0);
-        unsafe{
-            self.map_ptr(|x|addr_of_mut!((*x).0._data) as *mut V::Upper)
+        unsafe {
+            self.0
+                .map_ptr(|x| addr_of_mut!((*x).0._data) as *mut V::Upper)
         }
     }
     fn round_up(x: usize) -> usize {
@@ -220,7 +227,7 @@ impl<'a, V: BasicNodeVariant, M: SeqLockMode> Wrapper<Guarded<'a, M, BasicNode<V
     }
     const HEAD_OFFSET: usize = offset_of!(BasicNodeData, _data) + V::UPPER_HEADS;
 
-    fn heads(&mut self) -> Result<Guarded<'a, M, [u32]>, M::ReleaseError> {
+    fn heads(self) -> Result<Guarded<'a, M, [u32]>, M::ReleaseError> {
         let count = self.count().load() as usize;
         self.slice(Self::HEAD_OFFSET + 4 * 0, count)
     }
@@ -228,30 +235,28 @@ impl<'a, V: BasicNodeVariant, M: SeqLockMode> Wrapper<Guarded<'a, M, BasicNode<V
     fn reserved_head_count(count: usize) -> usize {
         count.next_multiple_of(8)
     }
-    fn slots(&mut self) -> Result<Guarded<'a, M, [u16]>, M::ReleaseError> {
+    fn slots(self) -> Result<Guarded<'a, M, [u16]>, M::ReleaseError> {
         let count = self.count().load() as usize;
         let i = Self::reserved_head_count(count);
         self.slice(Self::HEAD_OFFSET + 4 * i, count)
     }
 
-    fn key(
-        &mut self,
-        unchecked_record_offset: usize,
-    ) -> Result<Guarded<'a, M, [u8]>, M::ReleaseError> {
+    fn key(self, unchecked_record_offset: usize) -> Result<Guarded<'a, M, [u8]>, M::ReleaseError> {
         if unchecked_record_offset + 2 > size_of::<Self>() || unchecked_record_offset % 2 != 0 {
             return Err(M::release_error());
         }
-        let len = self
-            .slice::<u16>(unchecked_record_offset, 1)?
-            .index(0)
-            .load();
+        let len = self.s().u16(unchecked_record_offset)?.load();
         self.slice(
             unchecked_record_offset + V::RECORD_TO_KEY_OFFSET,
             len as usize,
         )
     }
 
-    fn find(&mut self, key: &[u8]) -> Result<Result<usize, usize>, M::ReleaseError> {
+    fn find(&mut self, key: &[u8]) -> Result<Result<usize, usize>, M::ReleaseError>
+    where
+        Self: Copy,
+    {
+        let this = self.s();
         let prefix_len = self.prefix_len().load() as usize;
         if prefix_len > key.len() {
             return Err(M::release_error());
@@ -260,7 +265,7 @@ impl<'a, V: BasicNodeVariant, M: SeqLockMode> Wrapper<Guarded<'a, M, BasicNode<V
         let needle_head = key_head(truncated);
         let mut heads = self.heads()?;
         let matching_head_range =
-            (0..=heads.len() - 1).binary_all(|i| heads.index(i).load().cmp(&needle_head));
+            (0..=heads.len() - 1).binary_all(|i| heads.s().index(i).load().cmp(&needle_head));
         if matching_head_range.is_empty() {
             return Ok(Err(matching_head_range.start));
         }

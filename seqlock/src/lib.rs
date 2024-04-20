@@ -18,18 +18,36 @@ pub use access_impl::optimistic_release;
 pub use seqlock_macros::SeqlockAccessors;
 pub use wrappable::SeqLockWrappable;
 
+#[derive(Debug)]
+pub enum Never {}
+
+impl From<Never> for OptimisticLockError {
+    fn from(value: Never) -> Self {
+        unreachable!()
+    }
+}
+
+impl From<Never> for () {
+    fn from(value: Never) -> Self {
+        unreachable!()
+    }
+}
+
 #[path = "atomic_byte_impl.rs"]
 mod access_impl;
 
 #[allow(private_bounds)]
 pub trait SeqLockMode: SeqLockModeImpl + 'static {
-    type ReleaseError;
-    type SharedDowngrade: SeqLockMode;
+    type ReleaseError: Into<OptimisticLockError> + From<Never>;
+    type SharedDowngrade: SeqLockMode<ReleaseError = Self::ReleaseError>;
     fn release_error() -> Self::ReleaseError;
 }
 
 #[allow(private_bounds)]
-pub trait SeqLockModeExclusive: SeqLockMode + SeqLockModeExclusiveImpl {}
+pub trait SeqLockModeExclusive:
+    SeqLockMode<ReleaseError = Never> + SeqLockModeExclusiveImpl
+{
+}
 
 pub struct Optimistic;
 
@@ -46,19 +64,10 @@ impl SeqLockMode for Optimistic {
     }
 }
 
-impl SeqLockMode for Exclusive {
-    type ReleaseError = !;
-    type SharedDowngrade = Shared;
-
-    fn release_error() -> Self::ReleaseError {
-        unreachable!()
-    }
-}
-
 impl SeqLockModeExclusive for Exclusive {}
 
-impl SeqLockMode for Shared {
-    type ReleaseError = !;
+impl SeqLockMode for Exclusive {
+    type ReleaseError = Never;
     type SharedDowngrade = Shared;
 
     fn release_error() -> Self::ReleaseError {
@@ -66,11 +75,20 @@ impl SeqLockMode for Shared {
     }
 }
 
-impl<'a, T> Copy for Guarded<'a, Optimistic, T> {}
+impl SeqLockMode for Shared {
+    type ReleaseError = Never;
+    type SharedDowngrade = Shared;
 
-impl<'a, T> Copy for Guarded<'a, Shared, T> {}
+    fn release_error() -> Self::ReleaseError {
+        unreachable!()
+    }
+}
 
-impl<'a, T, M: SeqLockMode> Clone for Guarded<'a, M, T>
+impl<'a, T: ?Sized> Copy for Guarded<'a, Optimistic, T> {}
+
+impl<'a, T: ?Sized> Copy for Guarded<'a, Shared, T> {}
+
+impl<'a, T: ?Sized, M: SeqLockMode> Clone for Guarded<'a, M, T>
 where
     Self: Copy,
 {
@@ -80,7 +98,7 @@ where
 }
 
 unsafe trait SeqLockModeImpl {
-    type Pointer<'a, T: ?Sized>;
+    type Pointer<'a, T: ?Sized>: Copy;
     unsafe fn from_pointer<'a, T: ?Sized>(x: *mut T) -> Self::Pointer<'a, T>;
     fn as_ptr<T: ?Sized>(x: &Self::Pointer<'_, T>) -> *mut T;
     unsafe fn load<T: Pod>(p: &Self::Pointer<'_, T>) -> T;
@@ -89,13 +107,22 @@ unsafe trait SeqLockModeImpl {
 }
 
 impl<'a, M: SeqLockMode, T: SeqLockWrappable + ?Sized> Guarded<'a, M, T> {
-    pub fn reborrow(&mut self) -> T::Wrapper<Guarded<'_, M, T>> {
+    pub fn b(&mut self) -> T::Wrapper<Guarded<'_, M, T>> {
         unsafe { Guarded::wrap_unchecked(self.as_ptr()) }
     }
-    pub unsafe fn map_ptr<'b, U: SeqLockWrappable + ?Sized>(
-        &'b mut self,
+
+    pub fn s(&self) -> T::Wrapper<Guarded<'_, M::SharedDowngrade, T>> {
+        unsafe { Guarded::wrap_unchecked(self.as_ptr()) }
+    }
+
+    pub fn optimistic(&self) -> T::Wrapper<Guarded<'_, Optimistic, T>> {
+        unsafe { Guarded::wrap_unchecked(self.as_ptr()) }
+    }
+
+    pub unsafe fn map_ptr<U: SeqLockWrappable + ?Sized>(
+        self,
         f: impl FnOnce(*mut T) -> *mut U,
-    ) -> U::Wrapper<Guarded<'b, M, U>> {
+    ) -> U::Wrapper<Guarded<'a, M, U>> {
         Guarded::wrap_unchecked(f(M::as_ptr(&self.p)))
     }
 
@@ -123,7 +150,7 @@ impl<'a, M: SeqLockMode, T: SeqLockWrappable + ?Sized> Guarded<'a, M, T> {
         unsafe { M::load(&self.p) }
     }
 
-    pub fn cast<U: Pod + SeqLockWrappable>(&mut self) -> U::Wrapper<Guarded<'_, M, U>>
+    pub fn cast<U: Pod + SeqLockWrappable>(self) -> U::Wrapper<Guarded<'a, M, U>>
     where
         T: Pod,
     {
@@ -138,14 +165,6 @@ impl<'a, M: SeqLockMode, T: SeqLockWrappable + ?Sized> Guarded<'a, M, T> {
         M: SeqLockModeExclusive,
     {
         unsafe { M::store(&mut self.p, x) }
-    }
-
-    pub fn optimistic(&self) -> T::Wrapper<Guarded<'_, Optimistic, T>> {
-        unsafe { Guarded::wrap_unchecked(self.as_ptr()) }
-    }
-
-    pub fn shared(&self) -> T::Wrapper<Guarded<'_, M::SharedDowngrade, T>> {
-        unsafe { Guarded::wrap_unchecked(self.as_ptr()) }
     }
 }
 
@@ -163,11 +182,11 @@ impl<'a, M: SeqLockMode, T: SeqLockWrappable + Pod> Guarded<'a, M, [T]> {
         }
     }
 
-    pub fn len(&self)->usize{
+    pub fn len(&self) -> usize {
         self.as_ptr().len()
     }
 
-    pub fn cast_slice<U: Pod + SeqLockWrappable>(&mut self) -> Guarded<'_, M, [U]>
+    pub fn cast_slice<U: Pod + SeqLockWrappable>(self) -> Guarded<'a, M, [U]>
     where
         T: Pod,
     {
@@ -199,13 +218,13 @@ impl<'a, M: SeqLockMode, T: SeqLockWrappable + Pod> Guarded<'a, M, [T]> {
         }
     }
 
-    pub fn index(&mut self, i: usize) -> T::Wrapper<Guarded<'a, M, T>> {
+    pub fn index(self, i: usize) -> T::Wrapper<Guarded<'a, M, T>> {
         let ptr: *mut [T] = self.as_ptr();
         assert!(i < ptr.len());
         unsafe { Guarded::wrap_unchecked((ptr as *mut T).add(i)) }
     }
 
-    pub fn slice(&mut self, offset: usize, len: usize) -> Self {
+    pub fn slice(self, offset: usize, len: usize) -> Self {
         let ptr: *mut [T] = self.as_ptr();
         assert!(offset.checked_add(len).unwrap() <= ptr.len());
         unsafe {
@@ -213,7 +232,7 @@ impl<'a, M: SeqLockMode, T: SeqLockWrappable + Pod> Guarded<'a, M, [T]> {
         }
     }
 
-    pub fn as_array<const LEN: usize>(&mut self) -> Guarded<'_, M, [T; LEN]> {
+    pub fn as_array<const LEN: usize>(self) -> Guarded<'a, M, [T; LEN]> {
         unsafe {
             let ptr: *mut [T] = self.as_ptr();
             assert_eq!(ptr.len(), LEN);
@@ -223,7 +242,7 @@ impl<'a, M: SeqLockMode, T: SeqLockWrappable + Pod> Guarded<'a, M, [T]> {
 }
 
 impl<'a, M: SeqLockMode, T: SeqLockWrappable + Pod, const N: usize> crate::Guarded<'a, M, [T; N]> {
-    pub fn as_slice(&mut self) -> Guarded<'_, M, [T]> {
+    pub fn as_slice(self) -> Guarded<'a, M, [T]> {
         unsafe { Guarded::wrap_unchecked(self.as_ptr() as *mut [T]) }
     }
 }
