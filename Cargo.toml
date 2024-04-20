@@ -2,5 +2,5 @@
 resolver = "2"
 
 members = [ "btree",
-    "seqlock", "seqlock_macros",
+    "seqlock", "seqlock2", "seqlock_macros",
 ]
