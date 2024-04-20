@@ -68,10 +68,11 @@ unsafe impl<M: CommonImpl> SeqLockModeImpl for M {
 
     unsafe fn bit_cmp_slice<T: Pod>(p: &Self::Pointer<'_, [T]>, other: &[T]) -> Ordering {
         let other_bytes = bytemuck::cast_slice::<T, u8>(other);
-        let mut this = (0..other_bytes.len())
-            .map(|i| unsafe { (*(*p as *mut AtomicU8).add(i)).load(Relaxed) });
+        let this_bytes_len = p.len() * size_of::<T>();
+        let mut this =
+            (0..this_bytes_len).map(|i| unsafe { (*(*p as *mut AtomicU8).add(i)).load(Relaxed) });
         let mut other = other_bytes.iter().copied();
-        for _ in 0..other_bytes.len() {
+        for _ in 0..std::cmp::min(this_bytes_len, other_bytes.len()) {
             let c = this.next().cmp(&other.next());
             if !c.is_eq() {
                 return c;

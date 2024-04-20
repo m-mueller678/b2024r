@@ -106,7 +106,7 @@ impl<'a, M: SeqLockMode, T: SeqLockWrappable + Pod> Guarded<'a, M, [T]> {
         }
     }
 
-    pub unsafe fn bit_cmp(&self, other: &[T]) -> Ordering {
+    pub unsafe fn mem_cmp(&self, other: &[T]) -> Ordering {
         unsafe { M::bit_cmp_slice(&self.p, other) }
     }
 

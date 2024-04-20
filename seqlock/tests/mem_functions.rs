@@ -14,7 +14,7 @@ fn test_memcmp() {
             let std = (*a).cmp(b.as_bytes());
             let optimistic = unsafe {
                 Guarded::<Optimistic, [u8]>::wrap_unchecked(&mut *a as *mut [u8])
-                    .bit_cmp(b.as_bytes())
+                    .mem_cmp(b.as_bytes())
             };
             assert_eq!(std, optimistic);
         }
