@@ -48,9 +48,11 @@ pub fn derive_seqlock_safe(input: TokenStream1) -> TokenStream1 {
                 let ty = &field.ty;
                 let vis = &field.vis;
                 quote!(
-                    #vis fn #name<'b>(&'b mut self)-><#ty as #seqlock::SeqLockSafe>::Wrapped<#seqlock::SeqLockGuarded<'b,SeqLockModeParam,#ty>>{
+                    #vis fn #name<'b>(&'b mut self)-><#ty as #seqlock::SeqLockWrappable>::Wrapper<#seqlock::Guarded<'b,SeqLockModeParam,#ty>>{
                         unsafe{
-                            #seqlock::wrap_unchecked::<SeqLockModeParam,#ty>(core::ptr::addr_of_mut!((*self.0.as_ptr()).#name))
+                            #seqlock::Guarded::<SeqLockModeParam,#ty>::wrap_unchecked(
+                                core::ptr::addr_of_mut!((*self.0.as_ptr()).#name)
+                            )
                         }
                     }
                 )
@@ -64,25 +66,25 @@ pub fn derive_seqlock_safe(input: TokenStream1) -> TokenStream1 {
     let (impl_generics, impl_type_generics, impl_generics_where) = input.generics.split_for_impl();
 
     let out = quote! {
-        unsafe impl #impl_generics #seqlock::SeqLockSafe for #name #impl_type_generics #impl_generics_where{
-            type Wrapped<WrappedParam> = #wrapper_path<WrappedParam>;
+        impl #impl_generics #seqlock::SeqLockWrappable for #name #impl_type_generics #impl_generics_where{
+            type Wrapper<WrappedParam> = #wrapper_path<WrappedParam>;
 
-            fn wrap<WrappedParam>(x: WrappedParam) -> Self::Wrapped<WrappedParam> {
+            fn wrap<WrappedParam>(x: WrappedParam) -> Self::Wrapper<WrappedParam> {
                 #wrapper_path(x)
             }
 
-            fn unwrap_ref<WrappedParam>(x: &Self::Wrapped<WrappedParam>) -> &WrappedParam {
+            fn get<WrappedParam>(x: &Self::Wrapper<WrappedParam>) -> &WrappedParam {
                 &x.0
             }
 
-            fn unwrap_mut<WrappedParam>(x: &mut Self::Wrapped<WrappedParam>) -> &mut WrappedParam {
+            fn get_mut<WrappedParam>(x: &mut Self::Wrapper<WrappedParam>) -> &mut WrappedParam {
                 &mut x.0
             }
         }
 
         impl<'wrapped_guard,SeqLockModeParam:#seqlock::SeqLockMode,#generic_params>
         #wrapper_path<
-            #seqlock::SeqLockGuarded<'wrapped_guard,SeqLockModeParam,#name #impl_type_generics>
+            #seqlock::Guarded<'wrapped_guard,SeqLockModeParam,#name #impl_type_generics>
         >
         #impl_generics_where{
                     #(#accessors)*

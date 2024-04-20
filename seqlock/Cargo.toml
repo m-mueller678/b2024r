@@ -3,14 +3,6 @@ name = "seqlock"
 version = "0.1.0"
 edition = "2021"
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
-
-[features]
-default = ["asm_read"]
-atomic_byte=[]
-asm_read=[]
-
 [dependencies]
-as_base = "0.1.3"
-bytemuck = { version = "1.15.0",features = ["min_const_generics"] }
+bytemuck = {version = "1.15.0",features = ["min_const_generics"]}
 seqlock_macros = {path = "../seqlock_macros"}

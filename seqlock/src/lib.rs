@@ -1,202 +1,166 @@
-#![feature(slice_ptr_len)]
-#![feature(slice_ptr_get)]
-#![feature(never_type)]
-#![allow(clippy::missing_safety_doc)]
+extern crate core;
 
+use bytemuck::Pod;
 use std::cmp::Ordering;
-use std::collections::Bound;
-use std::ops::RangeBounds;
+use std::marker::PhantomData;
+use std::mem::{transmute, MaybeUninit};
 use std::ptr::slice_from_raw_parts_mut;
 
-#[cfg(all(feature = "asm_read", target_arch = "x86_64", not(miri)))]
-#[path = "asm_x86_impl.rs"]
-mod access_impl;
-#[cfg(any(miri, feature = "atomic_byte"))]
+mod wrappable;
+
+pub use access_impl::optimistic_release;
+pub use seqlock_macros::SeqlockAccessors;
+pub use wrappable::SeqLockWrappable;
+
 #[path = "atomic_byte_impl.rs"]
 mod access_impl;
 
-mod lock;
+#[allow(private_bounds)]
+pub trait SeqLockMode: SeqLockModeImpl {}
 
-pub use lock::{Guard, SeqLock};
+#[allow(private_bounds)]
+pub trait SeqLockModeExclusive: SeqLockMode + SeqLockModeExclusiveImpl {}
 
-use crate::lock::LockState;
-pub use access_impl::{optimistic_release, SeqLockPrimitive};
-pub use seqlock_macros::SeqlockAccessors;
+pub struct Optimistic;
 
 pub struct Exclusive;
 
-pub struct OptimisticLockError(());
+pub struct Shared;
 
-pub struct Optimistic;
-pub unsafe trait SeqLockModeBase {
-    type GuardData;
-    type ReleaseError;
-    type ReleaseData;
-
-    fn release_error() -> Self::ReleaseError;
-    fn acquire(s: &LockState) -> Self::GuardData;
-    fn release(s: &LockState, d: Self::GuardData) -> Result<Self::ReleaseData, Self::ReleaseError>;
-}
-
-#[allow(private_bounds)]
-pub unsafe trait SeqLockModeImpl {
-    type Access<'a, T: 'a + ?Sized>;
-
-    unsafe fn new_unchecked<'a, T: 'a + ?Sized>(p: *mut T) -> Self::Access<'a, T>;
-    fn as_ptr<'a, T: 'a + ?Sized>(a: &Self::Access<'a, T>) -> *mut T;
-
-    unsafe fn load_primitive<P: SeqLockPrimitive>(p: *const P) -> P;
-    unsafe fn cmp_bytes(this: *const [u8], other: &[u8]) -> Ordering;
-}
-
-#[allow(private_bounds)]
-pub trait SeqLockMode: SeqLockModeBase + SeqLockModeImpl {}
-impl SeqLockMode for Exclusive {}
 impl SeqLockMode for Optimistic {}
 
-pub unsafe fn wrap_unchecked<'a, M: SeqLockMode, T: SeqLockSafe + 'a + ?Sized>(
-    p: *mut T,
-) -> T::Wrapped<SeqLockGuarded<'a, M, T>> {
-    T::wrap(SeqLockGuarded(M::new_unchecked(p)))
+impl SeqLockMode for Exclusive {}
+
+impl SeqLockModeExclusive for Exclusive {}
+
+impl SeqLockMode for Shared {}
+
+impl<'a, T> Copy for Guarded<'a, Optimistic, T> {}
+
+impl<'a, T> Copy for Guarded<'a, Shared, T> {}
+
+impl<'a, T, M: SeqLockMode> Clone for Guarded<'a, M, T>
+where
+    Self: Copy,
+{
+    fn clone(&self) -> Self {
+        *self
+    }
 }
 
-pub struct SeqLockGuarded<'a, M: SeqLockMode, T: 'a + ?Sized>(M::Access<'a, T>);
+unsafe trait SeqLockModeImpl {
+    type Pointer<'a, T: ?Sized>;
+    unsafe fn from_pointer<'a, T: ?Sized>(x: *mut T) -> Self::Pointer<'a, T>;
+    fn as_ptr<T: ?Sized>(x: &Self::Pointer<'_, T>) -> *mut T;
+    unsafe fn load<T: Pod>(p: &Self::Pointer<'_, T>) -> T;
+    unsafe fn load_slice<T: Pod>(p: &Self::Pointer<'_, [T]>, dst: &mut [MaybeUninit<T>]);
+    unsafe fn bit_cmp_slice<T: Pod>(p: &Self::Pointer<'_, [T]>, other: &[T]) -> Ordering;
+}
 
-impl<'a, M: SeqLockMode, T: 'a + ?Sized> SeqLockGuarded<'a, M, T> {
+impl<'a, M: SeqLockMode, T: SeqLockWrappable + ?Sized> Guarded<'a, M, T> {
+    pub unsafe fn map_ptr_mut<'b, U: SeqLockWrappable>(
+        &'b mut self,
+        f: impl FnOnce(*mut T) -> *mut U,
+    ) -> U::Wrapper<Guarded<'b, M, U>> {
+        Guarded::wrap_unchecked(f(M::as_ptr(&self.p)))
+    }
+
+    pub unsafe fn wrap_unchecked(p: *mut T) -> T::Wrapper<Guarded<'a, M, T>> {
+        T::wrap(Guarded {
+            p: M::from_pointer(p),
+            _p: PhantomData,
+        })
+    }
+
     pub fn as_ptr(&self) -> *mut T {
-        M::as_ptr(&self.0)
+        M::as_ptr(&self.p)
+    }
+
+    pub fn load(&self) -> T
+    where
+        T: Pod,
+    {
+        unsafe { M::load(&self.p) }
+    }
+
+    pub unsafe fn store(&mut self, x: T)
+    where
+        T: Pod,
+        M: SeqLockModeExclusive,
+    {
+        unsafe { M::store(&mut self.p, x) }
     }
 }
 
-impl<'a, T: 'a + ?Sized + SeqLockSafe> SeqLockGuarded<'a, Exclusive, T> {
-    pub fn optimistic<'b>(&self) -> T::Wrapped<SeqLockGuarded<'b, Optimistic, T>> {
-        unsafe { wrap_unchecked(self.as_ptr()) }
-    }
-}
-
-pub unsafe trait SeqLockSafe {
-    type Wrapped<T>;
-    fn wrap<T>(x: T) -> Self::Wrapped<T>;
-    fn unwrap_ref<T>(x: &Self::Wrapped<T>) -> &T;
-    fn unwrap_mut<T>(x: &mut Self::Wrapped<T>) -> &mut T;
-}
-
-#[macro_export]
-macro_rules! seqlock_wrapper {
-    ($v:vis $T:ident) => {
-        $v struct $T<T>($v T);
-
-        impl<T> core::ops::Deref for $T<T>{
-            type Target = T;
-            fn deref(&self) -> &Self::Target {
-                &self.0
-            }
-        }
-        impl<T> core::ops::DerefMut for $T<T>{
-            fn deref_mut(&mut self) -> &mut Self::Target {
-                &mut self.0
-            }
-        }
-    };
-}
-
-macro_rules! seqlock_safe_no_wrap {
-    ($($T:ty),*) => {
-        $(unsafe impl SeqLockSafe for $T{
-            type Wrapped<T> = T;
-            fn wrap<T>(x: T) -> Self::Wrapped<T> { x }
-            fn unwrap_ref<T>(x: &Self::Wrapped<T>) -> &T { x }
-            fn unwrap_mut<T>(x: &mut Self::Wrapped<T>) -> &mut T { x }
-        })*
-    };
-}
-
-unsafe impl<X> SeqLockSafe for [X] {
-    type Wrapped<T> = T;
-    fn wrap<T>(x: T) -> Self::Wrapped<T> {
-        x
+impl<'a, M: SeqLockMode, T: SeqLockWrappable + Pod> Guarded<'a, M, [T]> {
+    pub fn load_slice_uninit(&self, dst: &mut [MaybeUninit<T>]) {
+        unsafe { M::load_slice(&self.p, dst) }
     }
 
-    fn unwrap_ref<T>(x: &Self::Wrapped<T>) -> &T {
-        x
-    }
-    fn unwrap_mut<T>(x: &mut Self::Wrapped<T>) -> &mut T {
-        x
-    }
-}
-
-seqlock_safe_no_wrap!(u8, u16, u32, u64, i8, i16, i32, i64);
-
-impl<'a, T: SeqLockSafe, M: SeqLockMode> SeqLockGuarded<'a, M, [T]> {
-    #[inline]
-    pub fn slice<'b>(&'b mut self, i: impl RangeBounds<usize>) -> SeqLockGuarded<'b, M, [T]> {
-        let array = self.as_ptr();
-        let mut ptr = array.as_mut_ptr();
-        let mut len = array.len();
-        match i.end_bound() {
-            Bound::Included(&x) => {
-                assert!(x < len);
-                len = x + 1;
-            }
-            Bound::Excluded(&x) => {
-                assert!(x <= len);
-                len = x;
-            }
-            Bound::Unbounded => {}
-        }
+    pub fn load_slice<'dst>(&self, dst: &'dst mut [T]) {
         unsafe {
-            match i.start_bound() {
-                Bound::Included(&x) => {
-                    assert!(x <= len);
-                    ptr = ptr.add(x);
-                    len -= x;
-                }
-                Bound::Excluded(&x) => {
-                    assert!(x < len);
-                    ptr = ptr.add(x + 1);
-                    len -= x + 1;
-                }
-                Bound::Unbounded => {}
-            }
-            SeqLockGuarded(M::new_unchecked(slice_from_raw_parts_mut(ptr, len)))
+            M::load_slice(
+                &self.p,
+                transmute::<&'dst mut [T], &'dst mut [MaybeUninit<T>]>(dst),
+            )
         }
     }
 
-    pub fn index<'b>(&mut self, i: usize) -> T::Wrapped<SeqLockGuarded<'b, M, T>> {
-        assert!(i < self.as_ptr().len());
-        unsafe { wrap_unchecked(self.as_ptr().as_mut_ptr().add(i)) }
+    pub unsafe fn bit_cmp(&self, other: &[T]) -> Ordering {
+        unsafe { M::bit_cmp_slice(&self.p, other) }
     }
 
-    pub fn len(&self) -> usize {
-        self.as_ptr().len()
+    pub fn store_slice(&mut self, x: &[T])
+    where
+        M: SeqLockModeExclusive,
+    {
+        unsafe { M::store_slice::<T>(&mut self.p, x) }
+    }
+    pub fn move_within<const MOVE_UP: bool>(&mut self, distance: usize)
+    where
+        M: SeqLockModeExclusive,
+    {
+        assert!(distance <= M::as_ptr(&self.p).len());
+        unsafe {
+            M::move_within_slice::<T, MOVE_UP>(&mut self.p, distance);
+        }
+    }
+
+    pub fn index(&mut self, i: usize) -> T::Wrapper<Guarded<'a, M, T>> {
+        let ptr: *mut [T] = self.as_ptr();
+        assert!(i < ptr.len());
+        unsafe { Guarded::wrap_unchecked((ptr as *mut T).add(i)) }
+    }
+
+    pub fn slice(&mut self, offset: usize, len: usize) -> Self {
+        let ptr: *mut [T] = self.as_ptr();
+        assert!(offset.checked_add(len).unwrap() <= ptr.len());
+        unsafe {
+            Guarded::wrap_unchecked(slice_from_raw_parts_mut((ptr as *mut T).add(offset), len))
+        }
+    }
+
+    pub fn to_array<const LEN: usize>(self) -> Guarded<'a, M, [T; LEN]> {
+        unsafe {
+            let ptr: *mut [T] = self.as_ptr();
+            assert_eq!(ptr.len(), LEN);
+            Guarded::wrap_unchecked(ptr as *mut [T; LEN])
+        }
     }
 }
 
-unsafe impl<E, const N: usize> SeqLockSafe for [E; N] {
-    type Wrapped<T> = T;
-
-    fn wrap<T>(x: T) -> Self::Wrapped<T> {
-        x
-    }
-
-    fn unwrap_ref<T>(x: &Self::Wrapped<T>) -> &T {
-        x
-    }
-    fn unwrap_mut<T>(x: &mut Self::Wrapped<T>) -> &mut T {
-        x
-    }
+unsafe trait SeqLockModeExclusiveImpl: SeqLockModeImpl {
+    unsafe fn store<T>(p: &mut Self::Pointer<'_, T>, x: T);
+    unsafe fn store_slice<T>(p: &mut Self::Pointer<'_, [T]>, x: &[T]);
+    unsafe fn move_within_slice<T, const MOVE_UP: bool>(
+        p: &mut Self::Pointer<'_, [T]>,
+        distance: usize,
+    );
 }
 
-impl<'a, M: SeqLockMode, T: SeqLockPrimitive> SeqLockGuarded<'a, M, T> {
-    pub fn load(&self) -> T {
-        unsafe { M::load_primitive(self.as_ptr()) }
-    }
+pub struct Guarded<'a, M: SeqLockMode, T: ?Sized> {
+    p: M::Pointer<'a, T>,
+    _p: PhantomData<&'a T>,
 }
 
-impl<'a, M: SeqLockMode> SeqLockGuarded<'a, M, [u8]> {
-    pub fn cmp_bytes(&self, other: &[u8]) -> Ordering {
-        unsafe { M::cmp_bytes(self.as_ptr(), other) }
-    }
-}
-
-seqlock_safe_no_wrap!(());
+pub struct OptimisticLockError(());

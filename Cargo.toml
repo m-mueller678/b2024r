@@ -1,6 +1,4 @@
 [workspace]
 resolver = "2"
 
-members = [ "btree",
-    "seqlock", "seqlock2", "seqlock_macros",
-]
+members = [ "seqlock", "seqlock_macros"]

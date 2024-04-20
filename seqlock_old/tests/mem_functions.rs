@@ -1,6 +1,5 @@
-use seqlock::{
-    seqlock_wrapper, Exclusive, Guarded, Optimistic, SeqLockWrappable, SeqlockAccessors,
-};
+use seqlock::{seqlock_wrapper, wrap_unchecked, Exclusive, Optimistic, SeqLockSafe};
+use seqlock_macros::SeqlockAccessors;
 use std::cell::UnsafeCell;
 use std::ops::Deref;
 use std::ptr::slice_from_raw_parts_mut;
@@ -13,8 +12,7 @@ fn test_memcmp() {
         for b in &samples {
             let std = (*a).cmp(b.as_bytes());
             let optimistic = unsafe {
-                Guarded::<Optimistic, [u8]>::wrap_unchecked(&mut *a as *mut [u8])
-                    .bit_cmp(b.as_bytes())
+                wrap_unchecked::<Optimistic, [u8]>(&mut *a as *mut [u8]).cmp_bytes(b.as_bytes())
             };
             assert_eq!(std, optimistic);
         }
@@ -28,10 +26,10 @@ fn test_memcpy() {
         for a in &samples {
             let mut a = a.as_bytes().to_vec();
             let mut dst = vec![0u8; a.len()];
-            Guarded::<Optimistic, [u8]>::wrap_unchecked(&mut *a as *mut [u8]).load_slice(&mut dst);
+            wrap_unchecked::<Optimistic, [u8]>(&mut *a as *mut [u8]).load_slice(&mut dst);
             assert_eq!(&dst, &a);
         }
-        Guarded::<Optimistic, [u8]>::wrap_unchecked(slice_from_raw_parts_mut(
+        wrap_unchecked::<Optimistic, [u8]>(slice_from_raw_parts_mut(
             core::ptr::NonNull::dangling().as_ptr(),
             0,
         ))
@@ -44,7 +42,7 @@ fn test_load() {
     unsafe {
         let v = 0x12345678u32;
         let a = UnsafeCell::new(v);
-        let g = Guarded::<Optimistic, u32>::wrap_unchecked(a.get());
+        let g = wrap_unchecked::<Optimistic, u32>(a.get());
         let l = g.load();
         assert_eq!(l, v);
     }
@@ -61,7 +59,7 @@ struct MyStruct {
 
 #[derive(SeqlockAccessors)]
 #[seq_lock_wrapper(MyWrapper)]
-struct MyStructGeneric<T: Deref + SeqLockWrappable, U>
+struct MyStructGeneric<T: Deref + SeqLockSafe, U>
 where
     T::Target: Deref,
 {
@@ -76,7 +74,7 @@ where
 fn struct_access() {
     unsafe {
         let x = &mut MyStruct { a: 1, b: 2 };
-        let mut x = Guarded::<Exclusive, MyStruct>::wrap_unchecked(x);
+        let mut x = wrap_unchecked::<Exclusive, MyStruct>(x);
         assert_eq!(x.a().load(), 1);
         assert_eq!(x.b().load(), 2);
     }

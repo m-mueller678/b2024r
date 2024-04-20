@@ -1,7 +1,14 @@
-use crate::{Exclusive, Optimistic, OptimisticLockError, SeqLockGuarded, SeqLockModeImpl};
-use core::mem::{size_of, MaybeUninit};
+#![allow(unused_variables)]
+use crate::{
+    Exclusive, Optimistic, OptimisticLockError, SeqLockModeExclusiveImpl, SeqLockModeImpl, Shared,
+};
+use bytemuck::Pod;
 use std::cmp::Ordering;
-use std::sync::atomic::{compiler_fence, AtomicU64, AtomicU8, Ordering::*};
+use std::mem::size_of;
+use std::mem::{size_of_val, MaybeUninit};
+use std::slice::from_raw_parts;
+use std::sync::atomic::Ordering::{Acquire, Relaxed};
+use std::sync::atomic::{compiler_fence, AtomicU64, AtomicU8};
 
 pub fn optimistic_release(lock: &AtomicU64, expected: u64) -> Result<(), OptimisticLockError> {
     compiler_fence(Acquire);
@@ -12,86 +19,59 @@ pub fn optimistic_release(lock: &AtomicU64, expected: u64) -> Result<(), Optimis
     }
 }
 
-unsafe impl SeqLockModeImpl for Optimistic {
-    type Access<'a, T: 'a + ?Sized> = *const T;
-
-    unsafe fn new_unchecked<'a, T: 'a + ?Sized>(p: *mut T) -> Self::Access<'a, T> {
-        p
-    }
-
-    fn as_ptr<'a, T: 'a + ?Sized>(a: &Self::Access<'a, T>) -> *mut T {
-        *a as *mut T
-    }
-
-    unsafe fn load_primitive<P: crate::SeqLockPrimitive>(p: *const P) -> P {
-        load_primitive(p)
-    }
-}
-
-unsafe impl SeqLockModeImpl for Exclusive {
-    type Access<'a, T: 'a + ?Sized> = *const T;
-
-    unsafe fn new_unchecked<'a, T: 'a + ?Sized>(p: *mut T) -> Self::Access<'a, T> {
-        p
-    }
-
-    fn as_ptr<'a, T: 'a + ?Sized>(a: &Self::Access<'a, T>) -> *mut T {
-        *a as *mut T
-    }
-
-    unsafe fn load_primitive<P: crate::SeqLockPrimitive>(p: *const P) -> P {
-        load_primitive(p)
-    }
-}
-
-unsafe fn load_primitive<P: crate::SeqLockPrimitive>(p: *const P) -> P {
-    unsafe {
-        let mut ret = MaybeUninit::<P>::uninit();
-        for i in 0..size_of::<P>() {
-            (ret.as_mut_ptr() as *mut u8)
-                .add(i)
-                .write((*(p as *const AtomicU8).add(i)).load(Relaxed))
+unsafe fn atomic_memcpy<const FORWARD: bool>(src: *const u8, dst: *mut u8, len: usize) {
+    let src = from_raw_parts(src as *const AtomicU8, len);
+    let dst = from_raw_parts(dst as *const AtomicU8, len);
+    if FORWARD {
+        for i in 0..len {
+            dst[i].store(src[i].load(Relaxed), Relaxed)
         }
-        ret.assume_init()
+    } else {
+        for i in (0..len).rev() {
+            dst[i].store(src[i].load(Relaxed), Relaxed)
+        }
     }
 }
 
-macro_rules! seqlock_primitive {
-    ($(($T:ty) reg=$reg:ident reg_f=$reg_f:literal),*) => {
-        $(
+trait CommonImpl {}
+impl CommonImpl for Exclusive {}
+impl CommonImpl for Optimistic {}
+impl CommonImpl for Shared {}
 
-        impl SeqLockGuarded<'_,Exclusive,$T>{
-            pub fn store(&mut self,v:$T){
-                unsafe{
-                    for (i,x) in v.to_ne_bytes().iter().enumerate(){
-                    (*(self.0 as *const AtomicU8).add(i)).store(*x,Relaxed);
-                }
-                }
-            }
-        }
+unsafe impl<M: CommonImpl> SeqLockModeImpl for M {
+    type Pointer<'a, T: ?Sized> = *mut T;
+    unsafe fn from_pointer<'a, T: ?Sized>(x: *mut T) -> Self::Pointer<'a, T> {
+        x
+    }
 
-        impl SeqLockPrimitive for $T{}
-        )*
-    };
-}
+    fn as_ptr<T: ?Sized>(x: &Self::Pointer<'_, T>) -> *mut T {
+        *x
+    }
 
-seqlock_primitive!(
-    (u8) reg=reg_byte reg_f="",
-    (u16) reg=reg reg_f=":x",
-    (u32) reg=reg reg_f=":e",
-    (u64) reg=reg reg_f=":r",
-    (i8) reg=reg_byte reg_f="",
-    (i16) reg=reg reg_f=":x",
-    (i32) reg=reg reg_f=":e",
-    (i64) reg=reg reg_f=":r"
-);
+    unsafe fn load<T: Pod>(p: &Self::Pointer<'_, T>) -> T {
+        let mut buffer = MaybeUninit::<T>::uninit();
+        atomic_memcpy::<true>(
+            *p as *const u8,
+            buffer.as_mut_ptr() as *mut u8,
+            size_of::<T>(),
+        );
+        buffer.assume_init()
+    }
 
-impl<'a> SeqLockGuarded<'a, Optimistic, [u8]> {
-    pub fn cmp(&self, other: &[u8]) -> Ordering {
-        let mut this = (0..self.0.len())
-            .map(|i| unsafe { (*(self.0 as *const AtomicU8).add(i)).load(Relaxed) });
-        let mut other = other.iter().copied();
-        for _ in 0..self.0.len() {
+    unsafe fn load_slice<T: Pod>(p: &Self::Pointer<'_, [T]>, dst: &mut [MaybeUninit<T>]) {
+        atomic_memcpy::<true>(
+            *p as *const u8,
+            dst.as_mut_ptr() as *mut u8,
+            size_of_val(dst),
+        )
+    }
+
+    unsafe fn bit_cmp_slice<T: Pod>(p: &Self::Pointer<'_, [T]>, other: &[T]) -> Ordering {
+        let other_bytes = bytemuck::cast_slice::<T, u8>(other);
+        let mut this = (0..other_bytes.len())
+            .map(|i| unsafe { (*(*p as *mut AtomicU8).add(i)).load(Relaxed) });
+        let mut other = other_bytes.iter().copied();
+        for _ in 0..other_bytes.len() {
             let c = this.next().cmp(&other.next());
             if !c.is_eq() {
                 return c;
@@ -99,20 +79,32 @@ impl<'a> SeqLockGuarded<'a, Optimistic, [u8]> {
         }
         this.next().cmp(&other.next())
     }
+}
 
-    pub fn load(&self, dest: &mut [u8]) {
-        for i in 0..self.0.len() {
-            dest[i] = unsafe { (*(self.0 as *const AtomicU8).add(i)).load(Relaxed) };
+unsafe impl SeqLockModeExclusiveImpl for Exclusive {
+    unsafe fn store<T>(p: &mut Self::Pointer<'_, T>, x: T) {
+        atomic_memcpy::<true>(&x as *const T as *const u8, *p as *mut u8, size_of::<T>())
+    }
+
+    unsafe fn store_slice<T>(p: &mut Self::Pointer<'_, [T]>, x: &[T]) {
+        atomic_memcpy::<true>(
+            x.as_ptr() as *const u8,
+            *p as *mut T as *mut u8,
+            size_of_val(x),
+        );
+    }
+
+    unsafe fn move_within_slice<T, const MOVE_UP: bool>(
+        p: &mut Self::Pointer<'_, [T]>,
+        distance: usize,
+    ) {
+        let len = (p.len() - distance) * size_of::<T>();
+        let offset = distance * size_of::<T>();
+        let p = *p as *mut T as *mut u8;
+        if MOVE_UP {
+            atomic_memcpy::<false>(p, p.add(offset), len);
+        } else {
+            atomic_memcpy::<true>(p.add(offset), p, len);
         }
     }
 }
-
-impl<'a> SeqLockGuarded<'a, Exclusive, [u8]> {
-    pub fn store(&mut self, src: &[u8]) {
-        for i in 0..self.0.len() {
-            unsafe { (*(self.0 as *const AtomicU8).add(i)).store(src[i], Relaxed) };
-        }
-    }
-}
-
-pub trait SeqLockPrimitive: Copy {}
