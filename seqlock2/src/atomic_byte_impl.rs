@@ -20,11 +20,11 @@ pub fn optimistic_release(lock: &AtomicU64, expected: u64) -> Result<(), Optimis
 unsafe impl SeqLockModeImpl for Exclusive {
     type Pointer<'a, T: ?Sized> = ();
 
-    unsafe fn from_pointer<'a, T>(x: *mut T) -> Self::Pointer<'a, T> {
+    unsafe fn from_pointer<'a, T:?Sized>(x: *mut T) -> Self::Pointer<'a, T> {
         todo!()
     }
 
-    fn as_pointer<T>(x: &Self::Pointer<'_, T>) -> *mut T {
+    fn as_pointer<T:?Sized>(x: &Self::Pointer<'_, T>) -> *mut T {
         todo!()
     }
 
@@ -44,11 +44,11 @@ unsafe impl SeqLockModeImpl for Exclusive {
 unsafe impl SeqLockModeImpl for Shared {
     type Pointer<'a, T: ?Sized> = ();
 
-    unsafe fn from_pointer<'a, T>(x: *mut T) -> Self::Pointer<'a, T> {
+    unsafe fn from_pointer<'a, T:?Sized>(x: *mut T) -> Self::Pointer<'a, T> {
         todo!()
     }
 
-    fn as_pointer<T>(x: &Self::Pointer<'_, T>) -> *mut T {
+    fn as_pointer<T:?Sized>(x: &Self::Pointer<'_, T>) -> *mut T {
         todo!()
     }
 
@@ -68,11 +68,11 @@ unsafe impl SeqLockModeImpl for Shared {
 unsafe impl SeqLockModeImpl for Optimistic {
     type Pointer<'a, T: ?Sized> = ();
 
-    unsafe fn from_pointer<'a, T>(x: *mut T) -> Self::Pointer<'a, T> {
+    unsafe fn from_pointer<'a, T:?Sized>(x: *mut T) -> Self::Pointer<'a, T> {
         todo!()
     }
 
-    fn as_pointer<T>(x: &Self::Pointer<'_, T>) -> *mut T {
+    fn as_pointer<T:?Sized>(x: &Self::Pointer<'_, T>) -> *mut T {
         todo!()
     }
 
@@ -94,7 +94,7 @@ unsafe impl SeqLockModeExclusiveImpl for Exclusive {
         todo!()
     }
 
-    unsafe fn store_slice<T>(p: &mut Self::Pointer<'_, T>, x: T) {
+    unsafe fn store_slice<T>(p: &mut Self::Pointer<'_, T>, x: &[T]) {
         todo!()
     }
 

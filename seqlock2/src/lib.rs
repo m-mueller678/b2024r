@@ -37,8 +37,8 @@ where
 
 unsafe trait SeqLockModeImpl {
     type Pointer<'a, T: ?Sized>;
-    unsafe fn from_pointer<'a, T>(x: *mut T) -> Self::Pointer<'a, T>;
-    fn as_pointer<T>(x: &Self::Pointer<'_, T>) -> *mut T;
+    unsafe fn from_pointer<'a, T:?Sized>(x: *mut T) -> Self::Pointer<'a, T>;
+    fn as_pointer<T:?Sized>(x: &Self::Pointer<'_, T>) -> *mut T;
     unsafe fn load<T: Pod>(p: &Self::Pointer<'_, T>) -> T;
     unsafe fn load_slice<T: Pod>(p: &Self::Pointer<'_, [T]>, dst: &mut [MaybeUninit<T>]);
     unsafe fn bit_cmp_slice<T: Pod>(p: &Self::Pointer<'_, [T]>, other: &[T]) -> Ordering;
@@ -66,21 +66,34 @@ impl<'a, M: SeqLockMode, T: SeqLockSafe> Guarded<'a, M, T> {
     pub fn load(&self) -> T {
         unsafe { M::load(&self.p) }
     }
+
+    pub unsafe fn store(&mut self, x: T) where M:SeqLockModeExclusive{
+        unsafe{M::store(&mut self.p,x)}
+    }
+
 }
 
-impl<'a, M: SeqLockMode, T: SeqLockSafe + Sized> crate::Guarded<'a, M, [T]> {
-    pub fn load_slice_uninit(&self, dst: &mut [MaybeUninit<T>]) {
+impl<'a, M: SeqLockMode, T: SeqLockSafe + Sized> Guarded<'a, M, [T]> {
+    pub fn load_uninit(&self, dst: &mut [MaybeUninit<T>]) {
         unsafe { M::load_slice(&self.p, dst) }
     }
 
-    pub unsafe fn bit_cmp_slice(&self, other: &[T]) -> Ordering {
+    pub unsafe fn bit_cmp(&self, other: &[T]) -> Ordering {
         unsafe { M::bit_cmp_slice(&self.p, other) }
+    }
+
+    pub fn store(&mut self, x: &[T]) where M:SeqLockModeExclusive{
+        unsafe{M::store_slice(&mut self.p,x)}
+    }
+    pub fn move_within<const MOVE_UP: bool> (&mut self,distance: usize,) where M:SeqLockModeExclusive{
+        assert!(distance<=M::as_pointer(&self.p).len());
+        unsafe{M::move_within_slice(&mut self.p,distance);}
     }
 }
 
 unsafe trait SeqLockModeExclusiveImpl: SeqLockModeImpl {
     unsafe fn store<T>(p: &mut Self::Pointer<'_, T>, x: T);
-    unsafe fn store_slice<T>(p: &mut Self::Pointer<'_, T>, x: T);
+    unsafe fn store_slice<T>(p: &mut Self::Pointer<'_, T>, x: &[T]);
     unsafe fn move_within_slice<T, const MOVE_UP: bool>(
         p: &mut Self::Pointer<'_, [T]>,
         distance: usize,
