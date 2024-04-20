@@ -132,7 +132,7 @@ impl<'a, M: SeqLockMode, T: SeqLockWrappable + ?Sized> Guarded<'a, M, T> {
         unsafe { Guarded::wrap_unchecked(self.as_ptr() as *mut U) }
     }
 
-    pub unsafe fn store(&mut self, x: T)
+    pub fn store(&mut self, x: T)
     where
         T: Pod,
         M: SeqLockModeExclusive,
@@ -163,6 +163,10 @@ impl<'a, M: SeqLockMode, T: SeqLockWrappable + Pod> Guarded<'a, M, [T]> {
         }
     }
 
+    pub fn len(&self)->usize{
+        self.as_ptr().len()
+    }
+
     pub fn cast_slice<U: Pod + SeqLockWrappable>(&mut self) -> Guarded<'_, M, [U]>
     where
         T: Pod,
@@ -175,7 +179,7 @@ impl<'a, M: SeqLockMode, T: SeqLockWrappable + Pod> Guarded<'a, M, [T]> {
         unsafe { Guarded::wrap_unchecked(slice_from_raw_parts_mut(ptr, byte_len / size_of::<U>())) }
     }
 
-    pub unsafe fn mem_cmp(&self, other: &[T]) -> Ordering {
+    pub fn mem_cmp(&self, other: &[T]) -> Ordering {
         unsafe { M::bit_cmp_slice(&self.p, other) }
     }
 

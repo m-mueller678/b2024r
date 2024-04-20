@@ -8,8 +8,8 @@ use seqlock::{
 };
 use std::cmp::Ordering;
 use std::marker::PhantomData;
-use std::mem::{offset_of, size_of, MaybeUninit};
-use std::ptr::slice_from_raw_parts_mut;
+use std::mem::{offset_of, size_of, MaybeUninit, align_of};
+use std::ptr::{addr_of_mut, slice_from_raw_parts_mut};
 use std::slice::from_raw_parts_mut;
 
 pub const PAGE_SIZE: usize = 1 << 12;
@@ -60,7 +60,7 @@ pub trait BasicNodeVariant: 'static + Copy + Zeroable {
     type Upper: SeqLockWrappable + Pod + Copy + Zeroable;
     const IS_LEAF: bool;
     const RECORD_TO_KEY_OFFSET: usize = if Self::IS_LEAF { 4 } else { 8 };
-    const HEAD_START: usize = size_of::<Self::Upper>().div_ceil(4);
+    const UPPER_HEADS: usize = size_of::<Self::Upper>().div_ceil(4);
 }
 
 #[derive(Copy, Clone, Zeroable, Pod)]
@@ -111,17 +111,16 @@ fn key_head(k: &[u8]) -> u32 {
 impl<'a, V: BasicNodeVariant> Wrapper<Guarded<'a, Exclusive, BasicNode<V>>> {
     pub fn init(&mut self, lf: &[u8], uf: &[u8], upper: V::Upper) {
         assert_eq!(size_of::<BasicNode<V>>(), PAGE_SIZE - PAGE_HEAD_SIZE);
-        self.count().store(0);
-        self.prefix_len().store(common_prefix(lf, uf) as u16);
-        self.lower_fence_len().store(lf.len() as u16);
-        self.upper_fence_len().store(uf.len() as u16);
-        self.heap_bump()
+        self.count_mut().store(0);
+        self.prefix_len_mut().store(common_prefix(lf, uf) as u16);
+        self.lower_fence_len_mut().store(lf.len() as u16);
+        self.upper_fence_len_mut().store(uf.len() as u16);
+        self.heap_bump_mut()
             .store((size_of::<BasicNode<V>>() - lf.len() - uf.len()) as u16);
-        self.heap_freed().store(0);
-        V::Upper::unwrap_mut(&mut self.upper()).store(upper);
+        self.heap_freed_mut().store(0);
+        V::Upper::get_mut(&mut self.upper()).store(upper);
     }
-}
-impl<'a, V: BasicNodeVariant> Wrapper<Guarded<'a, Exclusive, BasicNode<V>>> {
+
     fn compactify(&mut self) {
         unsafe {
             let mut buffer = &mut [0u8; size_of::<Self>()];
@@ -154,8 +153,8 @@ impl<'a, V: BasicNodeVariant> Wrapper<Guarded<'a, Exclusive, BasicNode<V>>> {
                 self.heap_bump().load() + self.heap_freed().load(),
                 dst_offset as u16
             );
-            self.heap_freed().store(0);
-            self.heap_bump().store(dst_offset as u16);
+            self.heap_freed_mut().store(0);
+            self.heap_bump_mut().store(dst_offset as u16);
         }
     }
 }
@@ -166,13 +165,13 @@ impl<'a> Wrapper<Guarded<'a, Exclusive, BasicNode<BasicNodeLeaf>>> {
             let key = &key[self.prefix_len().load() as usize..];
             let record_len = Self::round_up(key.len() + val.len());
             let count = self.count().load() as usize;
-            let heap_start = Self::DATA_OFFSET + Self::reserved_head_count(count) * 4 + count * 2;
+            let heap_start = Self::HEAD_OFFSET + Self::reserved_head_count(count) * 4 + count * 2;
             let free_space = self.heap_bump().load() as usize - heap_start;
             match insert_pos {
                 Ok(existing) => {
                     if record_len + 4 <= free_space {
                         let record_pos = self.heap_bump().load() as usize - record_len - 4;
-                        self.heap_bump().store(record_pos as u16);
+                        self.heap_bump_mut().store(record_pos as u16);
                         self.slots()
                             .unwrap()
                             .index(existing)
@@ -210,14 +209,20 @@ impl<'a> Wrapper<Guarded<'a, Exclusive, BasicNode<BasicNodeLeaf>>> {
 }
 
 impl<'a, V: BasicNodeVariant, M: SeqLockMode> Wrapper<Guarded<'a, M, BasicNode<V>>> {
+    fn upper(&mut self)-><V::Upper as SeqLockWrappable>::Wrapper<Guarded<'_,M,V::Upper>>{
+        assert_eq!(4 % align_of::<V::Upper>(), 0);
+        unsafe{
+            self.map_ptr(|x|addr_of_mut!((*x).0._data) as *mut V::Upper)
+        }
+    }
     fn round_up(x: usize) -> usize {
         x + (1 - (x & 1))
     }
-    const DATA_OFFSET: usize = offset_of!(BasicNode<V>, _data);
+    const HEAD_OFFSET: usize = offset_of!(BasicNodeData, _data) + V::UPPER_HEADS;
 
     fn heads(&mut self) -> Result<Guarded<'a, M, [u32]>, M::ReleaseError> {
         let count = self.count().load() as usize;
-        self.slice(Self::DATA_OFFSET + 4 * 0, count)
+        self.slice(Self::HEAD_OFFSET + 4 * 0, count)
     }
 
     fn reserved_head_count(count: usize) -> usize {
@@ -226,7 +231,7 @@ impl<'a, V: BasicNodeVariant, M: SeqLockMode> Wrapper<Guarded<'a, M, BasicNode<V
     fn slots(&mut self) -> Result<Guarded<'a, M, [u16]>, M::ReleaseError> {
         let count = self.count().load() as usize;
         let i = Self::reserved_head_count(count);
-        self.slice(Self::DATA_OFFSET + 4 * i, count)
+        self.slice(Self::HEAD_OFFSET + 4 * i, count)
     }
 
     fn key(
@@ -268,7 +273,7 @@ impl<'a, V: BasicNodeVariant, M: SeqLockMode> Wrapper<Guarded<'a, M, BasicNode<V
                 let Ok(key) = self.key(i) else {
                     return Ordering::Equal;
                 };
-                key.cmp_bytes(truncated)
+                key.mem_cmp(truncated)
             });
         Ok(key_position)
     }
