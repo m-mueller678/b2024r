@@ -24,6 +24,7 @@ mod access_impl;
 #[allow(private_bounds)]
 pub trait SeqLockMode: SeqLockModeImpl + 'static {
     type ReleaseError;
+    type SharedDowngrade: SeqLockMode;
     fn release_error() -> Self::ReleaseError;
 }
 
@@ -38,6 +39,7 @@ pub struct Shared;
 
 impl SeqLockMode for Optimistic {
     type ReleaseError = OptimisticLockError;
+    type SharedDowngrade = Optimistic;
 
     fn release_error() -> Self::ReleaseError {
         OptimisticLockError(())
@@ -46,6 +48,7 @@ impl SeqLockMode for Optimistic {
 
 impl SeqLockMode for Exclusive {
     type ReleaseError = !;
+    type SharedDowngrade = Shared;
 
     fn release_error() -> Self::ReleaseError {
         unreachable!()
@@ -56,6 +59,7 @@ impl SeqLockModeExclusive for Exclusive {}
 
 impl SeqLockMode for Shared {
     type ReleaseError = !;
+    type SharedDowngrade = Shared;
 
     fn release_error() -> Self::ReleaseError {
         unreachable!()
@@ -134,6 +138,14 @@ impl<'a, M: SeqLockMode, T: SeqLockWrappable + ?Sized> Guarded<'a, M, T> {
         M: SeqLockModeExclusive,
     {
         unsafe { M::store(&mut self.p, x) }
+    }
+
+    pub fn optimistic(&self) -> T::Wrapper<Guarded<'_, Optimistic, T>> {
+        unsafe { Guarded::wrap_unchecked(self.as_ptr()) }
+    }
+
+    pub fn shared(&self) -> T::Wrapper<Guarded<'_, M::SharedDowngrade, T>> {
+        unsafe { Guarded::wrap_unchecked(self.as_ptr()) }
     }
 }
 

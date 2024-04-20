@@ -47,6 +47,7 @@ impl<X: SeqLockWrappable> SeqLockWrappableIdentity for [X] {}
 #[macro_export]
 macro_rules! seqlock_wrapper {
     ($v:vis $T:ident) => {
+        #[derive(Clone,Copy)]
         $v struct $T<T>($v T);
 
         impl<T> core::ops::Deref for $T<T>{

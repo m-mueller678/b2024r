@@ -1,8 +1,14 @@
 use itertools::Itertools;
 use proc_macro::TokenStream as TokenStream1;
-use proc_macro2::TokenStream;
-use quote::quote;
-use syn::{parse_macro_input, Attribute, Data, DeriveInput, Meta, Path};
+use proc_macro2::{Ident, TokenStream};
+use quote::{format_ident, quote};
+use syn::parse::{Parse, ParseStream};
+use syn::punctuated::Punctuated;
+use syn::token::Token;
+use syn::{
+    parse_macro_input, Attribute, Data, DeriveInput, Expr, ExprField, ExprPath, Index, Member,
+    Meta, Path, Token, Type, Visibility,
+};
 
 fn seqlock_crate() -> TokenStream {
     quote! {seqlock}
@@ -24,7 +30,32 @@ fn extract_wrapper_attr(x: &[Attribute]) -> impl Iterator<Item = Path> + '_ {
     })
 }
 
-#[proc_macro_derive(SeqlockAccessors, attributes(seq_lock_wrapper, seq_lock_skip_accessor))]
+struct AccessorSpec {
+    vis: Visibility,
+    name: Ident,
+    colon_token: Token![:],
+    ty: Type,
+    eq_token: Token![=],
+    expr: Punctuated<Member, Token![.]>,
+}
+
+impl Parse for AccessorSpec {
+    fn parse(input: ParseStream) -> syn::Result<Self> {
+        Ok(AccessorSpec {
+            vis: input.parse()?,
+            name: input.parse()?,
+            colon_token: input.parse()?,
+            ty: input.parse()?,
+            eq_token: input.parse()?,
+            expr: Punctuated::parse_separated_nonempty(input)?,
+        })
+    }
+}
+
+#[proc_macro_derive(
+    SeqlockAccessors,
+    attributes(seq_lock_wrapper, seq_lock_skip_accessor, seq_lock_accessor)
+)]
 pub fn derive_seqlock_safe(input: TokenStream1) -> TokenStream1 {
     let input = parse_macro_input!(input as DeriveInput);
     let wrapper_path = extract_wrapper_attr(&input.attrs)
@@ -34,29 +65,55 @@ pub fn derive_seqlock_safe(input: TokenStream1) -> TokenStream1 {
     let seqlock = seqlock_crate();
     let accessors = match &input.data {
         Data::Struct(s) => {
-            s.fields.iter()
-                .filter(|field|{
-                    !field.attrs.iter().any(|attr|{
-                        match &attr.meta {
-                            Meta::Path(x) => path_is_ident(x,"seq_lock_skip_accessor"),
-                            _=>false
-                        }
+            let default_accessors = s
+                .fields
+                .iter()
+                .enumerate()
+                .filter(|(_i, field)| {
+                    !field.attrs.iter().any(|attr| match &attr.meta {
+                        Meta::Path(x) => path_is_ident(x, "seq_lock_skip_accessor"),
+                        _ => false,
                     })
                 })
-                .filter_map(|field| {
-                let name = field.ident.as_ref()?;
-                let ty = &field.ty;
-                let vis = &field.vis;
-                Some(quote!(
-                    #vis fn #name<'b>(&'b mut self)-><#ty as #seqlock::SeqLockWrappable>::Wrapper<#seqlock::Guarded<'b,SeqLockModeParam,#ty>>{
-                        unsafe{
-                            #seqlock::Guarded::<SeqLockModeParam,#ty>::wrap_unchecked(
-                                core::ptr::addr_of_mut!((*self.0.as_ptr()).#name)
-                            )
-                        }
+                .map(|(i, field)| {
+                    let name = field.ident.clone().unwrap_or_else(|| format_ident!("x{i}"));
+                    let member = field
+                        .ident
+                        .clone()
+                        .map(Member::Named)
+                        .unwrap_or(Member::Unnamed(Index::from(i)));
+                    AccessorSpec {
+                        vis: field.vis.clone(),
+                        name,
+                        colon_token: field.colon_token.unwrap_or_default(),
+                        ty: field.ty.clone(),
+                        eq_token: Default::default(),
+                        expr: std::iter::once(member).collect(),
                     }
-                ))
-            })
+                });
+            let custom_accessors = input.attrs.iter().filter_map(|x| match &x.meta {
+                Meta::List(x) if path_is_ident(&x.path, "seq_lock_accessor") => {
+                    Some(syn::parse::<AccessorSpec>(x.tokens.clone().into()).unwrap())
+                }
+                _ => None,
+            });
+            default_accessors.chain(custom_accessors)
+                .flat_map(|AccessorSpec { vis, name, ty, expr, .. }| {
+                    let versions = [
+                        (format_ident!("{name}_mut"), quote!(mut), quote!(SeqLockModeParam)),
+                        (name,quote!(),quote!(SeqLockModeParam::SharedDowngrade)),
+                    ];
+                    versions.map(|(name,mutable,return_mode)|quote!(
+                        pub fn #name<'b>(&'b #mutable self)-><#ty as #seqlock::SeqLockWrappable>::Wrapper<#seqlock::Guarded<'b,#return_mode,#ty>> {
+                            unsafe{
+                                #seqlock::Guarded::wrap_unchecked(
+                                    core::ptr::addr_of_mut!((*self.0.as_ptr()).#expr)
+                                )
+                            }
+                        }
+                    ))
+
+                })
         }
         Data::Enum(_) => panic!(),
         Data::Union(_) => panic!(),

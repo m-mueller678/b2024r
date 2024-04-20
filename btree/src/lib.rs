@@ -43,7 +43,16 @@ struct BasicNodeData {
 #[repr(transparent)]
 #[derive(Clone, Copy, Zeroable, SeqlockAccessors)]
 #[seq_lock_wrapper(Wrapper)]
-pub struct BasicNode<V: BasicNodeVariant>(BasicNodeData, PhantomData<V::Upper>);
+#[seq_lock_accessor(prefix_len:u16=0.common.prefix_len)]
+#[seq_lock_accessor(count:u16=0.common.count)]
+#[seq_lock_accessor(lower_fence_len:u16=0.common.lower_fence_len)]
+#[seq_lock_accessor(upper_fence_len:u16=0.common.upper_fence_len)]
+#[seq_lock_accessor(heap_bump:u16=0.heap_bump)]
+#[seq_lock_accessor(heap_freed:u16=0.heap_freed)]
+pub struct BasicNode<V: BasicNodeVariant>(
+    #[seq_lock_skip_accessor] BasicNodeData,
+    #[seq_lock_skip_accessor] PhantomData<V::Upper>,
+);
 
 unsafe impl<V: BasicNodeVariant> Pod for BasicNode<V> {}
 
@@ -102,12 +111,10 @@ fn key_head(k: &[u8]) -> u32 {
 impl<'a, V: BasicNodeVariant> Wrapper<Guarded<'a, Exclusive, BasicNode<V>>> {
     pub fn init(&mut self, lf: &[u8], uf: &[u8], upper: V::Upper) {
         assert_eq!(size_of::<BasicNode<V>>(), PAGE_SIZE - PAGE_HEAD_SIZE);
-        self.common().count().store(0);
-        self.common()
-            .prefix_len()
-            .store(common_prefix(lf, uf) as u16);
-        self.common().lower_fence_len().store(lf.len() as u16);
-        self.common().upper_fence_len().store(uf.len() as u16);
+        self.count().store(0);
+        self.prefix_len().store(common_prefix(lf, uf) as u16);
+        self.lower_fence_len().store(lf.len() as u16);
+        self.upper_fence_len().store(uf.len() as u16);
         self.heap_bump()
             .store((size_of::<BasicNode<V>>() - lf.len() - uf.len()) as u16);
         self.heap_freed().store(0);
@@ -119,10 +126,10 @@ impl<'a, V: BasicNodeVariant> Wrapper<Guarded<'a, Exclusive, BasicNode<V>>> {
         unsafe {
             let mut buffer = &mut [0u8; size_of::<Self>()];
             let fence_offset = size_of::<Self>()
-                - self.common().lower_fence_len().load() as usize
-                - self.common().upper_fence_len().load() as usize;
+                - self.lower_fence_len().load() as usize
+                - self.upper_fence_len().load() as usize;
             let mut dst_offset = fence_offset;
-            for i in 0..self.common().count().load() as usize {
+            for i in 0..self.count().load() as usize {
                 let offset = self.slots().unwrap().index(i).load() as usize;
                 let mut lens = self.slice::<u16>(offset, 2).unwrap();
                 let record_len = V::RECORD_TO_KEY_OFFSET
@@ -156,9 +163,9 @@ impl<'a> Wrapper<Guarded<'a, Exclusive, BasicNode<BasicNodeLeaf>>> {
     pub fn insert_leaf(&mut self, key: &[u8], val: &[u8]) -> Result<(), ()> {
         loop {
             let insert_pos = self.find(key).unwrap();
-            let key = &key[self.common().prefix_len().load() as usize..];
+            let key = &key[self.prefix_len().load() as usize..];
             let record_len = Self::round_up(key.len() + val.len());
-            let count = self.common().count().load() as usize;
+            let count = self.count().load() as usize;
             let heap_start = Self::DATA_OFFSET + Self::reserved_head_count(count) * 4 + count * 2;
             let free_space = self.heap_bump().load() as usize - heap_start;
             match insert_pos {
@@ -209,7 +216,7 @@ impl<'a, V: BasicNodeVariant, M: SeqLockMode> Wrapper<Guarded<'a, M, BasicNode<V
     const DATA_OFFSET: usize = offset_of!(BasicNode<V>, _data);
 
     fn heads(&mut self) -> Result<Guarded<'a, M, [u32]>, M::ReleaseError> {
-        let count = self.common().count().load() as usize;
+        let count = self.count().load() as usize;
         self.slice(Self::DATA_OFFSET + 4 * 0, count)
     }
 
@@ -217,7 +224,7 @@ impl<'a, V: BasicNodeVariant, M: SeqLockMode> Wrapper<Guarded<'a, M, BasicNode<V
         count.next_multiple_of(8)
     }
     fn slots(&mut self) -> Result<Guarded<'a, M, [u16]>, M::ReleaseError> {
-        let count = self.common().count().load() as usize;
+        let count = self.count().load() as usize;
         let i = Self::reserved_head_count(count);
         self.slice(Self::DATA_OFFSET + 4 * i, count)
     }
@@ -240,7 +247,7 @@ impl<'a, V: BasicNodeVariant, M: SeqLockMode> Wrapper<Guarded<'a, M, BasicNode<V
     }
 
     fn find(&mut self, key: &[u8]) -> Result<Result<usize, usize>, M::ReleaseError> {
-        let prefix_len = self.common().prefix_len().load() as usize;
+        let prefix_len = self.prefix_len().load() as usize;
         if prefix_len > key.len() {
             return Err(M::release_error());
         }

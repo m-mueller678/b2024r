@@ -77,7 +77,9 @@ fn struct_access() {
     unsafe {
         let x = &mut MyStruct { a: 1, b: 2 };
         let mut x = Guarded::<Exclusive, MyStruct>::wrap_unchecked(x);
-        assert_eq!(x.a().load(), 1);
-        assert_eq!(x.b().load(), 2);
+        assert_eq!(x.a_mut().load(), 1);
+        assert_eq!(x.b_mut().load(), 2);
+        assert_eq!(x.shared().a().load(), 1);
+        assert_eq!(x.optimistic().a_mut().load(), 1);
     }
 }
