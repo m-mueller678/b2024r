@@ -1,9 +1,15 @@
+#![feature(never_type)]
+#![feature(hint_assert_unchecked)]
+#![feature(pointer_is_aligned_to)]
+#![feature(layout_for_ptr)]
+
 extern crate core;
 
 use bytemuck::Pod;
 use std::cmp::Ordering;
+use std::hint::assert_unchecked;
 use std::marker::PhantomData;
-use std::mem::{transmute, MaybeUninit};
+use std::mem::{align_of, align_of_val_raw, size_of, transmute, MaybeUninit};
 use std::ptr::slice_from_raw_parts_mut;
 
 mod wrappable;
@@ -16,7 +22,10 @@ pub use wrappable::SeqLockWrappable;
 mod access_impl;
 
 #[allow(private_bounds)]
-pub trait SeqLockMode: SeqLockModeImpl {}
+pub trait SeqLockMode: SeqLockModeImpl + 'static {
+    type ReleaseError;
+    fn release_error() -> Self::ReleaseError;
+}
 
 #[allow(private_bounds)]
 pub trait SeqLockModeExclusive: SeqLockMode + SeqLockModeExclusiveImpl {}
@@ -27,13 +36,31 @@ pub struct Exclusive;
 
 pub struct Shared;
 
-impl SeqLockMode for Optimistic {}
+impl SeqLockMode for Optimistic {
+    type ReleaseError = OptimisticLockError;
 
-impl SeqLockMode for Exclusive {}
+    fn release_error() -> Self::ReleaseError {
+        OptimisticLockError(())
+    }
+}
+
+impl SeqLockMode for Exclusive {
+    type ReleaseError = !;
+
+    fn release_error() -> Self::ReleaseError {
+        unreachable!()
+    }
+}
 
 impl SeqLockModeExclusive for Exclusive {}
 
-impl SeqLockMode for Shared {}
+impl SeqLockMode for Shared {
+    type ReleaseError = !;
+
+    fn release_error() -> Self::ReleaseError {
+        unreachable!()
+    }
+}
 
 impl<'a, T> Copy for Guarded<'a, Optimistic, T> {}
 
@@ -58,7 +85,10 @@ unsafe trait SeqLockModeImpl {
 }
 
 impl<'a, M: SeqLockMode, T: SeqLockWrappable + ?Sized> Guarded<'a, M, T> {
-    pub unsafe fn map_ptr_mut<'b, U: SeqLockWrappable>(
+    pub fn reborrow(&mut self) -> T::Wrapper<Guarded<'_, M, T>> {
+        unsafe { Guarded::wrap_unchecked(self.as_ptr()) }
+    }
+    pub unsafe fn map_ptr<'b, U: SeqLockWrappable + ?Sized>(
         &'b mut self,
         f: impl FnOnce(*mut T) -> *mut U,
     ) -> U::Wrapper<Guarded<'b, M, U>> {
@@ -73,7 +103,13 @@ impl<'a, M: SeqLockMode, T: SeqLockWrappable + ?Sized> Guarded<'a, M, T> {
     }
 
     pub fn as_ptr(&self) -> *mut T {
-        M::as_ptr(&self.p)
+        let ptr = M::as_ptr(&self.p);
+        let align = unsafe { align_of_val_raw(ptr) };
+        debug_assert!(ptr.is_aligned_to(align));
+        unsafe {
+            std::hint::assert_unchecked(ptr.is_aligned_to(align));
+        }
+        ptr
     }
 
     pub fn load(&self) -> T
@@ -81,6 +117,15 @@ impl<'a, M: SeqLockMode, T: SeqLockWrappable + ?Sized> Guarded<'a, M, T> {
         T: Pod,
     {
         unsafe { M::load(&self.p) }
+    }
+
+    pub fn cast<U: Pod + SeqLockWrappable>(&mut self) -> U::Wrapper<Guarded<'_, M, U>>
+    where
+        T: Pod,
+    {
+        assert_eq!(size_of::<U>(), size_of::<T>());
+        assert_eq!(align_of::<T>() & align_of::<U>(), 0);
+        unsafe { Guarded::wrap_unchecked(self.as_ptr() as *mut U) }
     }
 
     pub unsafe fn store(&mut self, x: T)
@@ -104,6 +149,18 @@ impl<'a, M: SeqLockMode, T: SeqLockWrappable + Pod> Guarded<'a, M, [T]> {
                 transmute::<&'dst mut [T], &'dst mut [MaybeUninit<T>]>(dst),
             )
         }
+    }
+
+    pub fn cast_slice<U: Pod + SeqLockWrappable>(&mut self) -> Guarded<'_, M, [U]>
+    where
+        T: Pod,
+    {
+        let ptr = M::as_ptr(&self.p);
+        let byte_len = ptr.len() * size_of::<T>();
+        assert_eq!(byte_len % size_of::<U>(), 0);
+        let ptr = ptr as *mut U;
+        assert!(ptr.is_aligned());
+        unsafe { Guarded::wrap_unchecked(slice_from_raw_parts_mut(ptr, byte_len / size_of::<U>())) }
     }
 
     pub unsafe fn mem_cmp(&self, other: &[T]) -> Ordering {
@@ -140,12 +197,18 @@ impl<'a, M: SeqLockMode, T: SeqLockWrappable + Pod> Guarded<'a, M, [T]> {
         }
     }
 
-    pub fn to_array<const LEN: usize>(self) -> Guarded<'a, M, [T; LEN]> {
+    pub fn as_array<const LEN: usize>(&mut self) -> Guarded<'_, M, [T; LEN]> {
         unsafe {
             let ptr: *mut [T] = self.as_ptr();
             assert_eq!(ptr.len(), LEN);
             Guarded::wrap_unchecked(ptr as *mut [T; LEN])
         }
+    }
+}
+
+impl<'a, M: SeqLockMode, T: SeqLockWrappable + Pod, const N: usize> crate::Guarded<'a, M, [T; N]> {
+    pub fn as_slice(&mut self) -> Guarded<'_, M, [T]> {
+        unsafe { Guarded::wrap_unchecked(self.as_ptr() as *mut [T]) }
     }
 }
 

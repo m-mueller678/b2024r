@@ -16,7 +16,7 @@ fn extract_wrapper_attr(x: &[Attribute]) -> impl Iterator<Item = Path> + '_ {
     x.iter().filter_map(|x| match &x.meta {
         Meta::List(x) if path_is_ident(&x.path, "seq_lock_wrapper") => {
             let tokens: TokenStream1 = (x.tokens.clone()).into();
-            let path = syn::parse::<Path>(tokens).unwrap();
+            let path = syn::parse::<Path>(tokens).expect("cannot parse seq_lock_wrapper path");
             // let path:Path=parse_macro_input!(tokens as Path);
             Some(path)
         }
@@ -43,11 +43,11 @@ pub fn derive_seqlock_safe(input: TokenStream1) -> TokenStream1 {
                         }
                     })
                 })
-                .map(|field| {
-                let name = field.ident.as_ref().unwrap();
+                .filter_map(|field| {
+                let name = field.ident.as_ref()?;
                 let ty = &field.ty;
                 let vis = &field.vis;
-                quote!(
+                Some(quote!(
                     #vis fn #name<'b>(&'b mut self)-><#ty as #seqlock::SeqLockWrappable>::Wrapper<#seqlock::Guarded<'b,SeqLockModeParam,#ty>>{
                         unsafe{
                             #seqlock::Guarded::<SeqLockModeParam,#ty>::wrap_unchecked(
@@ -55,7 +55,7 @@ pub fn derive_seqlock_safe(input: TokenStream1) -> TokenStream1 {
                             )
                         }
                     }
-                )
+                ))
             })
         }
         Data::Enum(_) => panic!(),

@@ -1,12 +1,13 @@
 mod byte_slice;
 
 use crate::byte_slice::common_prefix;
+use bytemuck::{Pod, Zeroable};
 use indxvec::Search;
 use seqlock::{
-    seqlock_wrapper, wrap_unchecked, Exclusive, SeqLockGuarded, SeqLockMode, SeqLockPrimitive,
-    SeqLockSafe, SeqlockAccessors,
+    seqlock_wrapper, Exclusive, Guarded, SeqLockMode, SeqLockWrappable, SeqlockAccessors,
 };
 use std::cmp::Ordering;
+use std::marker::PhantomData;
 use std::mem::{offset_of, size_of, MaybeUninit};
 use std::ptr::slice_from_raw_parts_mut;
 use std::slice::from_raw_parts_mut;
@@ -16,8 +17,8 @@ pub const PAGE_HEAD_SIZE: usize = 8;
 
 seqlock_wrapper!(pub Wrapper);
 
-#[derive(SeqlockAccessors)]
-#[seq_lock_wrapper(Wrapper)]
+#[derive(Pod, Copy, Clone, Zeroable)]
+#[repr(C)]
 pub struct CommonNodeHead {
     prefix_len: u16,
     count: u16,
@@ -27,25 +28,34 @@ pub struct CommonNodeHead {
 
 pub type PageId = [u16; 3];
 
-#[derive(SeqlockAccessors)]
+#[derive(Copy, Clone, Zeroable, Pod)]
 #[repr(align(8))]
-#[seq_lock_wrapper(Wrapper)]
-pub struct BasicNode<V: BasicNodeVariant> {
+#[repr(C)]
+struct BasicNodeData {
     common: CommonNodeHead,
     heap_bump: u16,
     heap_freed: u16,
     hints: [u32; 16],
-    upper: V::Upper,
-    _pad: u16,
     _data: [u32; PAGE_SIZE - PAGE_HEAD_SIZE - size_of::<CommonNodeHead>() - 6 * 2 - 16 * 4],
+    _upper: PhantomData<V::Upper>,
 }
 
-pub trait BasicNodeVariant: 'static {
-    type Upper: SeqLockPrimitive + SeqLockSafe;
+#[repr(transparent)]
+#[derive(Clone, Copy, Zeroable, SeqlockAccessors)]
+#[seq_lock_wrapper(Wrapper)]
+pub struct BasicNode<V: BasicNodeVariant>(BasicNodeData, PhantomData<V::Upper>);
+
+unsafe impl<V: BasicNodeVariant> Pod for BasicNode<V> {}
+
+pub trait BasicNodeVariant: 'static + Copy + Zeroable {
+    type Upper: SeqLockWrappable + Pod + Copy + Zeroable;
     const IS_LEAF: bool;
     const RECORD_TO_KEY_OFFSET: usize = if Self::IS_LEAF { 4 } else { 8 };
+    const HEAD_START: usize = size_of::<Self::Upper>().div_ceil(4);
 }
 
+#[derive(Copy, Clone, Zeroable, Pod)]
+#[repr(transparent)]
 struct BasicNodeLeaf;
 
 impl BasicNodeVariant for BasicNodeLeaf {
@@ -53,31 +63,30 @@ impl BasicNodeVariant for BasicNodeLeaf {
     const IS_LEAF: bool = true;
 }
 
+#[derive(Copy, Clone, Zeroable, Pod)]
+#[repr(transparent)]
 struct BasicNodeInner;
 impl BasicNodeVariant for BasicNodeInner {
     type Upper = PageId;
     const IS_LEAF: bool = false;
 }
 
-unsafe trait Node {}
+unsafe trait Node: SeqLockWrappable + Pod {}
 
 unsafe impl<V: BasicNodeVariant> Node for BasicNode<V> {}
 
-impl<'a, N: Node, M: SeqLockMode> Wrapper<SeqLockGuarded<'a, M, N>> {
-    fn slice<'b, T: SeqLockSafe>(
-        &self,
+impl<'a, N: Node, M: SeqLockMode> Wrapper<Guarded<'a, M, N>> {
+    fn slice<'b, T: SeqLockWrappable + Pod>(
+        &mut self,
         offset: usize,
         count: usize,
-    ) -> Result<SeqLockGuarded<'b, M, [T]>, M::ReleaseError> {
-        if offset + count * size_of::<T>() > PAGE_SIZE - PAGE_HEAD_SIZE {
-            return Err(M::release_error());
-        }
-        unsafe {
-            Ok(wrap_unchecked(slice_from_raw_parts_mut(
-                self.as_ptr().cast::<u8>().add(offset).cast::<T>(),
-                count,
-            )))
-        }
+    ) -> Result<Guarded<'b, M, [T]>, M::ReleaseError> {
+        const SIZE: usize = PAGE_SIZE - PAGE_HEAD_SIZE;;
+        Ok(self
+            .cast::<[u8; SIZE]>()
+            .as_slice()
+            .slice(offset, count * size_of::<T>())
+            .cast_slice::<T>())
     }
 }
 
@@ -90,7 +99,7 @@ fn key_head(k: &[u8]) -> u32 {
     h
 }
 
-impl<'a, V: BasicNodeVariant> Wrapper<SeqLockGuarded<'a, Exclusive, BasicNode<V>>> {
+impl<'a, V: BasicNodeVariant> Wrapper<Guarded<'a, Exclusive, BasicNode<V>>> {
     pub fn init(&mut self, lf: &[u8], uf: &[u8], upper: V::Upper) {
         assert_eq!(size_of::<BasicNode<V>>(), PAGE_SIZE - PAGE_HEAD_SIZE);
         self.common().count().store(0);
@@ -105,7 +114,7 @@ impl<'a, V: BasicNodeVariant> Wrapper<SeqLockGuarded<'a, Exclusive, BasicNode<V>
         V::Upper::unwrap_mut(&mut self.upper()).store(upper);
     }
 }
-impl<'a, V: BasicNodeVariant> Wrapper<SeqLockGuarded<'a, Exclusive, BasicNode<V>>> {
+impl<'a, V: BasicNodeVariant> Wrapper<Guarded<'a, Exclusive, BasicNode<V>>> {
     fn compactify(&mut self) {
         unsafe {
             let mut buffer = &mut [0u8; size_of::<Self>()];
@@ -143,7 +152,7 @@ impl<'a, V: BasicNodeVariant> Wrapper<SeqLockGuarded<'a, Exclusive, BasicNode<V>
         }
     }
 }
-impl<'a> Wrapper<SeqLockGuarded<'a, Exclusive, BasicNode<BasicNodeLeaf>>> {
+impl<'a> Wrapper<Guarded<'a, Exclusive, BasicNode<BasicNodeLeaf>>> {
     pub fn insert_leaf(&mut self, key: &[u8], val: &[u8]) -> Result<(), ()> {
         loop {
             let insert_pos = self.find(key).unwrap();
@@ -193,13 +202,13 @@ impl<'a> Wrapper<SeqLockGuarded<'a, Exclusive, BasicNode<BasicNodeLeaf>>> {
     }
 }
 
-impl<'a, V: BasicNodeVariant, M: SeqLockMode> Wrapper<SeqLockGuarded<'a, M, BasicNode<V>>> {
+impl<'a, V: BasicNodeVariant, M: SeqLockMode> Wrapper<Guarded<'a, M, BasicNode<V>>> {
     fn round_up(x: usize) -> usize {
         x + (1 - (x & 1))
     }
     const DATA_OFFSET: usize = offset_of!(BasicNode<V>, _data);
 
-    fn heads(&mut self) -> Result<SeqLockGuarded<'a, M, [u32]>, M::ReleaseError> {
+    fn heads(&mut self) -> Result<Guarded<'a, M, [u32]>, M::ReleaseError> {
         let count = self.common().count().load() as usize;
         self.slice(Self::DATA_OFFSET + 4 * 0, count)
     }
@@ -207,7 +216,7 @@ impl<'a, V: BasicNodeVariant, M: SeqLockMode> Wrapper<SeqLockGuarded<'a, M, Basi
     fn reserved_head_count(count: usize) -> usize {
         count.next_multiple_of(8)
     }
-    fn slots(&mut self) -> Result<SeqLockGuarded<'a, M, [u16]>, M::ReleaseError> {
+    fn slots(&mut self) -> Result<Guarded<'a, M, [u16]>, M::ReleaseError> {
         let count = self.common().count().load() as usize;
         let i = Self::reserved_head_count(count);
         self.slice(Self::DATA_OFFSET + 4 * i, count)
@@ -216,7 +225,7 @@ impl<'a, V: BasicNodeVariant, M: SeqLockMode> Wrapper<SeqLockGuarded<'a, M, Basi
     fn key(
         &mut self,
         unchecked_record_offset: usize,
-    ) -> Result<SeqLockGuarded<'a, M, [u8]>, M::ReleaseError> {
+    ) -> Result<Guarded<'a, M, [u8]>, M::ReleaseError> {
         if unchecked_record_offset + 2 > size_of::<Self>() || unchecked_record_offset % 2 != 0 {
             return Err(M::release_error());
         }

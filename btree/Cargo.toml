@@ -4,5 +4,6 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-seqlock = {path = "../seqlock_old" }
+seqlock = {path = "../seqlock" }
 indxvec = "1.9"
+bytemuck = { version = "1.15.0",features = ["derive"] }
