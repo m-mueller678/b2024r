@@ -198,9 +198,9 @@ impl<'a, V: BasicNodeVariant> Wrapper<Guarded<'a, Exclusive, BasicNode<V>>> {
                     }
                 }
             }
-            let available_space =
-                self.heap_bump().load() as usize - new_heap_start + (self.s().heap_freed().load() as usize);
-            if available_space < Self::record_size(key.len(), val.len()) {
+            if self.heap_bump().load() as usize + (self.s().heap_freed().load() as usize)
+                < new_heap_start + Self::record_size(key.len(), val.len())
+            {
                 return Err(());
             }
             self.compactify()?;
