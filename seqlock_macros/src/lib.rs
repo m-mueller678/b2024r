@@ -4,10 +4,7 @@ use proc_macro2::{Ident, TokenStream};
 use quote::{format_ident, quote};
 use syn::parse::{Parse, ParseStream};
 use syn::punctuated::Punctuated;
-use syn::{
-    parse_macro_input, Attribute, Data, DeriveInput, Index, Member, Meta, Path, Token, Type,
-    Visibility,
-};
+use syn::{parse_macro_input, Attribute, Data, DeriveInput, Index, Member, Meta, Path, Token, Type, Visibility};
 
 fn seqlock_crate() -> TokenStream {
     quote! {seqlock}
@@ -51,16 +48,11 @@ impl Parse for AccessorSpec {
     }
 }
 
-#[proc_macro_derive(
-    SeqlockAccessors,
-    attributes(seq_lock_wrapper, seq_lock_skip_accessor, seq_lock_accessor)
-)]
+#[proc_macro_derive(SeqlockAccessors, attributes(seq_lock_wrapper, seq_lock_skip_accessor, seq_lock_accessor))]
 pub fn derive_seqlock_safe(input: TokenStream1) -> TokenStream1 {
     let input = parse_macro_input!(input as DeriveInput);
-    let wrapper_path = extract_wrapper_attr(&input.attrs)
-        .exactly_one()
-        .map_err(|_| ())
-        .expect("need exactly one seq_lock_wrapper");
+    let wrapper_path =
+        extract_wrapper_attr(&input.attrs).exactly_one().map_err(|_| ()).expect("need exactly one seq_lock_wrapper");
     let seqlock = seqlock_crate();
     let accessors = match &input.data {
         Data::Struct(s) => {
@@ -76,11 +68,7 @@ pub fn derive_seqlock_safe(input: TokenStream1) -> TokenStream1 {
                 })
                 .map(|(i, field)| {
                     let name = field.ident.clone().unwrap_or_else(|| format_ident!("x{i}"));
-                    let member = field
-                        .ident
-                        .clone()
-                        .map(Member::Named)
-                        .unwrap_or(Member::Unnamed(Index::from(i)));
+                    let member = field.ident.clone().map(Member::Named).unwrap_or(Member::Unnamed(Index::from(i)));
                     AccessorSpec {
                         vis: field.vis.clone(),
                         name,

@@ -1,0 +1,6 @@
+max_width=120
+use_small_heuristics="Max"
+imports_granularity="Module"
+newline_style="Unix"
+group_imports="One"
+use_field_init_shorthand=true

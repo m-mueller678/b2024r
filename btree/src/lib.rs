@@ -3,9 +3,7 @@ mod byte_slice;
 use crate::byte_slice::common_prefix;
 use bytemuck::{Pod, Zeroable};
 use indxvec::Search;
-use seqlock::{
-    seqlock_wrapper, Exclusive, Guarded, Never, SeqLockMode, SeqLockWrappable, SeqlockAccessors,
-};
+use seqlock::{seqlock_wrapper, Exclusive, Guarded, Never, SeqLockMode, SeqLockWrappable, SeqlockAccessors};
 use std::cmp::Ordering;
 use std::marker::PhantomData;
 use std::mem::{align_of, offset_of, size_of};
@@ -38,8 +36,7 @@ pub struct BasicNodeData {
     _data: [u32; BASIC_NODE_DATA_SIZE],
 }
 
-const BASIC_NODE_DATA_SIZE: usize =
-    (PAGE_SIZE - PAGE_HEAD_SIZE - size_of::<CommonNodeHead>() - 2 * 2 - 16 * 4) / 4;
+const BASIC_NODE_DATA_SIZE: usize = (PAGE_SIZE - PAGE_HEAD_SIZE - size_of::<CommonNodeHead>() - 2 * 2 - 16 * 4) / 4;
 
 #[repr(transparent)]
 #[derive(Clone, Copy, Zeroable, SeqlockAccessors)]
@@ -93,12 +90,7 @@ impl<'a, N: Node, M: SeqLockMode> Wrapper<Guarded<'a, M, N>> {
         count: usize,
     ) -> Result<Guarded<'a, M, [T]>, M::ReleaseError> {
         const SIZE: usize = PAGE_SIZE - PAGE_HEAD_SIZE;
-        Ok(self
-            .0
-            .cast::<[u8; SIZE]>()
-            .as_slice()
-            .slice(offset, count * size_of::<T>())
-            .cast_slice::<T>())
+        Ok(self.0.cast::<[u8; SIZE]>().as_slice().slice(offset, count * size_of::<T>()).cast_slice::<T>())
     }
 }
 
@@ -118,43 +110,29 @@ impl<'a, V: BasicNodeVariant> Wrapper<Guarded<'a, Exclusive, BasicNode<V>>> {
         self.prefix_len_mut().store(common_prefix(lf, uf) as u16);
         self.lower_fence_len_mut().store(lf.len() as u16);
         self.upper_fence_len_mut().store(uf.len() as u16);
-        self.heap_bump_mut()
-            .store((size_of::<BasicNode<V>>() - lf.len() - uf.len()) as u16);
+        self.heap_bump_mut().store((size_of::<BasicNode<V>>() - lf.len() - uf.len()) as u16);
         self.heap_freed_mut().store(0);
         V::Upper::get_mut(&mut self.b().upper()).store(upper);
     }
 
     fn compactify(&mut self) -> Result<(), Never> {
         let buffer = &mut [0u8; size_of::<BasicNodeData>()];
-        let fence_offset = size_of::<Self>()
-            - self.lower_fence_len().load() as usize
-            - self.upper_fence_len().load() as usize;
+        let fence_offset =
+            size_of::<Self>() - self.lower_fence_len().load() as usize - self.upper_fence_len().load() as usize;
         let mut dst_offset = fence_offset;
         for i in 0..self.count().load() as usize {
             let offset = self.s().slots().unwrap().index(i).load() as usize;
             let lens = self.s().slice::<u16>(offset, 2).unwrap();
             let record_len = V::RECORD_TO_KEY_OFFSET
                 + Self::round_up(
-                    lens.index(0).load() as usize
-                        + if V::IS_LEAF {
-                            lens.index(1).load() as usize
-                        } else {
-                            0
-                        },
+                    lens.index(0).load() as usize + if V::IS_LEAF { lens.index(1).load() as usize } else { 0 },
                 );
             dst_offset -= record_len;
-            self.s()
-                .slice(offset, record_len)?
-                .load_slice(&mut buffer[dst_offset..][..record_len]);
+            self.s().slice(offset, record_len)?.load_slice(&mut buffer[dst_offset..][..record_len]);
             self.b().slots().unwrap().index(i).store(dst_offset as u16);
         }
-        self.b()
-            .slice::<u8>(dst_offset, fence_offset - dst_offset)?
-            .store_slice(&buffer[dst_offset..fence_offset]);
-        debug_assert_eq!(
-            self.heap_bump().load() + self.heap_freed().load(),
-            dst_offset as u16
-        );
+        self.b().slice::<u8>(dst_offset, fence_offset - dst_offset)?.store_slice(&buffer[dst_offset..fence_offset]);
+        debug_assert_eq!(self.heap_bump().load() + self.heap_freed().load(), dst_offset as u16);
         self.heap_freed_mut().store(0);
         self.heap_bump_mut().store(dst_offset as u16);
         Ok(())
@@ -179,24 +157,15 @@ impl<'a> Wrapper<Guarded<'a, Exclusive, BasicNode<BasicNodeLeaf>>> {
                         self.b().slots()?.index(existing).store(record_pos as u16);
                         self.b().u16(record_pos)?.store(key.len() as u16);
                         self.b().u16(record_pos + 2)?.store(val.len() as u16);
-                        self.b()
-                            .slice(record_pos + 4, key.len())
-                            .unwrap()
-                            .store_slice(key);
-                        self.b()
-                            .slice(record_pos + 4 + key.len(), val.len())
-                            .unwrap()
-                            .store_slice(val);
+                        self.b().slice(record_pos + 4, key.len()).unwrap().store_slice(key);
+                        self.b().slice(record_pos + 4 + key.len(), val.len()).unwrap().store_slice(val);
                         return Ok(());
                     }
                     let old_offset = self.b().slots().unwrap().index(existing).load() as usize;
                     let old_record_len = 4 + Self::round_up(
-                        self.s().u16(old_offset)?.load() as usize
-                            + self.s().u16(old_offset + 2)?.load() as usize,
+                        self.s().u16(old_offset)?.load() as usize + self.s().u16(old_offset + 2)?.load() as usize,
                     );
-                    if free_space + old_record_len + (self.s().heap_freed().load() as usize)
-                        < record_len
-                    {
+                    if free_space + old_record_len + (self.s().heap_freed().load() as usize) < record_len {
                         return Err(());
                     }
                     self.b().u16(old_offset)?.store(0);
@@ -216,10 +185,7 @@ impl<'a, V: BasicNodeVariant, M: SeqLockMode> Wrapper<Guarded<'a, M, BasicNode<V
     }
     fn upper(self) -> <V::Upper as SeqLockWrappable>::Wrapper<Guarded<'a, M, V::Upper>> {
         assert_eq!(4 % align_of::<V::Upper>(), 0);
-        unsafe {
-            self.0
-                .map_ptr(|x| addr_of_mut!((*x).0._data) as *mut V::Upper)
-        }
+        unsafe { self.0.map_ptr(|x| addr_of_mut!((*x).0._data) as *mut V::Upper) }
     }
     fn round_up(x: usize) -> usize {
         x + (1 - (x & 1))
@@ -245,10 +211,7 @@ impl<'a, V: BasicNodeVariant, M: SeqLockMode> Wrapper<Guarded<'a, M, BasicNode<V
             return Err(M::release_error());
         }
         let len = self.s().u16(unchecked_record_offset)?.load();
-        self.slice(
-            unchecked_record_offset + V::RECORD_TO_KEY_OFFSET,
-            len as usize,
-        )
+        self.slice(unchecked_record_offset + V::RECORD_TO_KEY_OFFSET, len as usize)
     }
 
     fn find(&mut self, key: &[u8]) -> Result<Result<usize, usize>, M::ReleaseError>
@@ -262,8 +225,7 @@ impl<'a, V: BasicNodeVariant, M: SeqLockMode> Wrapper<Guarded<'a, M, BasicNode<V
         let truncated = &key[prefix_len..];
         let needle_head = key_head(truncated);
         let heads = self.heads()?;
-        let matching_head_range =
-            (0..=heads.len() - 1).binary_all(|i| heads.s().index(i).load().cmp(&needle_head));
+        let matching_head_range = (0..=heads.len() - 1).binary_all(|i| heads.s().index(i).load().cmp(&needle_head));
         if matching_head_range.is_empty() {
             return Ok(Err(matching_head_range.start));
         }
@@ -271,13 +233,12 @@ impl<'a, V: BasicNodeVariant, M: SeqLockMode> Wrapper<Guarded<'a, M, BasicNode<V
         if slots.len() != heads.len() {
             return Err(M::release_error());
         }
-        let key_position =
-            (matching_head_range.start..=matching_head_range.end - 1).binary_by(|i| {
-                let Ok(key) = self.key(i) else {
-                    return Ordering::Equal;
-                };
-                key.mem_cmp(truncated)
-            });
+        let key_position = (matching_head_range.start..=matching_head_range.end - 1).binary_by(|i| {
+            let Ok(key) = self.key(i) else {
+                return Ordering::Equal;
+            };
+            key.mem_cmp(truncated)
+        });
         Ok(key_position)
     }
 }

@@ -43,10 +43,7 @@ pub trait SeqLockMode: SeqLockModeImpl + 'static {
 }
 
 #[allow(private_bounds)]
-pub trait SeqLockModeExclusive:
-    SeqLockMode<ReleaseError = Never> + SeqLockModeExclusiveImpl
-{
-}
+pub trait SeqLockModeExclusive: SeqLockMode<ReleaseError = Never> + SeqLockModeExclusiveImpl {}
 
 pub struct Optimistic;
 
@@ -126,10 +123,7 @@ impl<'a, M: SeqLockMode, T: SeqLockWrappable + ?Sized> Guarded<'a, M, T> {
     }
 
     pub unsafe fn wrap_unchecked(p: *mut T) -> T::Wrapper<Guarded<'a, M, T>> {
-        T::wrap(Guarded {
-            p: M::from_pointer(p),
-            _p: PhantomData,
-        })
+        T::wrap(Guarded { p: M::from_pointer(p), _p: PhantomData })
     }
 
     pub fn as_ptr(&self) -> *mut T {
@@ -173,12 +167,7 @@ impl<'a, M: SeqLockMode, T: SeqLockWrappable + Pod> Guarded<'a, M, [T]> {
     }
 
     pub fn load_slice<'dst>(&self, dst: &'dst mut [T]) {
-        unsafe {
-            M::load_slice(
-                &self.p,
-                transmute::<&'dst mut [T], &'dst mut [MaybeUninit<T>]>(dst),
-            )
-        }
+        unsafe { M::load_slice(&self.p, transmute::<&'dst mut [T], &'dst mut [MaybeUninit<T>]>(dst)) }
     }
 
     pub fn len(&self) -> usize {
@@ -226,9 +215,7 @@ impl<'a, M: SeqLockMode, T: SeqLockWrappable + Pod> Guarded<'a, M, [T]> {
     pub fn slice(self, offset: usize, len: usize) -> Self {
         let ptr: *mut [T] = self.as_ptr();
         assert!(offset.checked_add(len).unwrap() <= ptr.len());
-        unsafe {
-            Guarded::wrap_unchecked(slice_from_raw_parts_mut((ptr as *mut T).add(offset), len))
-        }
+        unsafe { Guarded::wrap_unchecked(slice_from_raw_parts_mut((ptr as *mut T).add(offset), len)) }
     }
 
     pub fn as_array<const LEN: usize>(self) -> Guarded<'a, M, [T; LEN]> {
@@ -249,10 +236,7 @@ impl<'a, M: SeqLockMode, T: SeqLockWrappable + Pod, const N: usize> crate::Guard
 unsafe trait SeqLockModeExclusiveImpl: SeqLockModeImpl {
     unsafe fn store<T>(p: &mut Self::Pointer<'_, T>, x: T);
     unsafe fn store_slice<T>(p: &mut Self::Pointer<'_, [T]>, x: &[T]);
-    unsafe fn move_within_slice<T, const MOVE_UP: bool>(
-        p: &mut Self::Pointer<'_, [T]>,
-        distance: usize,
-    );
+    unsafe fn move_within_slice<T, const MOVE_UP: bool>(p: &mut Self::Pointer<'_, [T]>, distance: usize);
 }
 
 pub struct Guarded<'a, M: SeqLockMode, T: ?Sized> {

@@ -1,11 +1,8 @@
 #![allow(unused_variables)]
-use crate::{
-    Exclusive, Optimistic, OptimisticLockError, SeqLockModeExclusiveImpl, SeqLockModeImpl, Shared,
-};
+use crate::{Exclusive, Optimistic, OptimisticLockError, SeqLockModeExclusiveImpl, SeqLockModeImpl, Shared};
 use bytemuck::Pod;
 use std::cmp::Ordering;
-use std::mem::size_of;
-use std::mem::{size_of_val, MaybeUninit};
+use std::mem::{size_of, size_of_val, MaybeUninit};
 use std::slice::from_raw_parts;
 use std::sync::atomic::Ordering::{Acquire, Relaxed};
 use std::sync::atomic::{compiler_fence, AtomicU64, AtomicU8};
@@ -50,27 +47,18 @@ unsafe impl<M: CommonImpl> SeqLockModeImpl for M {
 
     unsafe fn load<T: Pod>(p: &Self::Pointer<'_, T>) -> T {
         let mut buffer = MaybeUninit::<T>::uninit();
-        atomic_memcpy::<true>(
-            *p as *const u8,
-            buffer.as_mut_ptr() as *mut u8,
-            size_of::<T>(),
-        );
+        atomic_memcpy::<true>(*p as *const u8, buffer.as_mut_ptr() as *mut u8, size_of::<T>());
         buffer.assume_init()
     }
 
     unsafe fn load_slice<T: Pod>(p: &Self::Pointer<'_, [T]>, dst: &mut [MaybeUninit<T>]) {
-        atomic_memcpy::<true>(
-            *p as *const u8,
-            dst.as_mut_ptr() as *mut u8,
-            size_of_val(dst),
-        )
+        atomic_memcpy::<true>(*p as *const u8, dst.as_mut_ptr() as *mut u8, size_of_val(dst))
     }
 
     unsafe fn bit_cmp_slice<T: Pod>(p: &Self::Pointer<'_, [T]>, other: &[T]) -> Ordering {
         let other_bytes = bytemuck::cast_slice::<T, u8>(other);
         let this_bytes_len = p.len() * size_of::<T>();
-        let mut this =
-            (0..this_bytes_len).map(|i| unsafe { (*(*p as *mut AtomicU8).add(i)).load(Relaxed) });
+        let mut this = (0..this_bytes_len).map(|i| unsafe { (*(*p as *mut AtomicU8).add(i)).load(Relaxed) });
         let mut other = other_bytes.iter().copied();
         for _ in 0..std::cmp::min(this_bytes_len, other_bytes.len()) {
             let c = this.next().cmp(&other.next());
@@ -88,17 +76,10 @@ unsafe impl SeqLockModeExclusiveImpl for Exclusive {
     }
 
     unsafe fn store_slice<T>(p: &mut Self::Pointer<'_, [T]>, x: &[T]) {
-        atomic_memcpy::<true>(
-            x.as_ptr() as *const u8,
-            *p as *mut T as *mut u8,
-            size_of_val(x),
-        );
+        atomic_memcpy::<true>(x.as_ptr() as *const u8, *p as *mut T as *mut u8, size_of_val(x));
     }
 
-    unsafe fn move_within_slice<T, const MOVE_UP: bool>(
-        p: &mut Self::Pointer<'_, [T]>,
-        distance: usize,
-    ) {
+    unsafe fn move_within_slice<T, const MOVE_UP: bool>(p: &mut Self::Pointer<'_, [T]>, distance: usize) {
         let len = (p.len() - distance) * size_of::<T>();
         let offset = distance * size_of::<T>();
         let p = *p as *mut T as *mut u8;

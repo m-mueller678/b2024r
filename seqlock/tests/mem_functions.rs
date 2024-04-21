@@ -1,6 +1,4 @@
-use seqlock::{
-    seqlock_wrapper, Exclusive, Guarded, Optimistic, SeqLockWrappable, SeqlockAccessors,
-};
+use seqlock::{seqlock_wrapper, Exclusive, Guarded, Optimistic, SeqLockWrappable, SeqlockAccessors};
 use std::cell::UnsafeCell;
 use std::ops::Deref;
 use std::ptr::slice_from_raw_parts_mut;
@@ -12,10 +10,8 @@ fn test_memcmp() {
         let mut a = a.as_bytes().to_vec();
         for b in &samples {
             let std = (*a).cmp(b.as_bytes());
-            let optimistic = unsafe {
-                Guarded::<Optimistic, [u8]>::wrap_unchecked(&mut *a as *mut [u8])
-                    .mem_cmp(b.as_bytes())
-            };
+            let optimistic =
+                unsafe { Guarded::<Optimistic, [u8]>::wrap_unchecked(&mut *a as *mut [u8]).mem_cmp(b.as_bytes()) };
             assert_eq!(std, optimistic);
         }
     }
