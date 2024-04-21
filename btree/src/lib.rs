@@ -13,7 +13,7 @@ use std::marker::PhantomData;
 use std::mem::{align_of, offset_of, size_of};
 use std::ptr::addr_of_mut;
 
-pub const PAGE_SIZE: usize = 1 << 12;
+pub const PAGE_SIZE: usize = 1 << 10;
 pub const PAGE_HEAD_SIZE: usize = 8;
 
 seqlock_wrapper!(pub Wrapper);
@@ -169,7 +169,7 @@ impl<'a, V: BasicNodeVariant> Wrapper<Guarded<'a, Exclusive, BasicNode<V>>> {
                 }
                 Err(insert_at) => {
                     new_heap_start = Self::HEAD_OFFSET + Self::reserved_head_count(count + 1) * 4 + (count + 1) * 2;
-                    if Self::record_size(key.len(), val.len()) <= (self.heap_bump().load() as usize - new_heap_start) {
+                    if new_heap_start + Self::record_size(key.len(), val.len()) <= self.heap_bump().load() as usize {
                         let orhc = Self::reserved_head_count(count);
                         let nrhc = Self::reserved_head_count(count + 1);
                         if nrhc == orhc {
