@@ -7,6 +7,7 @@ extern crate core;
 
 use bytemuck::Pod;
 use std::cmp::Ordering;
+use std::fmt::Debug;
 use std::marker::PhantomData;
 use std::mem::{align_of, align_of_val_raw, size_of, transmute, MaybeUninit};
 use std::ops::{Bound, Range, RangeBounds};
@@ -38,7 +39,7 @@ mod access_impl;
 
 #[allow(private_bounds)]
 pub trait SeqLockMode: SeqLockModeImpl + 'static {
-    type ReleaseError: Into<OptimisticLockError> + From<Never>;
+    type ReleaseError: Into<OptimisticLockError> + From<Never> + Debug;
     type SharedDowngrade: SeqLockMode<ReleaseError = Self::ReleaseError>;
     fn release_error() -> Self::ReleaseError;
 }
@@ -62,6 +63,9 @@ impl SeqLockMode for Optimistic {
 }
 
 impl SeqLockModeExclusive for Exclusive {}
+impl SeqLockModePessimistic for Exclusive {}
+impl SeqLockModePessimistic for Shared {}
+pub trait SeqLockModePessimistic: SeqLockMode<ReleaseError = Never> {}
 
 impl SeqLockMode for Exclusive {
     type ReleaseError = Never;
@@ -182,13 +186,24 @@ impl<'a, M: SeqLockMode, T: SeqLockWrappable + Pod> Guarded<'a, M, [T]> {
         self.as_ptr().is_empty()
     }
 
-    pub fn cast_slice<U: Pod + SeqLockWrappable>(self) -> Guarded<'a, M, [U]> {
+    pub fn try_cast_slice<U: Pod + SeqLockWrappable>(self) -> Result<Guarded<'a, M, [U]>, M::ReleaseError> {
         let ptr = M::as_ptr(&self.p);
         let byte_len = ptr.len() * size_of::<T>();
-        assert_eq!(byte_len % size_of::<U>(), 0);
+        if byte_len % size_of::<U>() != 0 {
+            return Err(M::release_error());
+        }
         let ptr = ptr as *mut U;
-        assert!(ptr.is_aligned());
-        unsafe { Guarded::wrap_unchecked(slice_from_raw_parts_mut(ptr, byte_len / size_of::<U>())) }
+        if !ptr.is_aligned() {
+            return Err(M::release_error());
+        }
+        Ok(unsafe { Guarded::wrap_unchecked(slice_from_raw_parts_mut(ptr, byte_len / size_of::<U>())) })
+    }
+
+    pub fn cast_slice<U: Pod + SeqLockWrappable>(self) -> Guarded<'a, M, [U]>
+    where
+        M: SeqLockModePessimistic,
+    {
+        self.try_cast_slice::<U>().unwrap()
     }
 
     pub fn mem_cmp(&self, other: &[T]) -> Ordering {
@@ -232,13 +247,29 @@ impl<'a, M: SeqLockMode, T: SeqLockWrappable + Pod> Guarded<'a, M, [T]> {
         }
     }
 
-    pub fn index(self, i: usize) -> T::Wrapper<Guarded<'a, M, T>> {
-        let ptr: *mut [T] = self.as_ptr();
-        assert!(i < ptr.len());
-        unsafe { Guarded::wrap_unchecked((ptr as *mut T).add(i)) }
+    pub fn index(self, i: usize) -> T::Wrapper<Guarded<'a, M, T>>
+    where
+        M: SeqLockModePessimistic,
+    {
+        self.try_index(i).unwrap()
     }
 
-    pub fn slice(self, x: impl RangeBounds<usize>) -> Self {
+    pub fn try_index(self, i: usize) -> Result<T::Wrapper<Guarded<'a, M, T>>, M::ReleaseError> {
+        let ptr: *mut [T] = self.as_ptr();
+        if i >= ptr.len() {
+            return Err(M::release_error());
+        }
+        Ok(unsafe { Guarded::wrap_unchecked((ptr as *mut T).add(i)) })
+    }
+
+    pub fn slice(self, x: impl RangeBounds<usize>) -> Self
+    where
+        M: SeqLockModePessimistic,
+    {
+        self.try_slice(x).unwrap()
+    }
+
+    pub fn try_slice(self, x: impl RangeBounds<usize>) -> Result<Self, M::ReleaseError> {
         let ptr: *mut [T] = self.as_ptr();
         let mut start = ptr as *mut T;
         let mut len = ptr.len();
@@ -248,7 +279,9 @@ impl<'a, M: SeqLockMode, T: SeqLockWrappable + Pod> Guarded<'a, M, [T]> {
             Bound::Excluded(&i) => Some(i),
         };
         if let Some(upper) = upper {
-            assert!(upper <= len);
+            if upper > len {
+                return Err(M::release_error());
+            }
             len = upper;
         }
         let lower = match x.start_bound() {
@@ -257,11 +290,13 @@ impl<'a, M: SeqLockMode, T: SeqLockWrappable + Pod> Guarded<'a, M, [T]> {
             Bound::Excluded(&i) => Some(i + 1),
         };
         if let Some(lower) = lower {
-            assert!(lower <= len);
+            if lower > len {
+                return Err(M::release_error());
+            }
             len -= lower;
             start = unsafe { start.add(lower) };
         }
-        unsafe { Guarded::wrap_unchecked(slice_from_raw_parts_mut(start, len)) }
+        Ok(unsafe { Guarded::wrap_unchecked(slice_from_raw_parts_mut(start, len)) })
     }
 
     pub fn as_array<const LEN: usize>(self) -> Guarded<'a, M, [T; LEN]> {
@@ -295,4 +330,5 @@ pub struct Guarded<'a, M: SeqLockMode, T: ?Sized> {
     _p: PhantomData<&'a T>,
 }
 
+#[derive(Debug)]
 pub struct OptimisticLockError(());

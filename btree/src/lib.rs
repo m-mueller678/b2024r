@@ -95,7 +95,7 @@ impl<'a, N: Node, M: SeqLockMode> Wrapper<Guarded<'a, M, N>> {
         offset: usize,
         count: usize,
     ) -> Result<Guarded<'a, M, [T]>, M::ReleaseError> {
-        Ok(self.as_bytes().slice(offset..offset + count * size_of::<T>()).cast_slice::<T>())
+        self.as_bytes().try_slice(offset..offset + count * size_of::<T>())?.try_cast_slice::<T>()
     }
 
     #[allow(clippy::wrong_self_convention)]
@@ -245,21 +245,9 @@ impl<'a, V: BasicNodeVariant> Wrapper<Guarded<'a, Exclusive, BasicNode<V>>> {
         Ok(())
     }
 }
-
-impl<'a> Wrapper<Guarded<'a, Exclusive, BasicNode<BasicNodeLeaf>>> {
-    pub fn insert_leaf(&mut self, key: &[u8], val: &[u8]) {
-        self.insert(key, val).unwrap()
-    }
-}
-impl<'a> Wrapper<Guarded<'a, Exclusive, BasicNode<BasicNodeInner>>> {
-    pub fn insert_inner(&mut self, key: &[u8], pid: u64) {
-        self.insert(key, &bytemuck::cast::<u64, [u16; 4]>(pid)[..3]).unwrap()
-    }
-}
-
 impl<'a, V: BasicNodeVariant, M: SeqLockMode> Wrapper<Guarded<'a, M, BasicNode<V>>> {
     fn u16(self, offset: usize) -> Result<Guarded<'a, M, u16>, M::ReleaseError> {
-        Ok(self.slice::<u16>(offset, 1)?.index(0))
+        self.slice::<u16>(offset, 1)?.try_index(0)
     }
     fn upper(self) -> <V::Upper as SeqLockWrappable>::Wrapper<Guarded<'a, M, V::Upper>> {
         assert_eq!(4 % align_of::<V::Upper>(), 0);
@@ -292,7 +280,7 @@ impl<'a, V: BasicNodeVariant, M: SeqLockMode> Wrapper<Guarded<'a, M, BasicNode<V
         self.slice(unchecked_record_offset + V::RECORD_TO_KEY_OFFSET, len as usize)
     }
 
-    fn find(&mut self, key: &[u8]) -> Result<Result<usize, usize>, M::ReleaseError>
+    fn find(self, key: &[u8]) -> Result<Result<usize, usize>, M::ReleaseError>
     where
         Self: Copy,
     {
@@ -303,7 +291,8 @@ impl<'a, V: BasicNodeVariant, M: SeqLockMode> Wrapper<Guarded<'a, M, BasicNode<V
         let truncated = &key[prefix_len..];
         let needle_head = key_head(truncated);
         let heads = self.heads()?;
-        let matching_head_range = (0..=heads.len() - 1).binary_all(|i| heads.s().index(i).load().cmp(&needle_head));
+        let matching_head_range = (0..=heads.len() - 1)
+            .binary_all(|i| heads.s().try_index(i).map(|x| x.load()).unwrap_or(0).cmp(&needle_head));
         if matching_head_range.is_empty() {
             return Ok(Err(matching_head_range.start));
         }
@@ -318,5 +307,31 @@ impl<'a, V: BasicNodeVariant, M: SeqLockMode> Wrapper<Guarded<'a, M, BasicNode<V
             key.mem_cmp(truncated)
         });
         Ok(key_position)
+    }
+}
+
+impl<'a, M: SeqLockMode> Wrapper<Guarded<'a, M, BasicNode<BasicNodeLeaf>>> {
+    pub fn lookup_leaf(self, key: &[u8]) -> Result<Option<Guarded<'a, M, [u8]>>, M::ReleaseError>
+    where
+        Self: Copy,
+    {
+        if let Ok(i) = self.find(key)? {
+            let offset = self.slots()?.try_index(i)?.load() as usize;
+            let val_start = self.u16(offset)?.load() as usize + offset + BasicNodeLeaf::RECORD_TO_KEY_OFFSET;
+            let val_len = self.u16(offset + 2)?.load() as usize;
+            Ok(Some(self.slice(val_start, val_len)?))
+        } else {
+            Ok(None)
+        }
+    }
+}
+impl<'a> Wrapper<Guarded<'a, Exclusive, BasicNode<BasicNodeLeaf>>> {
+    pub fn insert_leaf(&mut self, key: &[u8], val: &[u8]) {
+        self.insert(key, val).unwrap()
+    }
+}
+impl<'a> Wrapper<Guarded<'a, Exclusive, BasicNode<BasicNodeInner>>> {
+    pub fn insert_inner(&mut self, key: &[u8], pid: u64) {
+        self.insert(key, &bytemuck::cast::<u64, [u16; 4]>(pid)[..3]).unwrap()
     }
 }
