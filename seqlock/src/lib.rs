@@ -134,6 +134,10 @@ impl<'a, M: SeqLockMode, T: SeqLockWrappable + ?Sized> Guarded<'a, M, T> {
         T::wrap(Guarded { p: M::from_pointer(p), _p: PhantomData })
     }
 
+    pub fn wrap_mut(p: &'a mut T) -> T::Wrapper<Guarded<'a, M, T>> {
+        unsafe { T::wrap(Guarded { p: M::from_pointer(p), _p: PhantomData }) }
+    }
+
     pub fn as_ptr(&self) -> *mut T {
         let ptr = M::as_ptr(&self.p);
         let align = unsafe { align_of_val_raw(ptr) };
@@ -176,6 +180,12 @@ impl<'a, M: SeqLockMode, T: SeqLockWrappable + Pod> Guarded<'a, M, [T]> {
 
     pub fn load_slice<'dst>(&self, dst: &'dst mut [T]) {
         unsafe { M::load_slice(&self.p, transmute::<&'dst mut [T], &'dst mut [MaybeUninit<T>]>(dst)) }
+    }
+
+    pub fn load_slice_to_vec(&self) -> Vec<T> {
+        let mut dst = vec![T::zeroed(); self.len()];
+        self.load_slice(&mut dst);
+        dst
     }
 
     pub fn len(&self) -> usize {

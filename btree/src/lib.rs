@@ -1,6 +1,8 @@
 #![allow(clippy::missing_safety_doc)]
 
 mod byte_slice;
+#[cfg(test)]
+mod test_util;
 
 use crate::byte_slice::common_prefix;
 use bytemuck::{Pod, Zeroable};
@@ -245,6 +247,7 @@ impl<'a, V: BasicNodeVariant> Wrapper<Guarded<'a, Exclusive, BasicNode<V>>> {
         Ok(())
     }
 }
+
 impl<'a, V: BasicNodeVariant, M: SeqLockMode> Wrapper<Guarded<'a, M, BasicNode<V>>> {
     fn u16(self, offset: usize) -> Result<Guarded<'a, M, u16>, M::ReleaseError> {
         self.slice::<u16>(offset, 1)?.try_index(0)
@@ -325,13 +328,53 @@ impl<'a, M: SeqLockMode> Wrapper<Guarded<'a, M, BasicNode<BasicNodeLeaf>>> {
         }
     }
 }
+
 impl<'a> Wrapper<Guarded<'a, Exclusive, BasicNode<BasicNodeLeaf>>> {
     pub fn insert_leaf(&mut self, key: &[u8], val: &[u8]) {
         self.insert(key, val).unwrap()
     }
 }
+
 impl<'a> Wrapper<Guarded<'a, Exclusive, BasicNode<BasicNodeInner>>> {
     pub fn insert_inner(&mut self, key: &[u8], pid: u64) {
         self.insert(key, &bytemuck::cast::<u64, [u16; 4]>(pid)[..3]).unwrap()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::test_util::{bin_key_generator, subslices};
+    use crate::{BasicNode, BasicNodeLeaf};
+    use bytemuck::Zeroable;
+    use rand::prelude::SliceRandom;
+    use rand::rngs::SmallRng;
+    use rand::SeedableRng;
+    use seqlock::{Exclusive, Guarded};
+
+    #[test]
+    fn leaf() {
+        let rng = &mut SmallRng::seed_from_u64(42);
+        let keys = bin_key_generator(10..=50);
+        let mut keys: Vec<Vec<u8>> = (0..50).map(|_| keys(rng)).collect();
+        keys.sort();
+        keys.dedup();
+        let leaf = &mut BasicNode::<BasicNodeLeaf>::zeroed();
+        let mut leaf = Guarded::<Exclusive, _>::wrap_mut(leaf);
+        for keys in subslices(&keys, 5) {
+            let kc = keys.len();
+            leaf.init(&keys[1], &keys[kc - 2], ());
+            let insert_range = 2..kc - 2;
+            let mut to_insert = keys[insert_range.clone()].to_vec();
+            to_insert.shuffle(rng);
+            for k in &to_insert {
+                leaf.insert_leaf(k, k);
+            }
+            for (i, k) in keys.iter().enumerate() {
+                assert_eq!(
+                    Some(k).filter(|_| insert_range.contains(&i)),
+                    leaf.s().lookup_leaf(k).unwrap().map(|v| v.load_slice_to_vec()).as_ref()
+                );
+            }
+        }
     }
 }
