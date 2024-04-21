@@ -109,9 +109,9 @@ impl<'a, N: Node, M: SeqLockMode> Wrapper<Guarded<'a, M, N>> {
 
 fn key_head(k: &[u8]) -> u32 {
     let mut h = 0u32;
-    for x in k {
+    for i in 0..4 {
         h <<= 8;
-        h |= *x as u32;
+        h |= k.get(i).copied().unwrap_or(0) as u32;
     }
     h
 }
@@ -123,7 +123,7 @@ impl<'a, V: BasicNodeVariant> Wrapper<Guarded<'a, Exclusive, BasicNode<V>>> {
     fn relocate_by<const UP: bool, T: SeqLockWrappable + Pod>(&mut self, offset: usize, count: usize, dist: usize) {
         assert_eq!(offset % size_of::<T>(), 0);
         let offset = offset / size_of::<T>();
-        self.b().as_bytes().cast_slice::<T>().move_within_by::<false>(offset..offset + count, dist);
+        self.b().as_bytes().cast_slice::<T>().move_within_by::<UP>(offset..offset + count, dist);
     }
     fn heap_write_new(&mut self, key: &[u8], val: &[V::ValueSlice], write_slot: usize) -> Result<(), Never> {
         let size = Self::record_size(key.len(), val.len());
@@ -155,10 +155,11 @@ impl<'a, V: BasicNodeVariant> Wrapper<Guarded<'a, Exclusive, BasicNode<V>>> {
             assert_eq!(val.len(), 3);
         }
         loop {
+            let index = self.s().find(key).unwrap();
             let key = &key[self.prefix_len().load() as usize..];
             let count = self.count().load() as usize;
             let new_heap_start;
-            match self.s().find(key).unwrap() {
+            match index {
                 Ok(existing) => {
                     new_heap_start = Self::HEAD_OFFSET + Self::reserved_head_count(count) * 4 + count * 2;
                     if Self::record_size(key.len(), val.len()) <= (self.heap_bump().load() as usize - new_heap_start) {
@@ -190,6 +191,7 @@ impl<'a, V: BasicNodeVariant> Wrapper<Guarded<'a, Exclusive, BasicNode<V>>> {
                             );
                         }
                         self.relocate_by::<true, u32>(Self::HEAD_OFFSET + 4 * insert_at, count - insert_at, 1);
+                        self.count_mut().store(count as u16 + 1);
                         self.b().heads()?.index(insert_at).store(key_head(key));
                         self.heap_write_new(key, val, insert_at)?;
                         return Ok(());
@@ -213,22 +215,27 @@ impl<'a, V: BasicNodeVariant> Wrapper<Guarded<'a, Exclusive, BasicNode<V>>> {
         }
     }
 
+    fn heap_end(&mut self) -> usize {
+        size_of::<BasicNodeData>()
+            - Self::round_up(self.lower_fence_len().load() as usize + self.upper_fence_len().load() as usize)
+    }
+
     pub fn init(&mut self, lf: &[u8], uf: &[u8], upper: V::Upper) {
         assert_eq!(size_of::<BasicNode<V>>(), PAGE_SIZE - PAGE_HEAD_SIZE);
         self.count_mut().store(0);
         self.prefix_len_mut().store(common_prefix(lf, uf) as u16);
         self.lower_fence_len_mut().store(lf.len() as u16);
         self.upper_fence_len_mut().store(uf.len() as u16);
-        self.heap_bump_mut().store((size_of::<BasicNode<V>>() - lf.len() - uf.len()) as u16);
+        let heap_end = self.heap_end() as u16;
+        self.heap_bump_mut().store(heap_end);
         self.heap_freed_mut().store(0);
         V::Upper::get_mut(&mut self.b().upper()).store(upper);
     }
 
     fn compactify(&mut self) -> Result<(), Never> {
         let buffer = &mut [0u8; size_of::<BasicNodeData>()];
-        let fence_offset =
-            size_of::<Self>() - self.lower_fence_len().load() as usize - self.upper_fence_len().load() as usize;
-        let mut dst_offset = fence_offset;
+        let heap_end = self.heap_end();
+        let mut dst_offset = heap_end;
         for i in 0..self.count().load() as usize {
             let offset = self.s().slots().unwrap().index(i).load() as usize;
             let lens = self.s().slice::<u16>(offset, 2).unwrap();
@@ -240,7 +247,7 @@ impl<'a, V: BasicNodeVariant> Wrapper<Guarded<'a, Exclusive, BasicNode<V>>> {
             self.s().slice(offset, record_len)?.load_slice(&mut buffer[dst_offset..][..record_len]);
             self.b().slots().unwrap().index(i).store(dst_offset as u16);
         }
-        self.b().slice::<u8>(dst_offset, fence_offset - dst_offset)?.store_slice(&buffer[dst_offset..fence_offset]);
+        self.b().slice::<u8>(dst_offset, heap_end - dst_offset)?.store_slice(&buffer[dst_offset..heap_end]);
         debug_assert_eq!(self.heap_bump().load() + self.heap_freed().load(), dst_offset as u16);
         self.heap_freed_mut().store(0);
         self.heap_bump_mut().store(dst_offset as u16);
@@ -257,7 +264,7 @@ impl<'a, V: BasicNodeVariant, M: SeqLockMode> Wrapper<Guarded<'a, M, BasicNode<V
         unsafe { self.0.map_ptr(|x| addr_of_mut!((*x).0._data) as *mut V::Upper) }
     }
     fn round_up(x: usize) -> usize {
-        x + (1 - (x & 1))
+        x + (x % 2)
     }
     const HEAD_OFFSET: usize = offset_of!(BasicNodeData, _data) + V::UPPER_HEADS;
 
@@ -275,12 +282,10 @@ impl<'a, V: BasicNodeVariant, M: SeqLockMode> Wrapper<Guarded<'a, M, BasicNode<V
         self.slice(Self::HEAD_OFFSET + 4 * i, count)
     }
 
-    fn key(self, unchecked_record_offset: usize) -> Result<Guarded<'a, M, [u8]>, M::ReleaseError> {
-        if unchecked_record_offset + 2 > size_of::<Self>() || unchecked_record_offset % 2 != 0 {
-            return Err(M::release_error());
-        }
-        let len = self.s().u16(unchecked_record_offset)?.load();
-        self.slice(unchecked_record_offset + V::RECORD_TO_KEY_OFFSET, len as usize)
+    fn key(self, index: usize) -> Result<Guarded<'a, M, [u8]>, M::ReleaseError> {
+        let offset = self.s().slots().unwrap().try_index(index)?.load() as usize;
+        let len = self.s().u16(offset)?.load();
+        self.slice(offset + V::RECORD_TO_KEY_OFFSET, len as usize)
     }
 
     fn find(self, key: &[u8]) -> Result<Result<usize, usize>, M::ReleaseError>
@@ -294,6 +299,9 @@ impl<'a, V: BasicNodeVariant, M: SeqLockMode> Wrapper<Guarded<'a, M, BasicNode<V
         let truncated = &key[prefix_len..];
         let needle_head = key_head(truncated);
         let heads = self.heads()?;
+        if heads.is_empty() {
+            return Ok(Err(0));
+        }
         let matching_head_range = (0..=heads.len() - 1)
             .binary_all(|i| heads.s().try_index(i).map(|x| x.load()).unwrap_or(0).cmp(&needle_head));
         if matching_head_range.is_empty() {
@@ -330,8 +338,8 @@ impl<'a, M: SeqLockMode> Wrapper<Guarded<'a, M, BasicNode<BasicNodeLeaf>>> {
 }
 
 impl<'a> Wrapper<Guarded<'a, Exclusive, BasicNode<BasicNodeLeaf>>> {
-    pub fn insert_leaf(&mut self, key: &[u8], val: &[u8]) {
-        self.insert(key, val).unwrap()
+    pub fn insert_leaf(&mut self, key: &[u8], val: &[u8]) -> Result<(), ()> {
+        self.insert(key, val)
     }
 }
 
@@ -350,6 +358,7 @@ mod tests {
     use rand::rngs::SmallRng;
     use rand::SeedableRng;
     use seqlock::{Exclusive, Guarded};
+    use std::collections::{HashMap, HashSet};
 
     #[test]
     fn leaf() {
@@ -360,20 +369,24 @@ mod tests {
         keys.dedup();
         let leaf = &mut BasicNode::<BasicNodeLeaf>::zeroed();
         let mut leaf = Guarded::<Exclusive, _>::wrap_mut(leaf);
-        for keys in subslices(&keys, 5) {
+        for (_k, keys) in subslices(&keys, 5).enumerate() {
             let kc = keys.len();
             leaf.init(&keys[1], &keys[kc - 2], ());
             let insert_range = 2..kc - 2;
-            let mut to_insert = keys[insert_range.clone()].to_vec();
-            to_insert.shuffle(rng);
-            for k in &to_insert {
-                leaf.insert_leaf(k, k);
-            }
-            for (i, k) in keys.iter().enumerate() {
-                assert_eq!(
-                    Some(k).filter(|_| insert_range.contains(&i)),
-                    leaf.s().lookup_leaf(k).unwrap().map(|v| v.load_slice_to_vec()).as_ref()
-                );
+            let mut to_insert: Vec<&[u8]> = keys[insert_range.clone()].iter().map(|x| x.as_slice()).collect();
+            let mut inserted = HashSet::new();
+            for _p in 0..2 {
+                to_insert.shuffle(rng);
+                for &k in to_insert.iter() {
+                    if leaf.insert_leaf(k, k).is_ok() {
+                        inserted.insert(k);
+                    }
+                }
+                for (_i, k) in keys.iter().enumerate() {
+                    let expected = Some(k).filter(|_| inserted.contains(k.as_slice()));
+                    let actual = leaf.s().lookup_leaf(k).unwrap().map(|v| v.load_slice_to_vec());
+                    assert_eq!(expected, actual.as_ref());
+                }
             }
         }
     }
