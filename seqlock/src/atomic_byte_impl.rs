@@ -3,6 +3,7 @@ use crate::{Exclusive, Optimistic, OptimisticLockError, SeqLockModeExclusiveImpl
 use bytemuck::Pod;
 use std::cmp::Ordering;
 use std::mem::{size_of, size_of_val, MaybeUninit};
+use std::ops::Range;
 use std::slice::from_raw_parts;
 use std::sync::atomic::Ordering::{Acquire, Relaxed};
 use std::sync::atomic::{compiler_fence, AtomicU64, AtomicU8};
@@ -16,15 +17,15 @@ pub fn optimistic_release(lock: &AtomicU64, expected: u64) -> Result<(), Optimis
     }
 }
 
-unsafe fn atomic_memcpy<const FORWARD: bool>(src: *const u8, dst: *mut u8, len: usize) {
+unsafe fn atomic_memcpy<const REVERSE: bool>(src: *const u8, dst: *mut u8, len: usize) {
     let src = from_raw_parts(src as *const AtomicU8, len);
     let dst = from_raw_parts(dst as *const AtomicU8, len);
-    if FORWARD {
-        for i in 0..len {
+    if REVERSE {
+        for i in (0..len).rev() {
             dst[i].store(src[i].load(Relaxed), Relaxed)
         }
     } else {
-        for i in (0..len).rev() {
+        for i in 0..len {
             dst[i].store(src[i].load(Relaxed), Relaxed)
         }
     }
@@ -47,12 +48,12 @@ unsafe impl<M: CommonImpl> SeqLockModeImpl for M {
 
     unsafe fn load<T: Pod>(p: &Self::Pointer<'_, T>) -> T {
         let mut buffer = MaybeUninit::<T>::uninit();
-        atomic_memcpy::<true>(*p as *const u8, buffer.as_mut_ptr() as *mut u8, size_of::<T>());
+        atomic_memcpy::<false>(*p as *const u8, buffer.as_mut_ptr() as *mut u8, size_of::<T>());
         buffer.assume_init()
     }
 
     unsafe fn load_slice<T: Pod>(p: &Self::Pointer<'_, [T]>, dst: &mut [MaybeUninit<T>]) {
-        atomic_memcpy::<true>(*p as *const u8, dst.as_mut_ptr() as *mut u8, size_of_val(dst))
+        atomic_memcpy::<false>(*p as *const u8, dst.as_mut_ptr() as *mut u8, size_of_val(dst))
     }
 
     unsafe fn bit_cmp_slice<T: Pod>(p: &Self::Pointer<'_, [T]>, other: &[T]) -> Ordering {
@@ -72,21 +73,20 @@ unsafe impl<M: CommonImpl> SeqLockModeImpl for M {
 
 unsafe impl SeqLockModeExclusiveImpl for Exclusive {
     unsafe fn store<T>(p: &mut Self::Pointer<'_, T>, x: T) {
-        atomic_memcpy::<true>(&x as *const T as *const u8, *p as *mut u8, size_of::<T>())
+        atomic_memcpy::<false>(&x as *const T as *const u8, *p as *mut u8, size_of::<T>())
     }
 
     unsafe fn store_slice<T>(p: &mut Self::Pointer<'_, [T]>, x: &[T]) {
-        atomic_memcpy::<true>(x.as_ptr() as *const u8, *p as *mut T as *mut u8, size_of_val(x));
+        atomic_memcpy::<false>(x.as_ptr() as *const u8, *p as *mut T as *mut u8, size_of_val(x));
     }
 
-    unsafe fn move_within_slice<T, const MOVE_UP: bool>(p: &mut Self::Pointer<'_, [T]>, distance: usize) {
-        let len = (p.len() - distance) * size_of::<T>();
-        let offset = distance * size_of::<T>();
-        let p = *p as *mut T as *mut u8;
-        if MOVE_UP {
-            atomic_memcpy::<false>(p, p.add(offset), len);
-        } else {
-            atomic_memcpy::<true>(p.add(offset), p, len);
-        }
+    unsafe fn move_within_slice_to<T, const MOVE_UP: bool>(
+        p: &mut Self::Pointer<'_, [T]>,
+        src_range: Range<usize>,
+        dst: usize,
+    ) {
+        let len = (src_range.len()) * size_of::<T>();
+        let p = *p as *mut T;
+        atomic_memcpy::<MOVE_UP>(p.add(src_range.start).cast(), p.add(dst).cast(), len)
     }
 }

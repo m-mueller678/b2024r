@@ -9,6 +9,7 @@ use bytemuck::Pod;
 use std::cmp::Ordering;
 use std::marker::PhantomData;
 use std::mem::{align_of, align_of_val_raw, size_of, transmute, MaybeUninit};
+use std::ops::Range;
 use std::ptr::slice_from_raw_parts_mut;
 
 mod wrappable;
@@ -196,13 +197,34 @@ impl<'a, M: SeqLockMode, T: SeqLockWrappable + Pod> Guarded<'a, M, [T]> {
     {
         unsafe { M::store_slice::<T>(&mut self.p, x) }
     }
-    pub fn move_within<const MOVE_UP: bool>(&mut self, distance: usize)
+    pub fn move_within_by<const MOVE_UP: bool>(&mut self, src_range: Range<usize>, distance: usize)
     where
         M: SeqLockModeExclusive,
     {
-        assert!(distance <= M::as_ptr(&self.p).len());
+        if !MOVE_UP {
+            assert!(distance <= src_range.start);
+        }
         unsafe {
-            M::move_within_slice::<T, MOVE_UP>(&mut self.p, distance);
+            M::move_within_slice_to::<T, MOVE_UP>(
+                &mut self.p,
+                src_range.clone(),
+                if MOVE_UP { src_range.start + distance } else { src_range.start - distance },
+            );
+        }
+    }
+
+    pub fn move_within_to<const MOVE_UP: bool>(&mut self, src_range: Range<usize>, dst: usize)
+    where
+        M: SeqLockModeExclusive,
+    {
+        if MOVE_UP {
+            assert!(dst > src_range.start);
+        } else {
+            assert!(dst < src_range.start);
+        }
+        assert!(src_range.start.max(dst) + src_range.len() <= self.as_ptr().len());
+        unsafe {
+            M::move_within_slice_to::<T, MOVE_UP>(&mut self.p, src_range, dst);
         }
     }
 
@@ -236,7 +258,11 @@ impl<'a, M: SeqLockMode, T: SeqLockWrappable + Pod, const N: usize> crate::Guard
 unsafe trait SeqLockModeExclusiveImpl: SeqLockModeImpl {
     unsafe fn store<T>(p: &mut Self::Pointer<'_, T>, x: T);
     unsafe fn store_slice<T>(p: &mut Self::Pointer<'_, [T]>, x: &[T]);
-    unsafe fn move_within_slice<T, const MOVE_UP: bool>(p: &mut Self::Pointer<'_, [T]>, distance: usize);
+    unsafe fn move_within_slice_to<T, const MOVE_UP: bool>(
+        p: &mut Self::Pointer<'_, [T]>,
+        src_range: Range<usize>,
+        dst: usize,
+    );
 }
 
 pub struct Guarded<'a, M: SeqLockMode, T: ?Sized> {

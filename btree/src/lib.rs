@@ -55,11 +55,11 @@ pub struct BasicNode<V: BasicNodeVariant>(
 unsafe impl<V: BasicNodeVariant> Pod for BasicNode<V> {}
 
 pub trait BasicNodeVariant: 'static + Copy + Zeroable {
-    type Upper: SeqLockWrappable + Pod + Copy + Zeroable;
+    type Upper: SeqLockWrappable + Pod;
     const IS_LEAF: bool;
     const RECORD_TO_KEY_OFFSET: usize = if Self::IS_LEAF { 4 } else { 8 };
     const UPPER_HEADS: usize = size_of::<Self::Upper>().div_ceil(4);
-    type ValueSlice;
+    type ValueSlice: SeqLockWrappable + Pod;
 }
 
 #[derive(Copy, Clone, Zeroable, Pod)]
