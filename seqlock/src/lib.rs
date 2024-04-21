@@ -94,6 +94,7 @@ where
     }
 }
 
+#[allow(clippy::missing_safety_doc)]
 unsafe trait SeqLockModeImpl {
     type Pointer<'a, T: ?Sized>: Copy;
     unsafe fn from_pointer<'a, T: ?Sized>(x: *mut T) -> Self::Pointer<'a, T>;
@@ -116,6 +117,7 @@ impl<'a, M: SeqLockMode, T: SeqLockWrappable + ?Sized> Guarded<'a, M, T> {
         unsafe { Guarded::wrap_unchecked(self.as_ptr()) }
     }
 
+    #[allow(clippy::missing_safety_doc)]
     pub unsafe fn map_ptr<U: SeqLockWrappable + ?Sized>(
         self,
         f: impl FnOnce(*mut T) -> *mut U,
@@ -123,6 +125,7 @@ impl<'a, M: SeqLockMode, T: SeqLockWrappable + ?Sized> Guarded<'a, M, T> {
         Guarded::wrap_unchecked(f(M::as_ptr(&self.p)))
     }
 
+    #[allow(clippy::missing_safety_doc)]
     pub unsafe fn wrap_unchecked(p: *mut T) -> T::Wrapper<Guarded<'a, M, T>> {
         T::wrap(Guarded { p: M::from_pointer(p), _p: PhantomData })
     }
@@ -175,10 +178,11 @@ impl<'a, M: SeqLockMode, T: SeqLockWrappable + Pod> Guarded<'a, M, [T]> {
         self.as_ptr().len()
     }
 
-    pub fn cast_slice<U: Pod + SeqLockWrappable>(self) -> Guarded<'a, M, [U]>
-    where
-        T: Pod,
-    {
+    pub fn is_empty(&self) -> bool {
+        self.as_ptr().is_empty()
+    }
+
+    pub fn cast_slice<U: Pod + SeqLockWrappable>(self) -> Guarded<'a, M, [U]> {
         let ptr = M::as_ptr(&self.p);
         let byte_len = ptr.len() * size_of::<T>();
         assert_eq!(byte_len % size_of::<U>(), 0);
@@ -275,6 +279,7 @@ impl<'a, M: SeqLockMode, T: SeqLockWrappable + Pod, const N: usize> crate::Guard
     }
 }
 
+#[allow(clippy::missing_safety_doc)]
 unsafe trait SeqLockModeExclusiveImpl: SeqLockModeImpl {
     unsafe fn store<T>(p: &mut Self::Pointer<'_, T>, x: T);
     unsafe fn store_slice<T>(p: &mut Self::Pointer<'_, [T]>, x: &[T]);

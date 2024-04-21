@@ -1,3 +1,5 @@
+#![allow(clippy::missing_safety_doc)]
+
 mod byte_slice;
 
 use crate::byte_slice::common_prefix;
@@ -96,6 +98,7 @@ impl<'a, N: Node, M: SeqLockMode> Wrapper<Guarded<'a, M, N>> {
         Ok(self.as_bytes().slice(offset..offset + count * size_of::<T>()).cast_slice::<T>())
     }
 
+    #[allow(clippy::wrong_self_convention)]
     fn as_bytes(self) -> Guarded<'a, M, [u8]> {
         const SIZE: usize = PAGE_SIZE - PAGE_HEAD_SIZE;
         self.0.cast::<[u8; SIZE]>().as_slice()
