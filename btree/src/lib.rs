@@ -64,7 +64,7 @@ pub trait BasicNodeVariant: 'static + Copy + Zeroable {
 
 #[derive(Copy, Clone, Zeroable, Pod)]
 #[repr(transparent)]
-struct BasicNodeLeaf;
+pub struct BasicNodeLeaf;
 
 impl BasicNodeVariant for BasicNodeLeaf {
     type Upper = ();
@@ -75,7 +75,7 @@ impl BasicNodeVariant for BasicNodeLeaf {
 
 #[derive(Copy, Clone, Zeroable, Pod)]
 #[repr(transparent)]
-struct BasicNodeInner;
+pub struct BasicNodeInner;
 
 impl BasicNodeVariant for BasicNodeInner {
     type Upper = PageId;
@@ -83,7 +83,7 @@ impl BasicNodeVariant for BasicNodeInner {
     const IS_LEAF: bool = false;
 }
 
-unsafe trait Node: SeqLockWrappable + Pod {}
+pub unsafe trait Node: SeqLockWrappable + Pod {}
 
 unsafe impl<V: BasicNodeVariant> Node for BasicNode<V> {}
 
@@ -93,8 +93,12 @@ impl<'a, N: Node, M: SeqLockMode> Wrapper<Guarded<'a, M, N>> {
         offset: usize,
         count: usize,
     ) -> Result<Guarded<'a, M, [T]>, M::ReleaseError> {
+        Ok(self.as_bytes().slice(offset..offset + count * size_of::<T>()).cast_slice::<T>())
+    }
+
+    fn as_bytes(self) -> Guarded<'a, M, [u8]> {
         const SIZE: usize = PAGE_SIZE - PAGE_HEAD_SIZE;
-        Ok(self.0.cast::<[u8; SIZE]>().as_slice().slice(offset, count * size_of::<T>()).cast_slice::<T>())
+        self.0.cast::<[u8; SIZE]>().as_slice()
     }
 }
 
@@ -107,7 +111,24 @@ fn key_head(k: &[u8]) -> u32 {
     h
 }
 
+const HEAD_RESERVATION: usize = 8;
+
 impl<'a, V: BasicNodeVariant> Wrapper<Guarded<'a, Exclusive, BasicNode<V>>> {
+    /// offset is in units of bytes, others in units of T
+    fn relocate_by<const UP: bool, T: SeqLockWrappable + Pod>(&mut self, offset: usize, count: usize, dist: usize) {
+        assert_eq!(offset % size_of::<T>(), 0);
+        let offset = offset / size_of::<T>();
+        self.b().as_bytes().cast_slice::<T>().move_within_by::<false>(offset..offset + count, dist);
+    }
+    fn heap_write_new(&mut self, key: &[u8], val: &[V::ValueSlice], write_slot: usize) -> Result<(), Never> {
+        let size = Self::record_size(key.len(), val.len());
+        let offset = self.heap_bump().load() as usize - size;
+        self.heap_write_record(key, val, offset)?;
+        self.heap_bump_mut().store(offset as u16);
+        self.b().slots()?.index(write_slot).store(offset as u16);
+        Ok(())
+    }
+
     fn heap_write_record(&mut self, key: &[u8], val: &[V::ValueSlice], offset: usize) -> Result<(), Never> {
         self.b().u16(offset)?.store(key.len() as u16);
         if V::IS_LEAF {
@@ -129,39 +150,64 @@ impl<'a, V: BasicNodeVariant> Wrapper<Guarded<'a, Exclusive, BasicNode<V>>> {
             assert_eq!(val.len(), 3);
         }
         loop {
-            let insert_pos = self.s().find(key).unwrap();
             let key = &key[self.prefix_len().load() as usize..];
-            let record_len =
-                if V::IS_LEAF { 4 + Self::round_up(key.len() + val.len()) } else { 8 + Self::round_up(key.len()) };
             let count = self.count().load() as usize;
-            let heap_start = Self::HEAD_OFFSET + Self::reserved_head_count(count) * 4 + count * 2;
-            let free_space = self.heap_bump().load() as usize - heap_start;
-            match insert_pos {
+            let new_heap_start;
+            match self.s().find(key).unwrap() {
                 Ok(existing) => {
-                    if record_len <= free_space {
-                        let record_pos = self.heap_bump().load() as usize - record_len - 4;
-                        self.heap_bump_mut().store(record_pos as u16);
-                        self.b().slots()?.index(existing).store(record_pos as u16);
-                        self.heap_write_record(key, val, record_pos)?;
+                    new_heap_start = Self::HEAD_OFFSET + Self::reserved_head_count(count) * 4 + count * 2;
+                    if Self::record_size(key.len(), val.len()) <= (self.heap_bump().load() as usize - new_heap_start) {
+                        self.heap_write_new(key, val, existing)?;
                         return Ok(());
                     }
-                    if free_space + (self.s().heap_freed().load() as usize) < record_len {
-                        return Err(());
-                    }
-                    self.compactify()?;
-                    continue;
                 }
                 Err(insert_at) => {
-                    let new_slot_start = Self::HEAD_OFFSET + Self::reserved_head_count(count + 1) * 4;
-                    let new_heap_start = new_slot_start + (count + 1) * 2;
-                    let free_space = self.heap_bump().load() as usize - new_heap_start;
-                    if record_len <= free_space {
-                        if Self::reserved_head_count(count) != Self::reserved_head_count(count + 1) {}
+                    new_heap_start = Self::HEAD_OFFSET + Self::reserved_head_count(count + 1) * 4 + (count + 1) * 2;
+                    if Self::record_size(key.len(), val.len()) <= (self.heap_bump().load() as usize - new_heap_start) {
+                        let orhc = Self::reserved_head_count(count);
+                        let nrhc = Self::reserved_head_count(count + 1);
+                        if nrhc == orhc {
+                            self.relocate_by::<true, u16>(
+                                Self::HEAD_OFFSET + nrhc * 4 + insert_at * 2,
+                                count - insert_at,
+                                1,
+                            );
+                        } else {
+                            self.relocate_by::<true, u16>(
+                                Self::HEAD_OFFSET + orhc * 4 + insert_at * 2,
+                                count - insert_at,
+                                HEAD_RESERVATION * 2 + 1,
+                            );
+                            self.relocate_by::<true, u16>(
+                                Self::HEAD_OFFSET + orhc * 4,
+                                insert_at,
+                                HEAD_RESERVATION * 2,
+                            );
+                        }
+                        self.relocate_by::<true, u32>(Self::HEAD_OFFSET + 4 * insert_at, count - insert_at, 1);
+                        self.b().heads()?.index(insert_at).store(key_head(key));
+                        self.heap_write_new(key, val, insert_at)?;
+                        return Ok(());
                     }
                 }
             }
+            let available_space =
+                self.heap_bump().load() as usize - new_heap_start + (self.s().heap_freed().load() as usize);
+            if available_space < Self::record_size(key.len(), val.len()) {
+                return Err(());
+            }
+            self.compactify()?;
         }
     }
+
+    fn record_size(key: usize, val: usize) -> usize {
+        if V::IS_LEAF {
+            4 + Self::round_up(key + val)
+        } else {
+            8 + Self::round_up(key)
+        }
+    }
+
     pub fn init(&mut self, lf: &[u8], uf: &[u8], upper: V::Upper) {
         assert_eq!(size_of::<BasicNode<V>>(), PAGE_SIZE - PAGE_HEAD_SIZE);
         self.count_mut().store(0);
@@ -197,7 +243,16 @@ impl<'a, V: BasicNodeVariant> Wrapper<Guarded<'a, Exclusive, BasicNode<V>>> {
     }
 }
 
-impl<'a> Wrapper<Guarded<'a, Exclusive, BasicNode<BasicNodeLeaf>>> {}
+impl<'a> Wrapper<Guarded<'a, Exclusive, BasicNode<BasicNodeLeaf>>> {
+    pub fn insert_leaf(&mut self, key: &[u8], val: &[u8]) {
+        self.insert(key, val).unwrap()
+    }
+}
+impl<'a> Wrapper<Guarded<'a, Exclusive, BasicNode<BasicNodeInner>>> {
+    pub fn insert_inner(&mut self, key: &[u8], pid: u64) {
+        self.insert(key, &bytemuck::cast::<u64, [u16; 4]>(pid)[..3]).unwrap()
+    }
+}
 
 impl<'a, V: BasicNodeVariant, M: SeqLockMode> Wrapper<Guarded<'a, M, BasicNode<V>>> {
     fn u16(self, offset: usize) -> Result<Guarded<'a, M, u16>, M::ReleaseError> {
@@ -218,7 +273,7 @@ impl<'a, V: BasicNodeVariant, M: SeqLockMode> Wrapper<Guarded<'a, M, BasicNode<V
     }
 
     fn reserved_head_count(count: usize) -> usize {
-        count.next_multiple_of(8)
+        count.next_multiple_of(HEAD_RESERVATION)
     }
     fn slots(self) -> Result<Guarded<'a, M, [u16]>, M::ReleaseError> {
         let count = self.count().load() as usize;

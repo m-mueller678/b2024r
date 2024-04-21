@@ -9,7 +9,7 @@ use bytemuck::Pod;
 use std::cmp::Ordering;
 use std::marker::PhantomData;
 use std::mem::{align_of, align_of_val_raw, size_of, transmute, MaybeUninit};
-use std::ops::Range;
+use std::ops::{Bound, Range, RangeBounds};
 use std::ptr::slice_from_raw_parts_mut;
 
 mod wrappable;
@@ -234,10 +234,30 @@ impl<'a, M: SeqLockMode, T: SeqLockWrappable + Pod> Guarded<'a, M, [T]> {
         unsafe { Guarded::wrap_unchecked((ptr as *mut T).add(i)) }
     }
 
-    pub fn slice(self, offset: usize, len: usize) -> Self {
+    pub fn slice(self, x: impl RangeBounds<usize>) -> Self {
         let ptr: *mut [T] = self.as_ptr();
-        assert!(offset.checked_add(len).unwrap() <= ptr.len());
-        unsafe { Guarded::wrap_unchecked(slice_from_raw_parts_mut((ptr as *mut T).add(offset), len)) }
+        let mut start = ptr as *mut T;
+        let mut len = ptr.len();
+        let upper = match x.end_bound() {
+            Bound::Unbounded => None,
+            Bound::Included(&i) => Some(i + 1),
+            Bound::Excluded(&i) => Some(i),
+        };
+        if let Some(upper) = upper {
+            assert!(upper <= len);
+            len = upper;
+        }
+        let lower = match x.start_bound() {
+            Bound::Unbounded => None,
+            Bound::Included(&i) => Some(i),
+            Bound::Excluded(&i) => Some(i + 1),
+        };
+        if let Some(lower) = lower {
+            assert!(lower <= len);
+            len -= lower;
+            start = unsafe { start.add(lower) };
+        }
+        unsafe { Guarded::wrap_unchecked(slice_from_raw_parts_mut(start, len)) }
     }
 
     pub fn as_array<const LEN: usize>(self) -> Guarded<'a, M, [T; LEN]> {
