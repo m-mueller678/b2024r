@@ -170,6 +170,7 @@ impl<'a, V: BasicNodeVariant> Wrapper<Guarded<'a, Exclusive, BasicNode<V>>> {
                     }
                 }
                 Err(insert_at) => {
+                    self.s().validate()?;
                     new_heap_start = Self::HEAD_OFFSET + Self::reserved_head_count(count + 1) * 4 + (count + 1) * 2;
                     if new_heap_start + Self::record_size(key.len(), val.len()) <= self.heap_bump().load() as usize {
                         let orhc = Self::reserved_head_count(count);
@@ -196,6 +197,7 @@ impl<'a, V: BasicNodeVariant> Wrapper<Guarded<'a, Exclusive, BasicNode<V>>> {
                         self.count_mut().store(count as u16 + 1);
                         self.b().heads()?.index(insert_at).store(key_head(key));
                         self.heap_write_new(key, val, insert_at)?;
+                        self.s().validate()?;
                         return Ok(());
                     }
                 }
@@ -284,8 +286,10 @@ impl<'a, V: BasicNodeVariant, M: SeqLockMode> Wrapper<Guarded<'a, M, BasicNode<V
     where
         Self: Copy,
     {
-        Ok(self.u16(offset)?.load() as usize
-            + if V::IS_LEAF { 2 + self.s().u16(offset + 2)?.load() as usize } else { 8 })
+        Ok(Self::reserved_head_count(
+            self.u16(offset)?.load() as usize
+                + if V::IS_LEAF { 4 + self.s().u16(offset + 2)?.load() as usize } else { 8 },
+        ))
     }
 
     fn heap_end(self) -> usize
@@ -308,10 +312,9 @@ impl<'a, V: BasicNodeVariant, M: SeqLockMode> Wrapper<Guarded<'a, M, BasicNode<V
         }
         let record_size_sum: usize =
             self.s().slots()?.iter().map(|x| self.stored_record_size(x.load() as usize).unwrap()).sum();
-        assert_eq!(
-            self.heap_end() - record_size_sum,
-            self.heap_bump().load() as usize + self.heap_freed().load() as usize
-        );
+        let calculated = self.heap_end() - record_size_sum;
+        let tracked = self.heap_bump().load() as usize + self.heap_freed().load() as usize;
+        assert_eq!(calculated, tracked);
         Ok(())
     }
     fn upper(self) -> <V::Upper as SeqLockWrappable>::Wrapper<Guarded<'a, M, V::Upper>> {
