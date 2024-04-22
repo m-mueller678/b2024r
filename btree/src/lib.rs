@@ -207,6 +207,34 @@ impl<'a, V: BasicNodeVariant> Wrapper<Guarded<'a, Exclusive, BasicNode<V>>> {
         }
     }
 
+    fn remove(&mut self, key: &[u8]) -> Result<Option<()>, Never> {
+        let Ok(index) = self.s().find(key)? else {
+            return Ok(None);
+        };
+        let offset = self.s().slots()?.index(index).load() as usize;
+        let record_size = self.s().u16(offset)?.load() as usize
+            + if V::IS_LEAF { 2 + self.s().u16(offset + 2)?.load() as usize } else { 8 };
+        self.heap_freed_mut().update(|x| x + record_size as u16);
+        let count = self.count().load() as usize;
+        {
+            let orhc = Self::reserved_head_count(count);
+            let nrhc = Self::reserved_head_count(count - 1);
+            self.relocate_by::<false, u32>(Self::HEAD_OFFSET + 4 * index + 4, count + 1 - index, 1);
+            if nrhc == orhc {
+                self.relocate_by::<false, u16>(Self::HEAD_OFFSET + nrhc * 4 + index * 2 + 2, count - 1 - index, 1);
+            } else {
+                self.relocate_by::<false, u16>(Self::HEAD_OFFSET + orhc * 4, index, HEAD_RESERVATION * 2);
+                self.relocate_by::<false, u16>(
+                    Self::HEAD_OFFSET + orhc * 4 + index * 2 + 2,
+                    count - 1 - index,
+                    HEAD_RESERVATION * 2 + 1,
+                );
+            }
+        }
+        self.count_mut().store((count - 1) as u16);
+        Ok(Some(()))
+    }
+
     fn record_size(key: usize, val: usize) -> usize {
         if V::IS_LEAF {
             4 + Self::round_up(key + val)
@@ -338,6 +366,7 @@ impl<'a, M: SeqLockMode> Wrapper<Guarded<'a, M, BasicNode<BasicNodeLeaf>>> {
 }
 
 impl<'a> Wrapper<Guarded<'a, Exclusive, BasicNode<BasicNodeLeaf>>> {
+    #[allow(clippy::result_unit_err)]
     pub fn insert_leaf(&mut self, key: &[u8], val: &[u8]) -> Result<(), ()> {
         self.insert(key, val)
     }

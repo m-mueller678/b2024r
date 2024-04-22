@@ -171,6 +171,16 @@ impl<'a, M: SeqLockMode, T: SeqLockWrappable + ?Sized> Guarded<'a, M, T> {
     {
         unsafe { M::store(&mut self.p, x) }
     }
+
+    pub fn update(&mut self, f: impl FnOnce(T) -> T) -> T
+    where
+        T: Pod,
+        M: SeqLockModeExclusive,
+    {
+        let x = f(self.load());
+        self.store(x);
+        x
+    }
 }
 
 impl<'a, M: SeqLockMode, T: SeqLockWrappable + Pod> Guarded<'a, M, [T]> {
