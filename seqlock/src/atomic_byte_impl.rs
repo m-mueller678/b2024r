@@ -86,6 +86,9 @@ unsafe impl SeqLockModeExclusiveImpl for Exclusive {
         dst: usize,
     ) {
         let len = (src_range.len()) * size_of::<T>();
+        if len == 0 {
+            return;
+        }
         let p = *p as *mut T;
         atomic_memcpy::<MOVE_UP>(p.add(src_range.start).cast(), p.add(dst).cast(), len)
     }

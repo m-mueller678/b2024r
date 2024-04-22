@@ -5,11 +5,13 @@ mod byte_slice;
 mod test_util;
 
 use crate::byte_slice::common_prefix;
+use bstr::BString;
 use bytemuck::{Pod, Zeroable};
 use indxvec::Search;
 use seqlock::{
     seqlock_wrapper, Exclusive, Guarded, Never, SeqLockMode, SeqLockModePessimistic, SeqLockWrappable, SeqlockAccessors,
 };
+use std::any::type_name;
 use std::cmp::Ordering;
 use std::marker::PhantomData;
 use std::mem::{align_of, offset_of, size_of};
@@ -165,12 +167,13 @@ impl<'a, V: BasicNodeVariant> Wrapper<Guarded<'a, Exclusive, BasicNode<V>>> {
                 Ok(existing) => {
                     new_heap_start = Self::HEAD_OFFSET + Self::reserved_head_count(count) * 4 + count * 2;
                     if Self::record_size(key.len(), val.len()) <= (self.heap_bump().load() as usize - new_heap_start) {
+                        let old_size = self.s().stored_record_size(self.s().slots()?.index(existing).load() as usize)?;
+                        self.heap_freed_mut().update(|x| x + old_size as u16);
                         self.heap_write_new(key, val, existing)?;
                         return Ok(());
                     }
                 }
                 Err(insert_at) => {
-                    self.s().validate()?;
                     new_heap_start = Self::HEAD_OFFSET + Self::reserved_head_count(count + 1) * 4 + (count + 1) * 2;
                     if new_heap_start + Self::record_size(key.len(), val.len()) <= self.heap_bump().load() as usize {
                         let orhc = Self::reserved_head_count(count);
@@ -197,7 +200,6 @@ impl<'a, V: BasicNodeVariant> Wrapper<Guarded<'a, Exclusive, BasicNode<V>>> {
                         self.count_mut().store(count as u16 + 1);
                         self.b().heads()?.index(insert_at).store(key_head(key));
                         self.heap_write_new(key, val, insert_at)?;
-                        self.s().validate()?;
                         return Ok(());
                     }
                 }
@@ -222,7 +224,7 @@ impl<'a, V: BasicNodeVariant> Wrapper<Guarded<'a, Exclusive, BasicNode<V>>> {
         {
             let orhc = Self::reserved_head_count(count);
             let nrhc = Self::reserved_head_count(count - 1);
-            self.relocate_by::<false, u32>(Self::HEAD_OFFSET + 4 * index + 4, count + 1 - index, 1);
+            self.relocate_by::<false, u32>(Self::HEAD_OFFSET + 4 * index + 4, count - 1 - index, 1);
             if nrhc == orhc {
                 self.relocate_by::<false, u16>(Self::HEAD_OFFSET + nrhc * 4 + index * 2 + 2, count - 1 - index, 1);
             } else {
@@ -235,6 +237,7 @@ impl<'a, V: BasicNodeVariant> Wrapper<Guarded<'a, Exclusive, BasicNode<V>>> {
             }
         }
         self.count_mut().store((count - 1) as u16);
+        self.s().validate()?;
         Ok(Some(()))
     }
 
@@ -286,7 +289,7 @@ impl<'a, V: BasicNodeVariant, M: SeqLockMode> Wrapper<Guarded<'a, M, BasicNode<V
     where
         Self: Copy,
     {
-        Ok(Self::reserved_head_count(
+        Ok(Self::round_up(
             self.u16(offset)?.load() as usize
                 + if V::IS_LEAF { 4 + self.s().u16(offset + 2)?.load() as usize } else { 8 },
         ))
@@ -344,6 +347,36 @@ impl<'a, V: BasicNodeVariant, M: SeqLockMode> Wrapper<Guarded<'a, M, BasicNode<V
         let offset = self.s().slots().unwrap().try_index(index)?.load() as usize;
         let len = self.s().u16(offset)?.load();
         self.slice(offset + V::RECORD_TO_KEY_OFFSET, len as usize)
+    }
+
+    fn print(self) -> Result<(), M::ReleaseError>
+    where
+        Self: Copy,
+    {
+        eprintln!("#{}", type_name::<V>());
+        dbg!(
+            self.count().load(),
+            self.lower_fence_len().load(),
+            self.upper_fence_len().load(),
+            self.prefix_len().load(),
+            self.heap_bump().load(),
+            self.heap_freed().load()
+        );
+        for i in 0..self.count().load() as usize {
+            let offset = self.slots()?.try_index(i)?.load() as usize;
+            eprint!(
+                "{i:4}:{:04x}->[0x{:08x}][{}]",
+                offset,
+                self.heads()?.try_index(i)?.load(),
+                self.u16(offset)?.load()
+            );
+            if V::IS_LEAF {
+                eprintln!("{:?}", BString::new(self.key(i)?.load_slice_to_vec()))
+            } else {
+                todo!()
+            }
+        }
+        Ok(())
     }
 
     fn find(self, key: &[u8]) -> Result<Result<usize, usize>, M::ReleaseError>
@@ -416,6 +449,7 @@ impl<'a> Wrapper<Guarded<'a, Exclusive, BasicNode<BasicNodeInner>>> {
 mod tests {
     use crate::test_util::{bin_key_generator, subslices};
     use crate::{BasicNode, BasicNodeLeaf};
+    use bstr::BStr;
     use bytemuck::Zeroable;
     use rand::prelude::SliceRandom;
     use rand::rngs::SmallRng;
@@ -426,7 +460,7 @@ mod tests {
     #[test]
     fn leaf() {
         let rng = &mut SmallRng::seed_from_u64(42);
-        let keys = bin_key_generator(10..=50);
+        let keys = crate::test_util::bin_key_generator(10..=50);
         let mut keys: Vec<Vec<u8>> = (0..50).map(|_| keys(rng)).collect();
         keys.sort();
         keys.dedup();
@@ -440,13 +474,15 @@ mod tests {
             let mut inserted = HashSet::new();
             for p in 0..=3 {
                 to_insert.shuffle(rng);
-                for &k in to_insert.iter() {
+                for (_i, &k) in to_insert.iter().enumerate() {
                     if p != 2 {
                         if leaf.insert_leaf(k, k).is_ok() {
                             inserted.insert(k);
                         }
                     } else {
-                        assert_eq!(leaf.remove(k).is_ok(), inserted.remove(k));
+                        let in_leaf = leaf.remove(k).unwrap().is_some();
+                        let expected = inserted.remove(k);
+                        assert_eq!(in_leaf, expected);
                     }
                 }
                 for (_i, k) in keys.iter().enumerate() {

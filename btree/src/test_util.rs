@@ -2,6 +2,15 @@ use rand::distributions::{Distribution, Uniform};
 use rand::Rng;
 use std::ops::RangeInclusive;
 
+pub fn alpha_key_generator<R: Rng>(len_range: RangeInclusive<usize>) -> impl Fn(&mut R) -> Vec<u8> {
+    let dist = Uniform::<usize>::new(*len_range.start(), *len_range.end());
+    let alpha_dist = Uniform::<u8>::new(b'A', b'Z');
+    move |rng| {
+        let len = dist.sample(rng);
+        (0..len).map(|_| alpha_dist.sample(rng)).collect()
+    }
+}
+
 pub fn bin_key_generator<R: Rng>(len_range: RangeInclusive<usize>) -> impl Fn(&mut R) -> Vec<u8> {
     let dist = Uniform::<usize>::new(*len_range.start(), *len_range.end());
     move |rng| {
