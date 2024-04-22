@@ -184,6 +184,11 @@ impl<'a, M: SeqLockMode, T: SeqLockWrappable + ?Sized> Guarded<'a, M, T> {
 }
 
 impl<'a, M: SeqLockMode, T: SeqLockWrappable + Pod> Guarded<'a, M, [T]> {
+    pub fn iter(self) -> impl Iterator<Item = T::Wrapper<Guarded<'a, M, T>>> {
+        let p = self.as_ptr() as *mut T;
+        (0..self.len()).map(move |i| unsafe { Guarded::wrap_unchecked(p.add(i)) })
+    }
+
     pub fn load_slice_uninit(&self, dst: &mut [MaybeUninit<T>]) {
         unsafe { M::load_slice(&self.p, dst) }
     }

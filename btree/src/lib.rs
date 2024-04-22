@@ -7,7 +7,9 @@ mod test_util;
 use crate::byte_slice::common_prefix;
 use bytemuck::{Pod, Zeroable};
 use indxvec::Search;
-use seqlock::{seqlock_wrapper, Exclusive, Guarded, Never, SeqLockMode, SeqLockWrappable, SeqlockAccessors};
+use seqlock::{
+    seqlock_wrapper, Exclusive, Guarded, Never, SeqLockMode, SeqLockModePessimistic, SeqLockWrappable, SeqlockAccessors,
+};
 use std::cmp::Ordering;
 use std::marker::PhantomData;
 use std::mem::{align_of, offset_of, size_of};
@@ -212,8 +214,7 @@ impl<'a, V: BasicNodeVariant> Wrapper<Guarded<'a, Exclusive, BasicNode<V>>> {
             return Ok(None);
         };
         let offset = self.s().slots()?.index(index).load() as usize;
-        let record_size = self.s().u16(offset)?.load() as usize
-            + if V::IS_LEAF { 2 + self.s().u16(offset + 2)?.load() as usize } else { 8 };
+        let record_size = self.s().stored_record_size(offset)?;
         self.heap_freed_mut().update(|x| x + record_size as u16);
         let count = self.count().load() as usize;
         {
@@ -243,18 +244,13 @@ impl<'a, V: BasicNodeVariant> Wrapper<Guarded<'a, Exclusive, BasicNode<V>>> {
         }
     }
 
-    fn heap_end(&mut self) -> usize {
-        size_of::<BasicNodeData>()
-            - Self::round_up(self.lower_fence_len().load() as usize + self.upper_fence_len().load() as usize)
-    }
-
     pub fn init(&mut self, lf: &[u8], uf: &[u8], upper: V::Upper) {
         assert_eq!(size_of::<BasicNode<V>>(), PAGE_SIZE - PAGE_HEAD_SIZE);
         self.count_mut().store(0);
         self.prefix_len_mut().store(common_prefix(lf, uf) as u16);
         self.lower_fence_len_mut().store(lf.len() as u16);
         self.upper_fence_len_mut().store(uf.len() as u16);
-        let heap_end = self.heap_end() as u16;
+        let heap_end = self.s().heap_end() as u16;
         self.heap_bump_mut().store(heap_end);
         self.heap_freed_mut().store(0);
         V::Upper::get_mut(&mut self.b().upper()).store(upper);
@@ -262,7 +258,7 @@ impl<'a, V: BasicNodeVariant> Wrapper<Guarded<'a, Exclusive, BasicNode<V>>> {
 
     fn compactify(&mut self) -> Result<(), Never> {
         let buffer = &mut [0u8; size_of::<BasicNodeData>()];
-        let heap_end = self.heap_end();
+        let heap_end = self.s().heap_end();
         let mut dst_offset = heap_end;
         for i in 0..self.count().load() as usize {
             let offset = self.s().slots().unwrap().index(i).load() as usize;
@@ -284,8 +280,39 @@ impl<'a, V: BasicNodeVariant> Wrapper<Guarded<'a, Exclusive, BasicNode<V>>> {
 }
 
 impl<'a, V: BasicNodeVariant, M: SeqLockMode> Wrapper<Guarded<'a, M, BasicNode<V>>> {
+    fn stored_record_size(self, offset: usize) -> Result<usize, M::ReleaseError>
+    where
+        Self: Copy,
+    {
+        Ok(self.u16(offset)?.load() as usize
+            + if V::IS_LEAF { 2 + self.s().u16(offset + 2)?.load() as usize } else { 8 })
+    }
+
+    fn heap_end(self) -> usize
+    where
+        Self: Copy,
+    {
+        size_of::<BasicNodeData>()
+            - Self::round_up(self.lower_fence_len().load() as usize + self.upper_fence_len().load() as usize)
+    }
     fn u16(self, offset: usize) -> Result<Guarded<'a, M, u16>, M::ReleaseError> {
         self.slice::<u16>(offset, 1)?.try_index(0)
+    }
+    fn validate(self) -> Result<(), M::ReleaseError>
+    where
+        M: SeqLockModePessimistic,
+        Self: Copy,
+    {
+        if !cfg!(debug_assertions) {
+            return Ok(());
+        }
+        let record_size_sum: usize =
+            self.s().slots()?.iter().map(|x| self.stored_record_size(x.load() as usize).unwrap()).sum();
+        assert_eq!(
+            self.heap_end() - record_size_sum,
+            self.heap_bump().load() as usize + self.heap_freed().load() as usize
+        );
+        Ok(())
     }
     fn upper(self) -> <V::Upper as SeqLockWrappable>::Wrapper<Guarded<'a, M, V::Upper>> {
         assert_eq!(4 % align_of::<V::Upper>(), 0);
@@ -368,13 +395,17 @@ impl<'a, M: SeqLockMode> Wrapper<Guarded<'a, M, BasicNode<BasicNodeLeaf>>> {
 impl<'a> Wrapper<Guarded<'a, Exclusive, BasicNode<BasicNodeLeaf>>> {
     #[allow(clippy::result_unit_err)]
     pub fn insert_leaf(&mut self, key: &[u8], val: &[u8]) -> Result<(), ()> {
-        self.insert(key, val)
+        let x = self.insert(key, val);
+        self.s().validate()?;
+        x
     }
 }
 
 impl<'a> Wrapper<Guarded<'a, Exclusive, BasicNode<BasicNodeInner>>> {
     pub fn insert_inner(&mut self, key: &[u8], pid: u64) {
-        self.insert(key, &bytemuck::cast::<u64, [u16; 4]>(pid)[..3]).unwrap()
+        let x = self.insert(key, &bytemuck::cast::<u64, [u16; 4]>(pid)[..3]).unwrap();
+        self.s().validate().unwrap();
+        x
     }
 }
 
@@ -387,7 +418,7 @@ mod tests {
     use rand::rngs::SmallRng;
     use rand::SeedableRng;
     use seqlock::{Exclusive, Guarded};
-    use std::collections::{HashMap, HashSet};
+    use std::collections::HashSet;
 
     #[test]
     fn leaf() {
@@ -404,11 +435,15 @@ mod tests {
             let insert_range = 2..kc - 2;
             let mut to_insert: Vec<&[u8]> = keys[insert_range.clone()].iter().map(|x| x.as_slice()).collect();
             let mut inserted = HashSet::new();
-            for _p in 0..2 {
+            for p in 0..=3 {
                 to_insert.shuffle(rng);
                 for &k in to_insert.iter() {
-                    if leaf.insert_leaf(k, k).is_ok() {
-                        inserted.insert(k);
+                    if p != 2 {
+                        if leaf.insert_leaf(k, k).is_ok() {
+                            inserted.insert(k);
+                        }
+                    } else {
+                        assert_eq!(leaf.remove(k).is_ok(), inserted.remove(k));
                     }
                 }
                 for (_i, k) in keys.iter().enumerate() {

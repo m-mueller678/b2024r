@@ -1,6 +1,6 @@
 use rand::distributions::{Distribution, Uniform};
 use rand::Rng;
-use std::ops::{Range, RangeInclusive};
+use std::ops::RangeInclusive;
 
 pub fn bin_key_generator<R: Rng>(len_range: RangeInclusive<usize>) -> impl Fn(&mut R) -> Vec<u8> {
     let dist = Uniform::<usize>::new(*len_range.start(), *len_range.end());
