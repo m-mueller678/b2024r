@@ -3,6 +3,7 @@
 mod byte_slice;
 #[cfg(test)]
 mod test_util;
+mod KeySource;
 
 use crate::byte_slice::common_prefix;
 use bstr::BString;
@@ -181,10 +182,10 @@ impl<'a, V: BasicNodeVariant> W<Guarded<'a, Exclusive, BasicNode<V>>> {
         if !V::IS_LEAF {
             assert_eq!(val.len(), 3);
         }
+        let key = &key[self.prefix_len().load() as usize..];
+        let index = self.s().find_truncated(key)?;
+        let count = self.count().load() as usize;
         loop {
-            let index = self.s().find(key).unwrap();
-            let key = &key[self.prefix_len().load() as usize..];
-            let count = self.count().load() as usize;
             let new_heap_start;
             match index {
                 Ok(existing) => {
@@ -245,12 +246,11 @@ impl<'a, V: BasicNodeVariant> W<Guarded<'a, Exclusive, BasicNode<V>>> {
         let sep_key = &[self.s().prefix()?, self.s().key(low_count)?];
         left.init(&[self.s().lower_fence()?], sep_key, self.s().lower().get().load())?;
         let sep_record_offset = self.s().slots()?.index(low_count).load() as usize;
-        right.init(
-            sep_key,
-            &[self.s().upper_fence()?],
-            self.s().slice::<V::Lower>(sep_record_offset, 1)?.index(1).get().load(),
-        )?;
-        todo!()
+        let lower = self.s().slice::<V::Lower>(sep_record_offset, 1)?.index(1).get().load();
+        right.init(sep_key, &[self.s().upper_fence()?], lower)?;
+        for i in 0..low_count{
+            left.heap_write_new()
+        }
     }
 
     fn remove(&mut self, key: &[u8]) -> Result<Option<()>, Never> {
@@ -436,7 +436,11 @@ impl<'a, V: BasicNodeVariant, M: SeqLockMode> W<Guarded<'a, M, BasicNode<V>>> {
             return Err(M::release_error());
         }
         let truncated = &key[prefix_len..];
-        let needle_head = key_head(truncated);
+        self.find_truncated(truncated)
+    }
+
+    fn find_truncated(self, key: &[u8]) -> Result<Result<usize, usize>, <M as SeqLockMode>::ReleaseError> {
+        let needle_head = key_head(key);
         let heads = self.heads()?;
         if heads.is_empty() {
             return Ok(Err(0));
@@ -454,7 +458,7 @@ impl<'a, V: BasicNodeVariant, M: SeqLockMode> W<Guarded<'a, M, BasicNode<V>>> {
             let Ok(key) = self.key(i) else {
                 return Ordering::Equal;
             };
-            key.mem_cmp(truncated)
+            key.mem_cmp(key)
         });
         Ok(key_position)
     }
