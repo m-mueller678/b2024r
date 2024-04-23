@@ -112,18 +112,6 @@ pub fn derive_seqlock_safe(input: TokenStream1) -> TokenStream1 {
     let out = quote! {
         impl #impl_generics #seqlock::SeqLockWrappable for #name #impl_type_generics #impl_generics_where{
             type Wrapper<WrappedParam> = #wrapper_path<WrappedParam>;
-
-            fn wrap<WrappedParam>(x: WrappedParam) -> Self::Wrapper<WrappedParam> {
-                #wrapper_path(x)
-            }
-
-            fn get<WrappedParam>(x: &Self::Wrapper<WrappedParam>) -> &WrappedParam {
-                &x.0
-            }
-
-            fn get_mut<WrappedParam>(x: &mut Self::Wrapper<WrappedParam>) -> &mut WrappedParam {
-                &mut x.0
-            }
         }
 
         impl<'wrapped_guard,SeqLockModeParam:#seqlock::SeqLockMode,#generic_params>

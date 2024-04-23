@@ -37,7 +37,6 @@ impl CommonImpl for Optimistic {}
 impl CommonImpl for Shared {}
 
 unsafe impl<M: CommonImpl> SeqLockModeImpl for M {
-
     type Pointer<'a, T: ?Sized> = *mut T;
     unsafe fn from_pointer<'a, T: ?Sized>(x: *mut T) -> Self::Pointer<'a, T> {
         x
@@ -71,8 +70,11 @@ unsafe impl<M: CommonImpl> SeqLockModeImpl for M {
         this.next().cmp(&other.next())
     }
 
-    unsafe fn copy_slice_non_overlapping<T: Pod>(p: &Self::Pointer<'_, [T]>, dst: &mut <Exclusive as SeqLockModeImpl>::Pointer<'_, [T]>) {
-        atomic_memcpy::<false>(*p as *mut u8,*dst as *mut u8,p.len() * size_of::<T>());
+    unsafe fn copy_slice_non_overlapping<T: Pod>(
+        p: &Self::Pointer<'_, [T]>,
+        dst: &mut <Exclusive as SeqLockModeImpl>::Pointer<'_, [T]>,
+    ) {
+        atomic_memcpy::<false>(*p as *mut u8, *dst as *mut u8, p.len() * size_of::<T>());
     }
 }
 

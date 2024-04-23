@@ -17,7 +17,7 @@ mod wrappable;
 
 pub use access_impl::optimistic_release;
 pub use seqlock_macros::SeqlockAccessors;
-pub use wrappable::SeqLockWrappable;
+pub use wrappable::{SeqLockWrappable, Wrapper};
 
 #[derive(Debug)]
 pub enum Never {}
@@ -45,7 +45,10 @@ pub trait SeqLockMode: SeqLockModeImpl + 'static {
 }
 
 #[allow(private_bounds)]
-pub trait SeqLockModeExclusive: SeqLockMode<ReleaseError = Never> + SeqLockModeExclusiveImpl {}
+pub trait SeqLockModeExclusive:
+    SeqLockMode<ReleaseError = Never> + SeqLockModeExclusiveImpl + SeqLockModePessimistic
+{
+}
 
 pub struct Optimistic;
 
@@ -106,7 +109,10 @@ unsafe trait SeqLockModeImpl {
     unsafe fn load<T: Pod>(p: &Self::Pointer<'_, T>) -> T;
     unsafe fn load_slice<T: Pod>(p: &Self::Pointer<'_, [T]>, dst: &mut [MaybeUninit<T>]);
     unsafe fn bit_cmp_slice<T: Pod>(p: &Self::Pointer<'_, [T]>, other: &[T]) -> Ordering;
-    unsafe fn copy_slice_non_overlapping<T:Pod>(p:&Self::Pointer<'_, [T]>, dst:&mut <Exclusive as SeqLockModeImpl>::Pointer<'_,[T]>);
+    unsafe fn copy_slice_non_overlapping<T: Pod>(
+        p: &Self::Pointer<'_, [T]>,
+        dst: &mut <Exclusive as SeqLockModeImpl>::Pointer<'_, [T]>,
+    );
 }
 
 impl<'a, M: SeqLockMode, T: SeqLockWrappable + ?Sized> Guarded<'a, M, T> {
@@ -132,11 +138,11 @@ impl<'a, M: SeqLockMode, T: SeqLockWrappable + ?Sized> Guarded<'a, M, T> {
 
     #[allow(clippy::missing_safety_doc)]
     pub unsafe fn wrap_unchecked(p: *mut T) -> T::Wrapper<Guarded<'a, M, T>> {
-        T::wrap(Guarded { p: M::from_pointer(p), _p: PhantomData })
+        T::Wrapper::wrap(Guarded { p: M::from_pointer(p), _p: PhantomData })
     }
 
     pub fn wrap_mut(p: &'a mut T) -> T::Wrapper<Guarded<'a, M, T>> {
-        unsafe { T::wrap(Guarded { p: M::from_pointer(p), _p: PhantomData }) }
+        unsafe { T::Wrapper::wrap(Guarded { p: M::from_pointer(p), _p: PhantomData }) }
     }
 
     pub fn as_ptr(&self) -> *mut T {
@@ -184,15 +190,56 @@ impl<'a, M: SeqLockMode, T: SeqLockWrappable + ?Sized> Guarded<'a, M, T> {
     }
 }
 
+pub fn guarded_concat_len<M: SeqLockMode, T: Pod + SeqLockWrappable>(x: &[Guarded<M, [T]>]) -> usize {
+    x.iter().map(|x| x.len()).sum()
+}
+
+impl<'a, T: SeqLockWrappable + Pod> Guarded<'a, Exclusive, [T]> {
+    pub fn concat_from<SM: SeqLockMode>(
+        mut self,
+        src: &[Guarded<SM, [T]>],
+        mut skip_head: usize,
+    ) -> Guarded<'a, Exclusive, [T]>
+    where
+        for<'x> Guarded<'x, SM, [T]>: Copy,
+    {
+        let mut written = 0;
+        for mut s in src.iter().copied() {
+            if s.len() <= skip_head {
+                skip_head -= s.len();
+                continue;
+            } else {
+                s = s.try_slice(skip_head..).unwrap();
+                skip_head = 0;
+            }
+            s.copy_to(&mut self.b().slice(written..written + s.len()));
+            written += s.len();
+        }
+        self.slice(0..written)
+    }
+
+    pub fn concat_from_offset<SM: SeqLockMode>(
+        mut self,
+        src: &[crate::Guarded<SM, [T]>],
+        skip_head: usize,
+    ) -> crate::Guarded<'a, Exclusive, [T]>
+    where
+        for<'x> crate::Guarded<'x, SM, [T]>: Copy,
+    {
+        let written = self.b().slice(skip_head..).concat_from(src, skip_head).len();
+        self.slice(0..skip_head + written)
+    }
+}
+
 impl<'a, M: SeqLockMode, T: SeqLockWrappable + Pod> Guarded<'a, M, [T]> {
     pub fn iter(self) -> impl Iterator<Item = T::Wrapper<Guarded<'a, M, T>>> {
         let p = self.as_ptr() as *mut T;
         (0..self.len()).map(move |i| unsafe { Guarded::wrap_unchecked(p.add(i)) })
     }
 
-    pub fn copy_to(&self,dst:&mut Guarded<Exclusive,[T]>){
-        assert_eq!(dst.len(),self.len());
-        unsafe{ M::copy_slice_non_overlapping(&self.p, &mut dst.p) };
+    pub fn copy_to(&self, dst: &mut Guarded<Exclusive, [T]>) {
+        assert_eq!(dst.len(), self.len());
+        unsafe { M::copy_slice_non_overlapping(&self.p, &mut dst.p) };
     }
 
     pub fn load_slice_uninit(&self, dst: &mut [MaybeUninit<T>]) {
@@ -201,6 +248,13 @@ impl<'a, M: SeqLockMode, T: SeqLockWrappable + Pod> Guarded<'a, M, [T]> {
 
     pub fn load_slice<'dst>(&self, dst: &'dst mut [T]) {
         unsafe { M::load_slice(&self.p, transmute::<&'dst mut [T], &'dst mut [MaybeUninit<T>]>(dst)) }
+    }
+
+    pub fn load_slice_into<'dst>(&self, dst: &'dst mut [T]) -> &'dst mut [T] {
+        let len = self.len();
+        let dst = &mut dst[..len];
+        self.load_slice(dst);
+        dst
     }
 
     pub fn load_slice_to_vec(&self) -> Vec<T> {
