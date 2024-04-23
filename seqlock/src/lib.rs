@@ -190,47 +190,6 @@ impl<'a, M: SeqLockMode, T: SeqLockWrappable + ?Sized> Guarded<'a, M, T> {
     }
 }
 
-pub fn guarded_concat_len<M: SeqLockMode, T: Pod + SeqLockWrappable>(x: &[Guarded<M, [T]>]) -> usize {
-    x.iter().map(|x| x.len()).sum()
-}
-
-impl<'a, T: SeqLockWrappable + Pod> Guarded<'a, Exclusive, [T]> {
-    pub fn concat_from<SM: SeqLockMode>(
-        mut self,
-        src: &[Guarded<SM, [T]>],
-        mut skip_head: usize,
-    ) -> Guarded<'a, Exclusive, [T]>
-    where
-        for<'x> Guarded<'x, SM, [T]>: Copy,
-    {
-        let mut written = 0;
-        for mut s in src.iter().copied() {
-            if s.len() <= skip_head {
-                skip_head -= s.len();
-                continue;
-            } else {
-                s = s.try_slice(skip_head..).unwrap();
-                skip_head = 0;
-            }
-            s.copy_to(&mut self.b().slice(written..written + s.len()));
-            written += s.len();
-        }
-        self.slice(0..written)
-    }
-
-    pub fn concat_from_offset<SM: SeqLockMode>(
-        mut self,
-        src: &[crate::Guarded<SM, [T]>],
-        skip_head: usize,
-    ) -> crate::Guarded<'a, Exclusive, [T]>
-    where
-        for<'x> crate::Guarded<'x, SM, [T]>: Copy,
-    {
-        let written = self.b().slice(skip_head..).concat_from(src, skip_head).len();
-        self.slice(0..skip_head + written)
-    }
-}
-
 impl<'a, M: SeqLockMode, T: SeqLockWrappable + Pod> Guarded<'a, M, [T]> {
     pub fn iter(self) -> impl Iterator<Item = T::Wrapper<Guarded<'a, M, T>>> {
         let p = self.as_ptr() as *mut T;

@@ -1,17 +1,20 @@
 #![allow(clippy::missing_safety_doc)]
 
+extern crate core;
+
 mod byte_slice;
+mod key_source;
 #[cfg(test)]
 mod test_util;
-mod KeySource;
 
-use crate::byte_slice::common_prefix;
+use crate::key_source::common_prefix;
 use bstr::BString;
 use bytemuck::{Pod, Zeroable};
 use indxvec::Search;
+use key_source::KeySource;
 use seqlock::{
-    guarded_concat_len, seqlock_wrapper, Exclusive, Guarded, Never, SeqLockMode, SeqLockModePessimistic,
-    SeqLockWrappable, SeqlockAccessors, Shared, Wrapper,
+    seqlock_wrapper, Exclusive, Guarded, Never, SeqLockMode, SeqLockModePessimistic, SeqLockWrappable,
+    SeqlockAccessors, Shared, Wrapper,
 };
 use std::any::type_name;
 use std::cmp::Ordering;
@@ -153,7 +156,7 @@ impl<'a, V: BasicNodeVariant> W<Guarded<'a, Exclusive, BasicNode<V>>> {
         let offset = offset / size_of::<T>();
         self.b().as_bytes().cast_slice::<T>().move_within_by::<UP>(offset..offset + count, dist);
     }
-    fn heap_write_new(&mut self, key: &[u8], val: &[V::ValueSlice], write_slot: usize) -> Result<(), Never> {
+    fn heap_write_new(&mut self, key: impl KeySource, val: &[V::ValueSlice], write_slot: usize) -> Result<(), Never> {
         let size = Self::record_size(key.len(), val.len());
         let offset = self.heap_bump().load() as usize - size;
         self.heap_write_record(key, val, offset)?;
@@ -162,17 +165,18 @@ impl<'a, V: BasicNodeVariant> W<Guarded<'a, Exclusive, BasicNode<V>>> {
         Ok(())
     }
 
-    fn heap_write_record(&mut self, key: &[u8], val: &[V::ValueSlice], offset: usize) -> Result<(), Never> {
-        self.b().u16(offset)?.store(key.len() as u16);
+    fn heap_write_record(&mut self, key: impl KeySource, val: &[V::ValueSlice], offset: usize) -> Result<(), Never> {
+        let len = key.len();
+        self.b().u16(offset)?.store(len as u16);
         if V::IS_LEAF {
             self.b().u16(offset + 2)?.store(val.len() as u16);
         }
         if !V::IS_LEAF {
             self.b().slice(offset + 2, 3)?.store_slice(val);
         }
-        self.b().slice(offset + V::RECORD_TO_KEY_OFFSET, key.len()).unwrap().store_slice(key);
+        key.write_to(&mut self.b().slice(offset + V::RECORD_TO_KEY_OFFSET, len)?);
         if V::IS_LEAF {
-            self.b().slice(offset + V::RECORD_TO_KEY_OFFSET + key.len(), val.len()).unwrap().store_slice(val);
+            self.b().slice(offset + V::RECORD_TO_KEY_OFFSET + len, val.len()).unwrap().store_slice(val);
         }
         Ok(())
     }
@@ -243,14 +247,15 @@ impl<'a, V: BasicNodeVariant> W<Guarded<'a, Exclusive, BasicNode<V>>> {
         let mut left = Guarded::<Exclusive, _>::wrap_mut(left);
         let count = self.count().load() as usize;
         let low_count = count / 2;
-        let sep_key = &[self.s().prefix()?, self.s().key(low_count)?];
-        left.init(&[self.s().lower_fence()?], sep_key, self.s().lower().get().load())?;
+        let sep_key = (self.s().prefix()?, self.s().key(low_count)?);
+        left.init(self.s().lower_fence()?, sep_key, self.s().lower().get().load())?;
         let sep_record_offset = self.s().slots()?.index(low_count).load() as usize;
         let lower = self.s().slice::<V::Lower>(sep_record_offset, 1)?.index(1).get().load();
-        right.init(sep_key, &[self.s().upper_fence()?], lower)?;
-        for i in 0..low_count{
-            left.heap_write_new()
+        right.init(sep_key, self.s().upper_fence()?, lower)?;
+        for i in 0..low_count {
+            todo!()
         }
+        todo!()
     }
 
     fn remove(&mut self, key: &[u8]) -> Result<Option<()>, Never> {
@@ -289,23 +294,18 @@ impl<'a, V: BasicNodeVariant> W<Guarded<'a, Exclusive, BasicNode<V>>> {
         }
     }
 
-    pub fn init(
-        &mut self,
-        lf: &[Guarded<Shared, [u8]>],
-        uf: &[Guarded<Shared, [u8]>],
-        lower: V::Lower,
-    ) -> Result<(), Never> {
+    pub fn init(&mut self, lf: impl KeySource, uf: impl KeySource, lower: V::Lower) -> Result<(), Never> {
         assert_eq!(size_of::<BasicNode<V>>(), PAGE_SIZE - PAGE_HEAD_SIZE);
         self.count_mut().store(0);
         self.prefix_len_mut().store(common_prefix(lf, uf) as u16);
         self.heap_freed_mut().store(0);
-        self.lower_fence_len_mut().store(guarded_concat_len(lf) as u16);
-        self.upper_fence_len_mut().store(guarded_concat_len(uf) as u16);
+        self.lower_fence_len_mut().store(lf.len() as u16);
+        self.upper_fence_len_mut().store(uf.len() as u16);
         let heap_end = self.s().heap_end() as u16;
         self.heap_bump_mut().store(heap_end);
         self.b().lower().get_mut().store(lower);
-        self.b().lower_fence().unwrap().concat_from(lf, 0);
-        self.b().upper_fence().unwrap().concat_from(uf, 0);
+        lf.write_to(&mut self.b().lower_fence()?);
+        uf.write_to(&mut self.b().upper_fence()?);
         Ok(())
     }
 
@@ -439,8 +439,11 @@ impl<'a, V: BasicNodeVariant, M: SeqLockMode> W<Guarded<'a, M, BasicNode<V>>> {
         self.find_truncated(truncated)
     }
 
-    fn find_truncated(self, key: &[u8]) -> Result<Result<usize, usize>, <M as SeqLockMode>::ReleaseError> {
-        let needle_head = key_head(key);
+    fn find_truncated(self, truncated: &[u8]) -> Result<Result<usize, usize>, <M as SeqLockMode>::ReleaseError>
+    where
+        Self: Copy,
+    {
+        let needle_head = key_head(truncated);
         let heads = self.heads()?;
         if heads.is_empty() {
             return Ok(Err(0));
@@ -458,7 +461,7 @@ impl<'a, V: BasicNodeVariant, M: SeqLockMode> W<Guarded<'a, M, BasicNode<V>>> {
             let Ok(key) = self.key(i) else {
                 return Ordering::Equal;
             };
-            key.mem_cmp(key)
+            key.mem_cmp(truncated)
         });
         Ok(key_position)
     }
@@ -520,7 +523,7 @@ mod tests {
         let mut leaf = Guarded::<Exclusive, _>::wrap_mut(leaf);
         for (_k, keys) in subslices(&keys, 5).enumerate() {
             let kc = keys.len();
-            leaf.init(&keys[1], &keys[kc - 2], ());
+            leaf.init(keys[1].as_slice(), keys[kc - 2].as_slice(), ()).unwrap();
             let insert_range = 2..kc - 2;
             let mut to_insert: Vec<&[u8]> = keys[insert_range.clone()].iter().map(|x| x.as_slice()).collect();
             let mut inserted = HashSet::new();
