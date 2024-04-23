@@ -106,6 +106,7 @@ unsafe trait SeqLockModeImpl {
     unsafe fn load<T: Pod>(p: &Self::Pointer<'_, T>) -> T;
     unsafe fn load_slice<T: Pod>(p: &Self::Pointer<'_, [T]>, dst: &mut [MaybeUninit<T>]);
     unsafe fn bit_cmp_slice<T: Pod>(p: &Self::Pointer<'_, [T]>, other: &[T]) -> Ordering;
+    unsafe fn copy_slice_non_overlapping<T:Pod>(p:&Self::Pointer<'_, [T]>, dst:&mut <Exclusive as SeqLockModeImpl>::Pointer<'_,[T]>);
 }
 
 impl<'a, M: SeqLockMode, T: SeqLockWrappable + ?Sized> Guarded<'a, M, T> {
@@ -187,6 +188,11 @@ impl<'a, M: SeqLockMode, T: SeqLockWrappable + Pod> Guarded<'a, M, [T]> {
     pub fn iter(self) -> impl Iterator<Item = T::Wrapper<Guarded<'a, M, T>>> {
         let p = self.as_ptr() as *mut T;
         (0..self.len()).map(move |i| unsafe { Guarded::wrap_unchecked(p.add(i)) })
+    }
+
+    pub fn copy_to(&self,dst:&mut Guarded<Exclusive,[T]>){
+        assert_eq!(dst.len(),self.len());
+        unsafe{ M::copy_slice_non_overlapping(&self.p, &mut dst.p) };
     }
 
     pub fn load_slice_uninit(&self, dst: &mut [MaybeUninit<T>]) {

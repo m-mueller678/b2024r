@@ -120,7 +120,7 @@ fn key_head(k: &[u8]) -> u32 {
     h
 }
 
-const HEAD_RESERVATION: usize = 8;
+const HEAD_RESERVATION: usize = 16;
 
 impl<'a, V: BasicNodeVariant> Wrapper<Guarded<'a, Exclusive, BasicNode<V>>> {
     /// offset is in units of bytes, others in units of T
@@ -211,6 +211,17 @@ impl<'a, V: BasicNodeVariant> Wrapper<Guarded<'a, Exclusive, BasicNode<V>>> {
             }
             self.compactify()?;
         }
+    }
+
+    fn split(&mut self,new_right:&mut Self){
+        // TODO tail compression
+        let left = &mut BasicNode::<BasicNodeLeaf>::zeroed();
+        let count = self.count().load() as usize;
+        let low_count = count/2;
+
+        let mut left = Guarded::<Exclusive, _>::wrap_mut(left);
+        left.init();
+        new_right.init()
     }
 
     fn remove(&mut self, key: &[u8]) -> Result<Option<()>, Never> {
