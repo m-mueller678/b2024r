@@ -6,7 +6,7 @@ mod key_source;
 #[cfg(test)]
 mod test_util;
 
-use crate::key_source::common_prefix;
+use crate::key_source::{common_prefix, key_head};
 use bstr::BString;
 use bytemuck::{Pod, Zeroable};
 use indxvec::Search;
@@ -19,6 +19,7 @@ use std::any::type_name;
 use std::cmp::Ordering;
 use std::marker::PhantomData;
 use std::mem::{align_of, offset_of, size_of};
+use std::ops::Range;
 use std::ptr::addr_of_mut;
 
 pub const PAGE_SIZE: usize = 1 << 10;
@@ -137,15 +138,6 @@ impl<'a, N: Node, M: SeqLockMode> W<Guarded<'a, M, N>> {
     }
 }
 
-fn key_head(k: &[u8]) -> u32 {
-    let mut h = 0u32;
-    for i in 0..4 {
-        h <<= 8;
-        h |= k.get(i).copied().unwrap_or(0) as u32;
-    }
-    h
-}
-
 const HEAD_RESERVATION: usize = 16;
 
 impl<'a, V: BasicNodeVariant> W<Guarded<'a, Exclusive, BasicNode<V>>> {
@@ -155,7 +147,7 @@ impl<'a, V: BasicNodeVariant> W<Guarded<'a, Exclusive, BasicNode<V>>> {
         let offset = offset / size_of::<T>();
         self.b().as_bytes().cast_slice::<T>().move_within_by::<UP>(offset..offset + count, dist);
     }
-    fn heap_write_new(&mut self, key: impl SourceSlice, val: &[V::ValueSlice], write_slot: usize) -> Result<(), Never> {
+    fn heap_write_new(&mut self, key: impl SourceSlice, val: impl SourceSlice<V::ValueSlice>, write_slot: usize) -> Result<(), Never> {
         let size = Self::record_size(key.len(), val.len());
         let offset = self.heap_bump().load() as usize - size;
         self.heap_write_record(key, val, offset)?;
@@ -164,18 +156,18 @@ impl<'a, V: BasicNodeVariant> W<Guarded<'a, Exclusive, BasicNode<V>>> {
         Ok(())
     }
 
-    fn heap_write_record(&mut self, key: impl SourceSlice, val: &[V::ValueSlice], offset: usize) -> Result<(), Never> {
+    fn heap_write_record(&mut self, key: impl SourceSlice, val: impl SourceSlice<V::ValueSlice>, offset: usize) -> Result<(), Never> {
         let len = key.len();
         self.b().u16(offset)?.store(len as u16);
         if V::IS_LEAF {
             self.b().u16(offset + 2)?.store(val.len() as u16);
         }
         if !V::IS_LEAF {
-            self.b().slice(offset + 2, 3)?.store_slice(val);
+            val.write_to(&mut self.b().slice(offset + 2, 3)?);
         }
         key.write_to(&mut self.b().slice(offset + V::RECORD_TO_KEY_OFFSET, len)?);
         if V::IS_LEAF {
-            self.b().slice(offset + V::RECORD_TO_KEY_OFFSET + len, val.len()).unwrap().store_slice(val);
+            val.write_to(&mut self.b().slice(offset + V::RECORD_TO_KEY_OFFSET + len, val.len())?);
         }
         Ok(())
     }
@@ -240,31 +232,38 @@ impl<'a, V: BasicNodeVariant> W<Guarded<'a, Exclusive, BasicNode<V>>> {
         }
     }
 
-    fn split(&mut self, right: &mut Self) -> Result<(), Never> {
+    fn split(&mut self, right: &mut W<Guarded<Exclusive,BasicNode<V>>>) -> Result<(), Never> {
         // TODO tail compression
         let left = &mut BasicNode::<V>::zeroed();
         let mut left = Guarded::<Exclusive, _>::wrap_mut(left);
         let count = self.count().load() as usize;
         let low_count = count / 2;
-        let sep_key = (self.s().prefix()?, self.s().key(low_count)?);
+        let sep_key = self.s().prefix()?.join(self.s().key(low_count)?);
         left.init(self.s().lower_fence()?, sep_key, self.s().lower().get().load())?;
         let sep_record_offset = self.s().slots()?.index(low_count).load() as usize;
         let lower = self.s().slice::<V::Lower>(sep_record_offset, 1)?.index(1).get().load();
         right.init(sep_key, self.s().upper_fence()?, lower)?;
         left.count_mut().store(low_count as u16);
-        let left_prefix_grow = left.prefix_len().load() as usize - self.prefix_len().load() as usize;
-        for i in 0..low_count {
-            left.heap_write_new(self.key(i)?.slice(left_prefix_grow..).s(),self.val(i)?,i).unwrap();
+        self.copy_records(&mut left, 0..low_count,0)?;
+        self.copy_records(&mut left, 0..low_count,0)?;
+        todo!()
+    }
+
+    fn copy_records(&self, mut dst: &mut W<Guarded<Exclusive,BasicNode<V>>>, src_range:Range<usize>,dst_start:usize) -> Result<(), Never> {
+        let dst_range = dst_start .. (src_range.end +dst_start -src_range.start);
+        let prefix_grow = dst.prefix_len().load() as usize - self.prefix_len().load() as usize;
+        for src_i in src_range.clone() {
+            dst.heap_write_new(self.s().key(src_i)?.slice(prefix_grow..), self.s().val(src_i)?, src_i-dst_start)?;
         }
-        if left_prefix_grow==0{
-            self.s().slots()?.slice(..low_count).copy_to(&mut left.slots()?);
-        }else{
-            for i in 0..low_count{
-                let head = self.s().key(i)?.slice(left_prefix_grow..);
-                left.slots()?.index(i).store(i);
+        if prefix_grow == 0 {
+            self.s().heads()?.slice(src_range).copy_to(&mut dst.b().heads()?.slice(dst_range));
+        } else {
+            for (src_i,dst_i) in src_range.zip(dst_range) {
+                let head = key_head(self.s().key(src_i)?.slice(prefix_grow..));
+                dst.b().heads()?.index(dst_i).store(head);
             }
         }
-        todo!()
+        Ok(())
     }
 
     fn remove(&mut self, key: &[u8]) -> Result<Option<()>, Never> {

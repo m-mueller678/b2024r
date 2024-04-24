@@ -8,8 +8,15 @@ pub fn common_prefix(a: impl SourceSlice, b: impl SourceSlice) -> usize {
     a.iter().zip(b.iter()).take_while(|&(a, b)| a == b).count()
 }
 
-pub trait SourceSlice<T:Pod>: Copy {
-    fn join<B:SourceSlice<T>>(self,b:B)->impl SourceSlice{
+pub fn key_head(k: impl SourceSlice) -> u32 {
+    let mut buffer=[0u8;4];
+    k.write_to(&mut Guarded::wrap_mut(&mut buffer[..k.len()]));
+    u32::from_be_bytes(buffer)
+}
+
+
+pub trait SourceSlice<T:Pod+SeqLockWrappable=u8>: Copy {
+    fn join<B:SourceSlice<T>>(self,b:B)->impl SourceSlice<T>{
         SourceSlicePair(self,b,PhantomData)
     }
     fn write_suffix_to_offset(self, dst: Guarded<Exclusive, [T]>, offset: usize) {
@@ -67,7 +74,7 @@ where
     }
 }
 
-impl<T:Pod> SourceSlice<T> for &'_ [T] {
+impl<T:Pod+SeqLockWrappable> SourceSlice<T> for &'_ [T] {
     fn write_to(self, dst: &mut Guarded<Exclusive, [T]>) {
         dst.store_slice(self)
     }
@@ -90,9 +97,9 @@ impl<T:Pod> SourceSlice<T> for &'_ [T] {
 }
 
 #[derive(Copy, Clone)]
-pub struct SourceSlicePair<T:Pod,A: SourceSlice<T>, B: SourceSlice<T>>(A,B,PhantomData<[T]>);
+pub struct SourceSlicePair<T:Pod+SeqLockWrappable,A: SourceSlice<T>, B: SourceSlice<T>>(A,B,PhantomData<[T]>);
 
-impl<T:Pod,A: SourceSlice<T>, B: SourceSlice<T>> SourceSlice for SourceSlicePair<T,A,B> {
+impl<T:Pod+SeqLockWrappable,A: SourceSlice<T>, B: SourceSlice<T>> SourceSlice<T> for SourceSlicePair<T,A,B> {
     fn write_to(self, dst: &mut Guarded<Exclusive, [T]>) {
         let a_len = self.0.len();
         self.0.write_to(&mut dst.b().slice(..a_len));
