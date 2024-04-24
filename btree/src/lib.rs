@@ -2,7 +2,6 @@
 
 extern crate core;
 
-mod byte_slice;
 mod key_source;
 #[cfg(test)]
 mod test_util;
@@ -252,8 +251,18 @@ impl<'a, V: BasicNodeVariant> W<Guarded<'a, Exclusive, BasicNode<V>>> {
         let sep_record_offset = self.s().slots()?.index(low_count).load() as usize;
         let lower = self.s().slice::<V::Lower>(sep_record_offset, 1)?.index(1).get().load();
         right.init(sep_key, self.s().upper_fence()?, lower)?;
+        left.count_mut().store(low_count as u16);
+        let left_prefix_grow = left.prefix_len().load() as usize - self.prefix_len().load() as usize;
         for i in 0..low_count {
-            todo!()
+            left.heap_write_new(self.key(i)?.slice(left_prefix_grow..).s(),self.val(i)?,i).unwrap();
+        }
+        if left_prefix_grow==0{
+            self.s().slots()?.slice(..low_count).copy_to(&mut left.slots()?);
+        }else{
+            for i in 0..low_count{
+                let head = self.s().key(i)?.slice(left_prefix_grow..);
+                left.slots()?.index(i).store(i);
+            }
         }
         todo!()
     }
@@ -395,6 +404,17 @@ impl<'a, V: BasicNodeVariant, M: SeqLockMode> W<Guarded<'a, M, BasicNode<V>>> {
         let offset = self.s().slots().unwrap().try_index(index)?.load() as usize;
         let len = self.s().u16(offset)?.load();
         self.slice(offset + V::RECORD_TO_KEY_OFFSET, len as usize)
+    }
+
+    fn val(self, index: usize) -> Result<Guarded<'a, M, [V::ValueSlice]>, M::ReleaseError> {
+        let offset = self.s().slots().unwrap().try_index(index)?.load() as usize;
+        if V::IS_LEAF{
+            let key_len = self.s().u16(offset)?.load() as usize;
+            let val_len = self.s().u16(offset+2)?.load() as usize;
+            self.slice(offset + V::RECORD_TO_KEY_OFFSET + key_len, val_len)
+        }else{
+            self.slice(offset + V::RECORD_TO_KEY_OFFSET + 2, 3)
+        }
     }
 
     pub fn print(self) -> Result<(), M::ReleaseError>
