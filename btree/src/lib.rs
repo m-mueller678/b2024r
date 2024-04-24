@@ -13,7 +13,7 @@ use indxvec::Search;
 use key_source::SourceSlice;
 use seqlock::{
     seqlock_wrapper, Exclusive, Guarded, Never, SeqLockMode, SeqLockModePessimistic, SeqLockWrappable,
-    SeqlockAccessors, Shared, Wrapper,
+    SeqlockAccessors, Wrapper,
 };
 use std::any::type_name;
 use std::cmp::Ordering;
@@ -147,7 +147,12 @@ impl<'a, V: BasicNodeVariant> W<Guarded<'a, Exclusive, BasicNode<V>>> {
         let offset = offset / size_of::<T>();
         self.b().as_bytes().cast_slice::<T>().move_within_by::<UP>(offset..offset + count, dist);
     }
-    fn heap_write_new(&mut self, key: impl SourceSlice, val: impl SourceSlice<V::ValueSlice>, write_slot: usize) -> Result<(), Never> {
+    fn heap_write_new(
+        &mut self,
+        key: impl SourceSlice,
+        val: impl SourceSlice<V::ValueSlice>,
+        write_slot: usize,
+    ) -> Result<(), Never> {
         let size = Self::record_size(key.len(), val.len());
         let offset = self.heap_bump().load() as usize - size;
         self.heap_write_record(key, val, offset)?;
@@ -156,7 +161,12 @@ impl<'a, V: BasicNodeVariant> W<Guarded<'a, Exclusive, BasicNode<V>>> {
         Ok(())
     }
 
-    fn heap_write_record(&mut self, key: impl SourceSlice, val: impl SourceSlice<V::ValueSlice>, offset: usize) -> Result<(), Never> {
+    fn heap_write_record(
+        &mut self,
+        key: impl SourceSlice,
+        val: impl SourceSlice<V::ValueSlice>,
+        offset: usize,
+    ) -> Result<(), Never> {
         let len = key.len();
         self.b().u16(offset)?.store(len as u16);
         if V::IS_LEAF {
@@ -232,7 +242,7 @@ impl<'a, V: BasicNodeVariant> W<Guarded<'a, Exclusive, BasicNode<V>>> {
         }
     }
 
-    fn split(&mut self, right: &mut W<Guarded<Exclusive,BasicNode<V>>>) -> Result<(), Never> {
+    fn split(&mut self, right: &mut W<Guarded<Exclusive, BasicNode<V>>>) -> Result<(), Never> {
         // TODO tail compression
         let left = &mut BasicNode::<V>::zeroed();
         let mut left = Guarded::<Exclusive, _>::wrap_mut(left);
@@ -244,21 +254,27 @@ impl<'a, V: BasicNodeVariant> W<Guarded<'a, Exclusive, BasicNode<V>>> {
         let lower = self.s().slice::<V::Lower>(sep_record_offset, 1)?.index(1).get().load();
         right.init(sep_key, self.s().upper_fence()?, lower)?;
         left.count_mut().store(low_count as u16);
-        self.copy_records(&mut left, 0..low_count,0)?;
-        self.copy_records(&mut left, 0..low_count,0)?;
-        todo!()
+        self.copy_records(&mut left, 0..low_count, 0)?;
+        self.copy_records(&mut left, 0..low_count, 0)?;
+        self.store(left.load()); //TODO optimize copy
+        Ok(())
     }
 
-    fn copy_records(&self, mut dst: &mut W<Guarded<Exclusive,BasicNode<V>>>, src_range:Range<usize>,dst_start:usize) -> Result<(), Never> {
-        let dst_range = dst_start .. (src_range.end +dst_start -src_range.start);
+    fn copy_records(
+        &self,
+        dst: &mut W<Guarded<Exclusive, BasicNode<V>>>,
+        src_range: Range<usize>,
+        dst_start: usize,
+    ) -> Result<(), Never> {
+        let dst_range = dst_start..(src_range.end + dst_start - src_range.start);
         let prefix_grow = dst.prefix_len().load() as usize - self.prefix_len().load() as usize;
         for src_i in src_range.clone() {
-            dst.heap_write_new(self.s().key(src_i)?.slice(prefix_grow..), self.s().val(src_i)?, src_i-dst_start)?;
+            dst.heap_write_new(self.s().key(src_i)?.slice(prefix_grow..), self.s().val(src_i)?, src_i - dst_start)?;
         }
         if prefix_grow == 0 {
             self.s().heads()?.slice(src_range).copy_to(&mut dst.b().heads()?.slice(dst_range));
         } else {
-            for (src_i,dst_i) in src_range.zip(dst_range) {
+            for (src_i, dst_i) in src_range.zip(dst_range) {
                 let head = key_head(self.s().key(src_i)?.slice(prefix_grow..));
                 dst.b().heads()?.index(dst_i).store(head);
             }
@@ -407,11 +423,11 @@ impl<'a, V: BasicNodeVariant, M: SeqLockMode> W<Guarded<'a, M, BasicNode<V>>> {
 
     fn val(self, index: usize) -> Result<Guarded<'a, M, [V::ValueSlice]>, M::ReleaseError> {
         let offset = self.s().slots().unwrap().try_index(index)?.load() as usize;
-        if V::IS_LEAF{
+        if V::IS_LEAF {
             let key_len = self.s().u16(offset)?.load() as usize;
-            let val_len = self.s().u16(offset+2)?.load() as usize;
+            let val_len = self.s().u16(offset + 2)?.load() as usize;
             self.slice(offset + V::RECORD_TO_KEY_OFFSET + key_len, val_len)
-        }else{
+        } else {
             self.slice(offset + V::RECORD_TO_KEY_OFFSET + 2, 3)
         }
     }
@@ -512,6 +528,7 @@ impl<'a> W<Guarded<'a, Exclusive, BasicNode<BasicNodeLeaf>>> {
 }
 
 impl<'a> W<Guarded<'a, Exclusive, BasicNode<BasicNodeInner>>> {
+    #[allow(clippy::result_unit_err)]
     pub fn insert_inner(&mut self, key: &[u8], pid: u64) -> Result<(), ()> {
         let x = self.insert(key, &bytemuck::cast::<u64, [u16; 4]>(pid)[..3]);
         self.s().validate().unwrap();
@@ -521,9 +538,8 @@ impl<'a> W<Guarded<'a, Exclusive, BasicNode<BasicNodeInner>>> {
 
 #[cfg(test)]
 mod tests {
-    use crate::test_util::{bin_key_generator, subslices};
+    use crate::test_util::subslices;
     use crate::{BasicNode, BasicNodeLeaf};
-    use bstr::BStr;
     use bytemuck::Zeroable;
     use rand::prelude::SliceRandom;
     use rand::rngs::SmallRng;
