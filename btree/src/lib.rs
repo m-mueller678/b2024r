@@ -10,7 +10,7 @@ use crate::key_source::common_prefix;
 use bstr::BString;
 use bytemuck::{Pod, Zeroable};
 use indxvec::Search;
-use key_source::KeySource;
+use key_source::SourceSlice;
 use seqlock::{
     seqlock_wrapper, Exclusive, Guarded, Never, SeqLockMode, SeqLockModePessimistic, SeqLockWrappable,
     SeqlockAccessors, Shared, Wrapper,
@@ -155,7 +155,7 @@ impl<'a, V: BasicNodeVariant> W<Guarded<'a, Exclusive, BasicNode<V>>> {
         let offset = offset / size_of::<T>();
         self.b().as_bytes().cast_slice::<T>().move_within_by::<UP>(offset..offset + count, dist);
     }
-    fn heap_write_new(&mut self, key: impl KeySource, val: &[V::ValueSlice], write_slot: usize) -> Result<(), Never> {
+    fn heap_write_new(&mut self, key: impl SourceSlice, val: &[V::ValueSlice], write_slot: usize) -> Result<(), Never> {
         let size = Self::record_size(key.len(), val.len());
         let offset = self.heap_bump().load() as usize - size;
         self.heap_write_record(key, val, offset)?;
@@ -164,7 +164,7 @@ impl<'a, V: BasicNodeVariant> W<Guarded<'a, Exclusive, BasicNode<V>>> {
         Ok(())
     }
 
-    fn heap_write_record(&mut self, key: impl KeySource, val: &[V::ValueSlice], offset: usize) -> Result<(), Never> {
+    fn heap_write_record(&mut self, key: impl SourceSlice, val: &[V::ValueSlice], offset: usize) -> Result<(), Never> {
         let len = key.len();
         self.b().u16(offset)?.store(len as u16);
         if V::IS_LEAF {
@@ -303,7 +303,7 @@ impl<'a, V: BasicNodeVariant> W<Guarded<'a, Exclusive, BasicNode<V>>> {
         }
     }
 
-    pub fn init(&mut self, lf: impl KeySource, uf: impl KeySource, lower: V::Lower) -> Result<(), Never> {
+    pub fn init(&mut self, lf: impl SourceSlice, uf: impl SourceSlice, lower: V::Lower) -> Result<(), Never> {
         assert_eq!(size_of::<BasicNode<V>>(), PAGE_SIZE - PAGE_HEAD_SIZE);
         self.count_mut().store(0);
         self.prefix_len_mut().store(common_prefix(lf, uf) as u16);

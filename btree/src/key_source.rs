@@ -1,16 +1,21 @@
-use seqlock::{Exclusive, Guarded, SeqLockMode};
+use seqlock::{Exclusive, Guarded, SeqLockMode, SeqLockWrappable};
 use std::collections::Bound;
+use std::marker::PhantomData;
 use std::ops::RangeBounds;
+use bytemuck::Pod;
 
-pub fn common_prefix(a: impl KeySource, b: impl KeySource) -> usize {
+pub fn common_prefix(a: impl SourceSlice, b: impl SourceSlice) -> usize {
     a.iter().zip(b.iter()).take_while(|&(a, b)| a == b).count()
 }
 
-pub trait KeySource: Copy {
-    fn write_suffix_to_offset(self, dst: Guarded<Exclusive, [u8]>, offset: usize) {
+pub trait SourceSlice<T:Pod>: Copy {
+    fn join<B:SourceSlice<T>>(self,b:B)->impl SourceSlice{
+        SourceSlicePair(self,b,PhantomData)
+    }
+    fn write_suffix_to_offset(self, dst: Guarded<Exclusive, [T]>, offset: usize) {
         self.slice(offset..).write_to(&mut dst.slice(offset..));
     }
-    fn write_to(self, dst: &mut Guarded<Exclusive, [u8]>);
+    fn write_to(self, dst: &mut Guarded<Exclusive, [T]>);
     fn slice(mut self, b: impl RangeBounds<usize>) -> Self {
         let start = match b.start_bound() {
             Bound::Unbounded => None,
@@ -38,14 +43,14 @@ pub trait KeySource: Copy {
     }
     fn len(self) -> usize;
 
-    fn iter(self) -> impl Iterator<Item = u8>;
+    fn iter(self) -> impl Iterator<Item = T>;
 }
 
-impl<M: SeqLockMode> KeySource for Guarded<'_, M, [u8]>
+impl<M: SeqLockMode,T:Pod+SeqLockWrappable> SourceSlice<T> for Guarded<'_, M, [T]>
 where
     Self: Copy,
 {
-    fn write_to(self, dst: &mut Guarded<Exclusive, [u8]>) {
+    fn write_to(self, dst: &mut Guarded<Exclusive, [T]>) {
         self.copy_to(dst);
     }
 
@@ -57,13 +62,13 @@ where
         Self::len(&self)
     }
 
-    fn iter(self) -> impl Iterator<Item = u8> {
-        Self::iter(self).map(|x| x.load())
+    fn iter(self) -> impl Iterator<Item = T> {
+        Guarded::iter(self).map(|x| seqlock::Wrapper::get(&x).load())
     }
 }
 
-impl KeySource for &'_ [u8] {
-    fn write_to(self, dst: &mut Guarded<Exclusive, [u8]>) {
+impl<T:Pod> SourceSlice<T> for &'_ [T] {
+    fn write_to(self, dst: &mut Guarded<Exclusive, [T]>) {
         dst.store_slice(self)
     }
 
@@ -79,13 +84,16 @@ impl KeySource for &'_ [u8] {
         self.len()
     }
 
-    fn iter(self) -> impl Iterator<Item = u8> {
+    fn iter(self) -> impl Iterator<Item = T> {
         self.iter().copied()
     }
 }
 
-impl<A: KeySource, B: KeySource> KeySource for (A, B) {
-    fn write_to(self, dst: &mut Guarded<Exclusive, [u8]>) {
+#[derive(Copy, Clone)]
+pub struct SourceSlicePair<T:Pod,A: SourceSlice<T>, B: SourceSlice<T>>(A,B,PhantomData<[T]>);
+
+impl<T:Pod,A: SourceSlice<T>, B: SourceSlice<T>> SourceSlice for SourceSlicePair<T,A,B> {
+    fn write_to(self, dst: &mut Guarded<Exclusive, [T]>) {
         let a_len = self.0.len();
         self.0.write_to(&mut dst.b().slice(..a_len));
         self.1.write_to(&mut dst.b().slice(a_len..));
@@ -117,7 +125,7 @@ impl<A: KeySource, B: KeySource> KeySource for (A, B) {
         self.0.len() + self.1.len()
     }
 
-    fn iter(self) -> impl Iterator<Item = u8> {
+    fn iter(self) -> impl Iterator<Item = T> {
         self.0.iter().chain(self.1.iter())
     }
 }
