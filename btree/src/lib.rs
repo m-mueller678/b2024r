@@ -11,10 +11,7 @@ use bstr::BString;
 use bytemuck::{Pod, Zeroable};
 use indxvec::Search;
 use key_source::SourceSlice;
-use seqlock::{
-    seqlock_wrapper, Exclusive, Guarded, Never, SeqLockMode, SeqLockModePessimistic, SeqLockWrappable,
-    SeqlockAccessors, Wrapper,
-};
+use seqlock::{seqlock_wrapper, Exclusive, Guarded, Never, SeqLockMode, SeqLockModePessimistic, SeqLockWrappable, SeqlockAccessors, Wrapper, Shared};
 use std::any::type_name;
 use std::cmp::Ordering;
 use std::marker::PhantomData;
@@ -257,6 +254,23 @@ impl<'a, V: BasicNodeVariant> W<Guarded<'a, Exclusive, BasicNode<V>>> {
         self.copy_records(&mut left, 0..low_count, 0)?;
         self.copy_records(&mut left, 0..low_count, 0)?;
         self.store(left.load()); //TODO optimize copy
+        Ok(())
+    }
+
+    fn merge(&mut self,right:&mut W<Guarded<Exclusive,BasicNode<V>>>)->Result<(),Never>{
+        let tmp = &mut BasicNode::<V>::zeroed();
+        let mut tmp = Guarded::<Exclusive, _>::wrap_mut(tmp);
+        let left_count = self.count().load() as usize;
+        let right_count = right.count().load() as usize;
+        tmp.init(self.s().lower_fence()?,right.s().upper_fence()?,self.s().lower().get().load())?;
+        if V::IS_LEAF{
+            tmp.count_mut().store((left_count+right_count) as u16);
+            self.copy_records(&mut tmp,0..left_count,0)?;
+            right.copy_records(&mut tmp,0..right_count,left_count)?;
+        }else{
+            todo!()
+        }
+        self.store(tmp.load()); //TODO optimize copy
         Ok(())
     }
 
