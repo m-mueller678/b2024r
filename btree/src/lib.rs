@@ -11,7 +11,10 @@ use bstr::BString;
 use bytemuck::{Pod, Zeroable};
 use indxvec::Search;
 use key_source::SourceSlice;
-use seqlock::{seqlock_wrapper, Exclusive, Guarded, Never, SeqLockMode, SeqLockModePessimistic, SeqLockWrappable, SeqlockAccessors, Wrapper, Shared};
+use seqlock::{
+    seqlock_wrapper, Exclusive, Guarded, Never, SeqLockMode, SeqLockModePessimistic, SeqLockWrappable,
+    SeqlockAccessors, Shared, Wrapper,
+};
 use std::any::type_name;
 use std::cmp::Ordering;
 use std::marker::PhantomData;
@@ -68,7 +71,7 @@ unsafe impl<V: BasicNodeVariant> Pod for BasicNode<V> {}
 pub trait BasicNodeVariant: 'static + Copy + Zeroable {
     const IS_LEAF: bool;
     const RECORD_TO_KEY_OFFSET: usize = if Self::IS_LEAF { 4 } else { 8 };
-    const LOWER_HEAD_SLOTS: usize = if Self::IS_LEAF{0}else{size_of::<[Self::ValueSlice;3]>().div_ceil(4)};
+    const LOWER_HEAD_SLOTS: usize = if Self::IS_LEAF { 0 } else { size_of::<[Self::ValueSlice; 3]>().div_ceil(4) };
     type ValueSlice: SeqLockWrappable + Pod;
 }
 
@@ -77,7 +80,6 @@ pub trait BasicNodeVariant: 'static + Copy + Zeroable {
 pub struct BasicNodeLeaf;
 
 impl BasicNodeVariant for BasicNodeLeaf {
-
     const IS_LEAF: bool = true;
     type ValueSlice = u8;
 }
@@ -237,48 +239,57 @@ impl<'a, V: BasicNodeVariant> W<Guarded<'a, Exclusive, BasicNode<V>>> {
     }
 
     // returns same as parent_insert, or Ok(()) in case node is nearly empty
-    fn split(&mut self, right: &mut W<Guarded<Exclusive, BasicNode<V>>>,parent_insert:impl FnOnce(usize,Guarded<'_,Shared,[u8]>)->Result<(),()>) -> Result<(), ()> {
+    fn split(
+        &mut self,
+        right: &mut W<Guarded<Exclusive, BasicNode<V>>>,
+        parent_insert: impl FnOnce(usize, Guarded<'_, Shared, [u8]>) -> Result<(), ()>,
+    ) -> Result<(), ()> {
         // TODO tail compression
         assert!(V::IS_LEAF);
         let left = &mut BasicNode::<V>::zeroed();
         let mut left = Guarded::<Exclusive, _>::wrap_mut(left);
         let count = self.count().load() as usize;
         let low_count = count / 2;
+        parent_insert(self.prefix_len().load() as usize, self.s().key(low_count)?)?;
         let sep_key = self.s().prefix()?.join(self.s().key(low_count)?);
         left.init(self.s().lower_fence()?, sep_key, self.s().lower().get().load())?;
         let sep_record_offset = self.s().slots()?.index(low_count).load() as usize;
-        let lower = self.s().slice::<[V::ValueSlice;3]>(sep_record_offset, 1)?.index(1).get().load();
+        let lower = self.s().slice::<[V::ValueSlice; 3]>(sep_record_offset, 1)?.index(1).get().load();
         right.init(sep_key, self.s().upper_fence()?, lower)?;
-        if V::IS_LEAF{
+        if V::IS_LEAF {
             left.count_mut().store(low_count as u16);
             self.copy_records(&mut left, 0..low_count, 0)?;
             right.count_mut().store((count - low_count) as u16);
             self.copy_records(right, low_count..count, 0)?;
-        }else{
+        } else {
             left.count_mut().store(low_count as u16);
             self.copy_records(&mut left, 0..low_count, 0)?;
-            right.count_mut().store((count - low_count -1) as u16);
+            right.count_mut().store((count - low_count - 1) as u16);
             self.copy_records(right, low_count..count, 0)?;
         }
         self.store(left.load()); //TODO optimize copy
         Ok(())
     }
 
-    fn merge(&mut self,right:&mut W<Guarded<Exclusive,BasicNode<V>>>)->Result<(),Never>{
+    fn merge(&mut self, right: &mut W<Guarded<Exclusive, BasicNode<V>>>) -> Result<(), Never> {
         let tmp = &mut BasicNode::<V>::zeroed();
         let mut tmp = Guarded::<Exclusive, _>::wrap_mut(tmp);
         let left_count = self.count().load() as usize;
         let right_count = right.count().load() as usize;
-        tmp.init(self.s().lower_fence()?,right.s().upper_fence()?,self.s().lower().get().load())?;
-        if V::IS_LEAF{
-            tmp.count_mut().store((left_count+right_count) as u16);
-            self.copy_records(&mut tmp,0..left_count,0)?;
-            right.copy_records(&mut tmp,0..right_count,left_count)?;
-        }else{
-            tmp.count_mut().store((left_count+right_count+1) as u16);
-            self.copy_records(&mut tmp,0..left_count,0)?;
-            right.copy_records(&mut tmp,0..right_count,left_count+1)?;
-            tmp.heap_write_new(self.s().upper_fence()?.slice(tmp.prefix_len().load() as usize ..),right.s().lower().as_slice(),left_count)?;
+        tmp.init(self.s().lower_fence()?, right.s().upper_fence()?, self.s().lower().get().load())?;
+        if V::IS_LEAF {
+            tmp.count_mut().store((left_count + right_count) as u16);
+            self.copy_records(&mut tmp, 0..left_count, 0)?;
+            right.copy_records(&mut tmp, 0..right_count, left_count)?;
+        } else {
+            tmp.count_mut().store((left_count + right_count + 1) as u16);
+            self.copy_records(&mut tmp, 0..left_count, 0)?;
+            right.copy_records(&mut tmp, 0..right_count, left_count + 1)?;
+            tmp.heap_write_new(
+                self.s().upper_fence()?.slice(tmp.prefix_len().load() as usize..),
+                right.s().lower().as_slice(),
+                left_count,
+            )?;
         }
         self.store(tmp.load()); //TODO optimize copy
         Ok(())
@@ -342,7 +353,7 @@ impl<'a, V: BasicNodeVariant> W<Guarded<'a, Exclusive, BasicNode<V>>> {
         }
     }
 
-    pub fn init(&mut self, lf: impl SourceSlice, uf: impl SourceSlice, lower: [V::ValueSlice;3]) -> Result<(), Never> {
+    pub fn init(&mut self, lf: impl SourceSlice, uf: impl SourceSlice, lower: [V::ValueSlice; 3]) -> Result<(), Never> {
         assert_eq!(size_of::<BasicNode<V>>(), PAGE_SIZE - PAGE_HEAD_SIZE);
         self.count_mut().store(0);
         self.prefix_len_mut().store(common_prefix(lf, uf) as u16);
@@ -416,9 +427,9 @@ impl<'a, V: BasicNodeVariant, M: SeqLockMode> W<Guarded<'a, M, BasicNode<V>>> {
         assert_eq!(calculated, tracked);
         Ok(())
     }
-    fn lower(self) -> Guarded<'a, M, [V::ValueSlice;3]> {
-        assert_eq!(4 % align_of::<[V::ValueSlice;3]>(), 0);
-        unsafe { self.0.map_ptr(|x| addr_of_mut!((*x).0._data) as *mut [V::ValueSlice;3]) }
+    fn lower(self) -> Guarded<'a, M, [V::ValueSlice; 3]> {
+        assert_eq!(4 % align_of::<[V::ValueSlice; 3]>(), 0);
+        unsafe { self.0.map_ptr(|x| addr_of_mut!((*x).0._data) as *mut [V::ValueSlice; 3]) }
     }
     fn round_up(x: usize) -> usize {
         x + (x % 2)

@@ -12,10 +12,14 @@ use std::marker::PhantomData;
 use std::mem::{align_of, align_of_val_raw, size_of, transmute, MaybeUninit};
 use std::ops::{Bound, Range, RangeBounds};
 use std::ptr::slice_from_raw_parts_mut;
+use std::sync::atomic::Ordering::{Acquire, Relaxed, Release};
+use std::thread::yield_now;
 
 mod wrappable;
 
+use crate::lock::LockState;
 pub use access_impl::optimistic_release;
+pub use lock::SeqLock;
 pub use seqlock_macros::SeqlockAccessors;
 pub use wrappable::{SeqLockWrappable, Wrapper};
 
@@ -36,11 +40,18 @@ impl From<Never> for () {
 
 #[path = "atomic_byte_impl.rs"]
 mod access_impl;
+mod lock;
 
 #[allow(private_bounds)]
 pub trait SeqLockMode: SeqLockModeImpl + 'static {
     type ReleaseError: Into<OptimisticLockError> + From<Never> + Debug;
     type SharedDowngrade: SeqLockMode<ReleaseError = Self::ReleaseError>;
+    type GuardData;
+    type ReleaseData;
+
+    fn acquire(s: &LockState) -> Self::GuardData;
+    fn release(s: &LockState, d: Self::GuardData) -> Result<Self::ReleaseData, Self::ReleaseError>;
+
     fn release_error() -> Self::ReleaseError;
 }
 
@@ -58,10 +69,28 @@ pub struct Shared;
 
 impl SeqLockMode for Optimistic {
     type ReleaseError = OptimisticLockError;
+    type GuardData = u64;
+    type ReleaseData = ();
+
     type SharedDowngrade = Optimistic;
 
     fn release_error() -> Self::ReleaseError {
         OptimisticLockError(())
+    }
+
+    fn acquire(lock: &LockState) -> Self::GuardData {
+        loop {
+            let x = lock.version.load(Acquire);
+            if x % 2 == 0 {
+                return x;
+            } else {
+                yield_now();
+            }
+        }
+    }
+
+    fn release(lock: &LockState, guard: Self::GuardData) -> Result<Self::ReleaseData, Self::ReleaseError> {
+        optimistic_release(&lock.version, guard)
     }
 }
 
@@ -73,15 +102,45 @@ pub trait SeqLockModePessimistic: SeqLockMode<ReleaseError = Never> {}
 impl SeqLockMode for Exclusive {
     type ReleaseError = Never;
     type SharedDowngrade = Shared;
+    type GuardData = ();
+    type ReleaseData = u64;
 
     fn release_error() -> Self::ReleaseError {
         unreachable!()
+    }
+
+    fn acquire(lock: &LockState) -> Self::GuardData {
+        loop {
+            let x = lock.version.load(Relaxed);
+            if x % 2 == 0 {
+                if lock.version.compare_exchange(x, x + 1, Acquire, Relaxed).is_ok() {
+                    return;
+                }
+            } else {
+                yield_now();
+            }
+        }
+    }
+
+    fn release(lock: &LockState, (): ()) -> Result<Self::ReleaseData, Self::ReleaseError> {
+        let prev = lock.version.fetch_add(1, Release);
+        Ok(prev + 1)
     }
 }
 
 impl SeqLockMode for Shared {
     type ReleaseError = Never;
     type SharedDowngrade = Shared;
+    type GuardData = ();
+    type ReleaseData = u64;
+
+    fn acquire(_s: &LockState) -> Self::GuardData {
+        unimplemented!()
+    }
+
+    fn release(_s: &LockState, _d: Self::GuardData) -> Result<Self::ReleaseData, Self::ReleaseError> {
+        unimplemented!()
+    }
 
     fn release_error() -> Self::ReleaseError {
         unreachable!()
