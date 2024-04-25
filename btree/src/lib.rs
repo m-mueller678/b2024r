@@ -60,16 +60,15 @@ const BASIC_NODE_DATA_SIZE: usize = (PAGE_SIZE - PAGE_HEAD_SIZE - size_of::<Comm
 #[seq_lock_accessor(heap_freed: u16 = 0.heap_freed)]
 pub struct BasicNode<V: BasicNodeVariant>(
     #[seq_lock_skip_accessor] BasicNodeData,
-    #[seq_lock_skip_accessor] PhantomData<V::Lower>,
+    #[seq_lock_skip_accessor] PhantomData<V::ValueSlice>,
 );
 
 unsafe impl<V: BasicNodeVariant> Pod for BasicNode<V> {}
 
 pub trait BasicNodeVariant: 'static + Copy + Zeroable {
-    type Lower: SeqLockWrappable + Pod;
     const IS_LEAF: bool;
     const RECORD_TO_KEY_OFFSET: usize = if Self::IS_LEAF { 4 } else { 8 };
-    const UPPER_HEADS: usize = size_of::<Self::Lower>().div_ceil(4);
+    const LOWER_HEAD_SLOTS: usize = if Self::IS_LEAF{0}else{size_of::<[Self::ValueSlice;3]>().div_ceil(4)};
     type ValueSlice: SeqLockWrappable + Pod;
 }
 
@@ -78,7 +77,6 @@ pub trait BasicNodeVariant: 'static + Copy + Zeroable {
 pub struct BasicNodeLeaf;
 
 impl BasicNodeVariant for BasicNodeLeaf {
-    type Lower = ();
 
     const IS_LEAF: bool = true;
     type ValueSlice = u8;
@@ -89,7 +87,6 @@ impl BasicNodeVariant for BasicNodeLeaf {
 pub struct BasicNodeInner;
 
 impl BasicNodeVariant for BasicNodeInner {
-    type Lower = PageId;
     type ValueSlice = u16;
     const IS_LEAF: bool = false;
 }
@@ -239,8 +236,10 @@ impl<'a, V: BasicNodeVariant> W<Guarded<'a, Exclusive, BasicNode<V>>> {
         }
     }
 
-    fn split(&mut self, right: &mut W<Guarded<Exclusive, BasicNode<V>>>) -> Result<(), Never> {
+    // returns same as parent_insert, or Ok(()) in case node is nearly empty
+    fn split(&mut self, right: &mut W<Guarded<Exclusive, BasicNode<V>>>,parent_insert:impl FnOnce(usize,Guarded<'_,Shared,[u8]>)->Result<(),()>) -> Result<(), ()> {
         // TODO tail compression
+        assert!(V::IS_LEAF);
         let left = &mut BasicNode::<V>::zeroed();
         let mut left = Guarded::<Exclusive, _>::wrap_mut(left);
         let count = self.count().load() as usize;
@@ -248,11 +247,19 @@ impl<'a, V: BasicNodeVariant> W<Guarded<'a, Exclusive, BasicNode<V>>> {
         let sep_key = self.s().prefix()?.join(self.s().key(low_count)?);
         left.init(self.s().lower_fence()?, sep_key, self.s().lower().get().load())?;
         let sep_record_offset = self.s().slots()?.index(low_count).load() as usize;
-        let lower = self.s().slice::<V::Lower>(sep_record_offset, 1)?.index(1).get().load();
+        let lower = self.s().slice::<[V::ValueSlice;3]>(sep_record_offset, 1)?.index(1).get().load();
         right.init(sep_key, self.s().upper_fence()?, lower)?;
-        left.count_mut().store(low_count as u16);
-        self.copy_records(&mut left, 0..low_count, 0)?;
-        self.copy_records(&mut left, 0..low_count, 0)?;
+        if V::IS_LEAF{
+            left.count_mut().store(low_count as u16);
+            self.copy_records(&mut left, 0..low_count, 0)?;
+            right.count_mut().store((count - low_count) as u16);
+            self.copy_records(right, low_count..count, 0)?;
+        }else{
+            left.count_mut().store(low_count as u16);
+            self.copy_records(&mut left, 0..low_count, 0)?;
+            right.count_mut().store((count - low_count -1) as u16);
+            self.copy_records(right, low_count..count, 0)?;
+        }
         self.store(left.load()); //TODO optimize copy
         Ok(())
     }
@@ -268,7 +275,10 @@ impl<'a, V: BasicNodeVariant> W<Guarded<'a, Exclusive, BasicNode<V>>> {
             self.copy_records(&mut tmp,0..left_count,0)?;
             right.copy_records(&mut tmp,0..right_count,left_count)?;
         }else{
-            todo!()
+            tmp.count_mut().store((left_count+right_count+1) as u16);
+            self.copy_records(&mut tmp,0..left_count,0)?;
+            right.copy_records(&mut tmp,0..right_count,left_count+1)?;
+            tmp.heap_write_new(self.s().upper_fence()?.slice(tmp.prefix_len().load() as usize ..),right.s().lower().as_slice(),left_count)?;
         }
         self.store(tmp.load()); //TODO optimize copy
         Ok(())
@@ -332,7 +342,7 @@ impl<'a, V: BasicNodeVariant> W<Guarded<'a, Exclusive, BasicNode<V>>> {
         }
     }
 
-    pub fn init(&mut self, lf: impl SourceSlice, uf: impl SourceSlice, lower: V::Lower) -> Result<(), Never> {
+    pub fn init(&mut self, lf: impl SourceSlice, uf: impl SourceSlice, lower: [V::ValueSlice;3]) -> Result<(), Never> {
         assert_eq!(size_of::<BasicNode<V>>(), PAGE_SIZE - PAGE_HEAD_SIZE);
         self.count_mut().store(0);
         self.prefix_len_mut().store(common_prefix(lf, uf) as u16);
@@ -406,14 +416,14 @@ impl<'a, V: BasicNodeVariant, M: SeqLockMode> W<Guarded<'a, M, BasicNode<V>>> {
         assert_eq!(calculated, tracked);
         Ok(())
     }
-    fn lower(self) -> <V::Lower as SeqLockWrappable>::Wrapper<Guarded<'a, M, V::Lower>> {
-        assert_eq!(4 % align_of::<V::Lower>(), 0);
-        unsafe { self.0.map_ptr(|x| addr_of_mut!((*x).0._data) as *mut V::Lower) }
+    fn lower(self) -> Guarded<'a, M, [V::ValueSlice;3]> {
+        assert_eq!(4 % align_of::<[V::ValueSlice;3]>(), 0);
+        unsafe { self.0.map_ptr(|x| addr_of_mut!((*x).0._data) as *mut [V::ValueSlice;3]) }
     }
     fn round_up(x: usize) -> usize {
         x + (x % 2)
     }
-    const HEAD_OFFSET: usize = offset_of!(BasicNodeData, _data) + V::UPPER_HEADS;
+    const HEAD_OFFSET: usize = offset_of!(BasicNodeData, _data) + V::LOWER_HEAD_SLOTS;
 
     fn heads(self) -> Result<Guarded<'a, M, [u32]>, M::ReleaseError> {
         let count = self.count().load() as usize;
