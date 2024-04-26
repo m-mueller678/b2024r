@@ -298,7 +298,9 @@ impl<'a, V: BasicNodeVariant> W<Guarded<'a, Exclusive, BasicNode<V>>> {
         self.upper_fence_len_mut().store(uf.len() as u16);
         let heap_end = self.s().heap_end() as u16;
         self.heap_bump_mut().store(heap_end);
-        self.b().lower().get_mut().store(lower);
+        if V::IS_LEAF {
+            self.b().lower().get_mut().store(lower);
+        }
         lf.write_to(&mut self.b().lower_fence()?);
         uf.write_to(&mut self.b().upper_fence()?);
         Ok(())
@@ -364,6 +366,7 @@ impl<'a, V: BasicNodeVariant, M: SeqLockMode> W<Guarded<'a, M, BasicNode<V>>> {
         Ok(())
     }
     fn lower(self) -> Guarded<'a, M, [V::ValueSlice; 3]> {
+        assert!(V::IS_LEAF);
         assert_eq!(4 % align_of::<[V::ValueSlice; 3]>(), 0);
         unsafe { self.0.map_ptr(|x| addr_of_mut!((*x).0._data) as *mut [V::ValueSlice; 3]) }
     }
