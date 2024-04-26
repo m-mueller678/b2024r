@@ -19,7 +19,7 @@ mod wrappable;
 
 use crate::lock::LockState;
 pub use access_impl::optimistic_release;
-pub use lock::SeqLock;
+pub use lock::{Guard, SeqLock};
 pub use seqlock_macros::SeqlockAccessors;
 pub use wrappable::{SeqLockWrappable, Wrapper};
 

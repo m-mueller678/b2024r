@@ -7,6 +7,9 @@ use std::ops::{Deref, DerefMut};
 use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering::{Acquire, Relaxed};
 
+unsafe impl<T: Send> Send for SeqLock<T> {}
+unsafe impl<T: Send + Sync> Sync for SeqLock<T> {}
+
 pub struct LockState {
     pub(crate) version: AtomicU64,
 }
@@ -25,6 +28,10 @@ impl Drop for NoDrop {
 }
 
 impl<T: SeqLockWrappable> SeqLock<T> {
+    pub fn new(x: T) -> Self {
+        SeqLock { lock: LockState { version: Default::default() }, data: UnsafeCell::new(x) }
+    }
+
     pub fn lock<M: SeqLockMode>(&self) -> Guard<M, T> {
         let guard_data = M::acquire(&self.lock);
         Guard {
