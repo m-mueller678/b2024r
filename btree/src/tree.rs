@@ -10,6 +10,12 @@ pub struct Tree {
     meta: PageId,
 }
 
+impl Default for Tree {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Tree {
     pub fn new() -> Self {
         let meta = PageId::alloc();
@@ -77,7 +83,7 @@ impl Tree {
         match leaf.insert_leaf(k, val) {
             Ok(x) => {
                 parent.release_unchecked();
-                return x;
+                x
             }
             Err(()) => {
                 let mut parent = parent.upgrade();

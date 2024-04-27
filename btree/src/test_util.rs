@@ -7,7 +7,6 @@ use rayon::prelude::*;
 use std::collections::HashSet;
 use std::hash::{DefaultHasher, Hash, Hasher};
 use std::ops::RangeInclusive;
-use std::sync::{Once, OnceLock};
 
 pub fn mixed_test_keys(count: usize) -> Vec<Vec<u8>> {
     assert!(count > CHUNK_SIZE * KEY_KINDS);
