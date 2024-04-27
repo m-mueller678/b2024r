@@ -1,7 +1,8 @@
 use crate::basic_node::BasicNodeData;
+use crate::page::PageTail;
 use crate::W;
 use bytemuck::{Pod, Zeroable};
-use seqlock::{Guarded, SeqLockMode, SeqLockWrappable, SeqlockAccessors, Wrapper};
+use seqlock::{Exclusive, Guard, Guarded, SeqLockMode, SeqLockWrappable, SeqlockAccessors, Shared, Wrapper};
 use std::mem::size_of;
 
 pub mod node_tag {
@@ -24,7 +25,14 @@ pub struct CommonNodeHead {
     pub upper_fence_len: u16,
 }
 
-pub unsafe trait Node: SeqLockWrappable + Pod {}
+pub unsafe trait Node: SeqLockWrappable + Pod {
+    /// fails iff parent_insert fails.
+    /// if node is near empty, no split is performed and parent_insert is not called.
+    fn split(
+        this: &mut W<Guarded<Exclusive, Self>>,
+        parent_insert: impl FnOnce(usize, Guarded<'_, Shared, [u8]>) -> Result<Guard<'static, Exclusive, PageTail>, ()>,
+    ) -> Result<(), ()>;
+}
 
 impl<'a, N: Node, M: SeqLockMode> W<Guarded<'a, M, N>> {
     pub fn common_head(self) -> W<Guarded<'a, M, CommonNodeHead>> {

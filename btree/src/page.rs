@@ -2,17 +2,46 @@ use crate::node::{CommonNodeHead, PAGE_HEAD_SIZE, PAGE_SIZE};
 use bytemuck::{Pod, Zeroable};
 use seqlock::{Guard, SeqLock, SeqLockMode, SeqlockAccessors};
 use std::collections::BTreeMap;
-use std::mem::size_of;
+use std::mem::{forget, size_of};
+use std::ops::Deref;
 use std::sync::Mutex;
 
-#[derive(Copy, Clone, Zeroable, Pod, SeqlockAccessors)]
+#[derive(Copy, Clone, Zeroable, Pod, SeqlockAccessors, Eq, PartialEq)]
 #[seq_lock_wrapper(crate::W)]
 #[repr(transparent)]
 pub struct PageId(#[seq_lock_skip_accessor] u64);
 
+pub struct UncommittedPageId(PageId);
+
+impl Drop for UncommittedPageId {
+    fn drop(&mut self) {
+        self.0.free()
+    }
+}
+
+impl UncommittedPageId {
+    pub fn commit(self) -> PageId {
+        let x = self.0;
+        forget(self);
+        x
+    }
+}
+
+impl Deref for UncommittedPageId {
+    type Target = PageId;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
 impl PageId {
     pub fn alloc() -> Self {
         ALLOCATOR.alloc()
+    }
+
+    pub fn alloc_uncommitted() -> UncommittedPageId {
+        UncommittedPageId(Self::alloc())
     }
 
     pub fn free(self) {
@@ -26,6 +55,10 @@ impl PageId {
 
     pub fn from_page(p: &'static Page) -> Self {
         PageId((p as *const Page).expose_provenance() as u64)
+    }
+
+    pub fn from_address_in_page<T>(p: *mut T) -> Self {
+        PageId((p.addr() as u64) & (u64::MAX << 12))
     }
 
     pub fn to_3x16(self) -> [u16; 3] {

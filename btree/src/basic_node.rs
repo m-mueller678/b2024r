@@ -1,13 +1,13 @@
 use crate::key_source::{common_prefix, key_head, SourceSlice};
 use crate::node::{CommonNodeHead, Node, PAGE_HEAD_SIZE, PAGE_SIZE};
-use crate::page::PageId;
+use crate::page::{PageId, PageTail};
 use crate::W;
 use bstr::BString;
 use bytemuck::{Pod, Zeroable};
 use indxvec::Search;
 use seqlock::{
-    Exclusive, Guarded, Never, Optimistic, SeqLockMode, SeqLockModePessimistic, SeqLockWrappable, SeqlockAccessors,
-    Shared, Wrapper,
+    Exclusive, Guard, Guarded, Never, Optimistic, SeqLockMode, SeqLockModePessimistic, SeqLockWrappable,
+    SeqlockAccessors, Shared, Wrapper,
 };
 use std::any::type_name;
 use std::marker::PhantomData;
@@ -70,7 +70,39 @@ impl BasicNodeVariant for BasicNodeInner {
     const IS_LEAF: bool = false;
 }
 
-unsafe impl<V: BasicNodeVariant> Node for BasicNode<V> {}
+unsafe impl<V: BasicNodeVariant> Node for BasicNode<V> {
+    fn split(
+        this: &mut W<Guarded<Exclusive, Self>>,
+        parent_insert: impl FnOnce(usize, Guarded<'_, Shared, [u8]>) -> Result<Guard<'static, Exclusive, PageTail>, ()>,
+    ) -> Result<(), ()> {
+        // TODO tail compression
+        assert!(V::IS_LEAF);
+        let left = &mut BasicNode::<V>::zeroed();
+        let mut left = Guarded::<Exclusive, _>::wrap_mut(left);
+        let count = this.count().load() as usize;
+        let low_count = count / 2;
+        let mut right = parent_insert(this.prefix_len().load() as usize, this.s().key(low_count))?;
+        let right = &mut right.b().0.cast::<BasicNode<V>>();
+        let sep_key = this.s().prefix().join(this.s().key(low_count));
+        left.init(this.s().lower_fence(), sep_key, this.s().lower().get().load());
+        let sep_record_offset = this.s().slots().index(low_count).load() as usize;
+        let lower = this.s().slice::<[V::ValueSlice; 3]>(sep_record_offset, 1).index(1).get().load();
+        right.init(sep_key, this.s().upper_fence(), lower);
+        if V::IS_LEAF {
+            left.count_mut().store(low_count as u16);
+            this.copy_records(&mut left, 0..low_count, 0);
+            right.count_mut().store((count - low_count) as u16);
+            this.copy_records(right, low_count..count, 0);
+        } else {
+            left.count_mut().store(low_count as u16);
+            this.copy_records(&mut left, 0..low_count, 0);
+            right.count_mut().store((count - low_count - 1) as u16);
+            this.copy_records(right, low_count..count, 0);
+        }
+        this.store(left.load()); //TODO optimize copy
+        Ok(())
+    }
+}
 
 const HEAD_RESERVATION: usize = 16;
 
@@ -105,7 +137,7 @@ impl<'a, V: BasicNodeVariant> W<Guarded<'a, Exclusive, BasicNode<V>>> {
     }
 
     #[allow(clippy::result_unit_err)]
-    fn insert(&mut self, key: &[u8], val: &[V::ValueSlice]) -> Result<(), ()> {
+    fn insert(&mut self, key: &[u8], val: &[V::ValueSlice]) -> Result<Option<()>, ()> {
         if !V::IS_LEAF {
             assert_eq!(val.len(), 3);
         }
@@ -121,7 +153,7 @@ impl<'a, V: BasicNodeVariant> W<Guarded<'a, Exclusive, BasicNode<V>>> {
                         let old_size = self.s().stored_record_size(self.s().slots().index(existing).load() as usize);
                         self.heap_freed_mut().update(|x| x + old_size as u16);
                         self.heap_write_new(key, val, existing);
-                        return Ok(());
+                        return Ok(Some(()));
                     }
                 }
                 Err(insert_at) => {
@@ -151,7 +183,7 @@ impl<'a, V: BasicNodeVariant> W<Guarded<'a, Exclusive, BasicNode<V>>> {
                         self.count_mut().store(count as u16 + 1);
                         self.b().heads().index(insert_at).store(key_head(key));
                         self.heap_write_new(key, val, insert_at);
-                        return Ok(());
+                        return Ok(None);
                     }
                 }
             }
@@ -162,39 +194,6 @@ impl<'a, V: BasicNodeVariant> W<Guarded<'a, Exclusive, BasicNode<V>>> {
             }
             self.compactify();
         }
-    }
-
-    // returns same as parent_insert, or Ok(()) in case node is nearly empty
-    fn split(
-        &mut self,
-        right: &mut W<Guarded<Exclusive, BasicNode<V>>>,
-        parent_insert: impl FnOnce(usize, Guarded<'_, Shared, [u8]>) -> Result<(), ()>,
-    ) -> Result<(), ()> {
-        // TODO tail compression
-        assert!(V::IS_LEAF);
-        let left = &mut BasicNode::<V>::zeroed();
-        let mut left = Guarded::<Exclusive, _>::wrap_mut(left);
-        let count = self.count().load() as usize;
-        let low_count = count / 2;
-        parent_insert(self.prefix_len().load() as usize, self.s().key(low_count))?;
-        let sep_key = self.s().prefix().join(self.s().key(low_count));
-        left.init(self.s().lower_fence(), sep_key, self.s().lower().get().load());
-        let sep_record_offset = self.s().slots().index(low_count).load() as usize;
-        let lower = self.s().slice::<[V::ValueSlice; 3]>(sep_record_offset, 1).index(1).get().load();
-        right.init(sep_key, self.s().upper_fence(), lower);
-        if V::IS_LEAF {
-            left.count_mut().store(low_count as u16);
-            self.copy_records(&mut left, 0..low_count, 0);
-            right.count_mut().store((count - low_count) as u16);
-            self.copy_records(right, low_count..count, 0);
-        } else {
-            left.count_mut().store(low_count as u16);
-            self.copy_records(&mut left, 0..low_count, 0);
-            right.count_mut().store((count - low_count - 1) as u16);
-            self.copy_records(right, low_count..count, 0);
-        }
-        self.store(left.load()); //TODO optimize copy
-        Ok(())
     }
 
     fn merge(&mut self, right: &mut W<Guarded<Exclusive, BasicNode<V>>>) {
@@ -464,7 +463,7 @@ impl<'a, M: SeqLockMode> W<Guarded<'a, M, BasicNode<BasicNodeLeaf>>> {
 
 impl<'a> W<Guarded<'a, Exclusive, BasicNode<BasicNodeLeaf>>> {
     #[allow(clippy::result_unit_err)]
-    pub fn insert_leaf(&mut self, key: &[u8], val: &[u8]) -> Result<(), ()> {
+    pub fn insert_leaf(&mut self, key: &[u8], val: &[u8]) -> Result<Option<()>, ()> {
         let x = self.insert(key, val);
         self.s().validate();
         x
@@ -487,10 +486,10 @@ impl<'a> W<Guarded<'a, Optimistic, BasicNode<BasicNodeInner>>> {
 
 impl<'a> W<Guarded<'a, Exclusive, BasicNode<BasicNodeInner>>> {
     #[allow(clippy::result_unit_err)]
-    pub fn insert_inner(&mut self, key: &[u8], pid: u64) -> Result<(), ()> {
-        let x = self.insert(key, &bytemuck::cast::<u64, [u16; 4]>(pid)[..3]);
+    pub fn insert_inner(&mut self, key: &[u8], pid: PageId) -> Result<(), ()> {
+        let x = self.insert(key, &pid.to_3x16());
         self.s().validate();
-        x
+        x.map(|x| debug_assert!(x.is_none()))
     }
 }
 

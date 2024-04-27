@@ -6,6 +6,14 @@ pub fn start() -> ! {
     panic_any(OptimisticError);
 }
 
+pub fn repeat<R, F: FnOnce() -> R + UnwindSafe>(mut f: impl FnMut() -> F) -> R {
+    loop {
+        if let Ok(x) = catch(f()) {
+            return x;
+        }
+    }
+}
+
 pub fn catch<R>(f: impl FnOnce() -> R + UnwindSafe) -> Result<R, OptimisticError> {
     match catch_unwind(f) {
         Ok(r) => Ok(r),

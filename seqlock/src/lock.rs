@@ -1,6 +1,6 @@
 use crate::{Exclusive, Guarded, Optimistic, SeqLockMode, SeqLockModeImpl, SeqLockWrappable, Wrapper};
 use std::cell::UnsafeCell;
-use std::mem::forget;
+use std::mem::{forget, ManuallyDrop};
 use std::ops::{Deref, DerefMut};
 use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering::{Acquire, Relaxed};
@@ -25,14 +25,18 @@ impl<T: SeqLockWrappable> SeqLock<T> {
 
     pub fn lock<M: SeqLockMode>(&self) -> Guard<M, T> {
         let guard_data = M::acquire(&self.lock);
-        Guard { lock: &self.lock, guard_data, access: unsafe { Guarded::wrap_unchecked(self.data.get()) } }
+        Guard {
+            lock: &self.lock,
+            guard_data,
+            access: ManuallyDrop::new(unsafe { Guarded::wrap_unchecked(self.data.get()) }),
+        }
     }
 }
 
 pub struct Guard<'a, M: SeqLockMode, T: SeqLockWrappable> {
     lock: &'a LockState,
     guard_data: M::GuardData,
-    access: T::Wrapper<Guarded<'a, M, T>>,
+    access: ManuallyDrop<T::Wrapper<Guarded<'a, M, T>>>,
 }
 
 impl<'a, M: SeqLockMode, T: SeqLockWrappable> Drop for Guard<'a, M, T> {
@@ -59,7 +63,9 @@ impl<'a, T: SeqLockWrappable> Guard<'a, Optimistic, T> {
             Guard {
                 lock: self.lock,
                 guard_data: (),
-                access: unsafe { Guarded::wrap_unchecked(Optimistic::as_ptr(&self.access.get().p)) },
+                access: ManuallyDrop::new(unsafe {
+                    Guarded::wrap_unchecked(Optimistic::as_ptr(&(*self.access).get().p))
+                }),
             }
         } else {
             Optimistic::release_error()
@@ -72,7 +78,7 @@ impl<'a, T: SeqLockWrappable> Clone for Guard<'a, Optimistic, T> {
         Guard {
             lock: self.lock,
             guard_data: self.guard_data,
-            access: unsafe { Guarded::wrap_unchecked(Optimistic::as_ptr(&self.access.get().p)) },
+            access: ManuallyDrop::new(unsafe { Guarded::wrap_unchecked(Optimistic::as_ptr(&(*self.access).get().p)) }),
         }
     }
 }
@@ -81,9 +87,23 @@ impl<'a, T: SeqLockWrappable> Guard<'a, Exclusive, T> {
     pub fn downgrade(self) -> Guard<'a, Optimistic, T> {
         let guard_data = Exclusive::release(self.lock, ());
         let lock = self.lock;
-        let ptr = Exclusive::as_ptr(&self.access.get().p);
+        let ptr = Exclusive::as_ptr(&(*self.access).get().p);
         forget(self);
-        Guard { lock, guard_data, access: unsafe { Guarded::wrap_unchecked(ptr) } }
+        Guard { lock, guard_data, access: ManuallyDrop::new(unsafe { Guarded::wrap_unchecked(ptr) }) }
+    }
+}
+
+impl<'a, M: SeqLockMode, T: SeqLockWrappable> Guard<'a, M, T> {
+    pub fn map<U: SeqLockWrappable + 'static>(
+        mut self,
+        f: impl FnOnce(T::Wrapper<Guarded<'a, M, T>>) -> U::Wrapper<Guarded<'a, M, U>>,
+    ) -> Guard<'a, M, U> {
+        unsafe {
+            let Guard { lock, guard_data, ref mut access } = self;
+            let access_taken = ManuallyDrop::take(access);
+            forget(self);
+            Guard { lock, guard_data, access: ManuallyDrop::new(f(access_taken)) }
+        }
     }
 }
 

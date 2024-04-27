@@ -15,14 +15,13 @@ use std::ptr::slice_from_raw_parts_mut;
 use std::sync::atomic::Ordering::{Acquire, Relaxed, Release};
 use std::thread::yield_now;
 
-mod unwind;
+pub mod unwind;
 mod wrappable;
 
 use crate::lock::LockState;
 pub use access_impl::optimistic_release;
 pub use lock::{Guard, SeqLock};
 pub use seqlock_macros::SeqlockAccessors;
-pub use unwind::catch as catch_optimistic;
 pub use wrappable::{SeqLockWrappable, Wrapper};
 
 #[derive(Debug)]

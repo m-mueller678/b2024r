@@ -1,4 +1,4 @@
-use bytemuck::Pod;
+use bytemuck::{Pod, Zeroable};
 use seqlock::{Exclusive, Guarded, SeqLockMode, SeqLockWrappable};
 use std::collections::Bound;
 use std::marker::PhantomData;
@@ -17,6 +17,11 @@ pub fn key_head(k: impl SourceSlice) -> u32 {
 pub trait SourceSlice<T: Pod + SeqLockWrappable = u8>: Copy {
     fn join<B: SourceSlice<T>>(self, b: B) -> impl SourceSlice<T> {
         SourceSlicePair(self, b, PhantomData)
+    }
+    fn to_stack_buffer<const SIZE: usize, R>(self, f: impl FnOnce(&mut [T]) -> R) -> R {
+        let mut buffer = <[T; SIZE]>::zeroed();
+        self.write_to(&mut Guarded::wrap_mut(&mut buffer[..]));
+        f(&mut buffer[..self.len()])
     }
     fn write_suffix_to_offset(self, dst: Guarded<Exclusive, [T]>, offset: usize) {
         self.slice(offset..).write_to(&mut dst.slice(offset..));
