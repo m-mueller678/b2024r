@@ -19,6 +19,10 @@ impl Tree {
         Tree { meta }
     }
 
+    pub fn remove(&self, k: &[u8]) -> Option<()> {
+        todo!()
+    }
+
     pub fn insert(&self, k: &[u8], val: &[u8]) -> Option<()> {
         seqlock::unwind::repeat(|| || self.try_insert(k, val))
     }
@@ -121,4 +125,115 @@ struct MetadataPage {
     root: PageId,
     #[seq_lock_skip_accessor]
     _pad: [u64; PAGE_TAIL_SIZE / 8 - 1],
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::test_util::mixed_test_keys;
+    use crate::Tree;
+    use rand::distributions::{Distribution, Uniform, WeightedIndex};
+    use rand::rngs::SmallRng;
+    use rand::{Rng, SeedableRng};
+    use std::sync::atomic::AtomicU32;
+    use std::sync::atomic::Ordering::Relaxed;
+    use std::sync::Barrier;
+
+    fn batch_ops(
+        threads: usize,
+        batches: u32,
+        key_count: usize,
+        op_weights: &(impl Fn(usize, u32) -> [u32; 3] + Sync),
+        after_batch: &mut (impl FnMut(u32, &Tree) + Send),
+    ) {
+        let keys = &mixed_test_keys(key_count);
+        let key_dist = &Uniform::new(0, keys.len());
+        let key_states: &Vec<_> = &(0..keys.len()).map(|_| [AtomicU32::new(0), AtomicU32::new(0)]).collect();
+        let barrier = &Barrier::new(threads);
+        let tree = &Tree::new();
+        std::thread::scope(|scope| {
+            let mut after_batch = Some(after_batch);
+            let mut join_handles: Vec<_> = (0..threads)
+                .map(|tid| {
+                    let mut after_batch = after_batch.take();
+                    scope.spawn(move || {
+                        let mut thread_rng = SmallRng::seed_from_u64(tid as u64);
+                        for batch in 1..=batches {
+                            let weights = op_weights(tid, batch);
+                            let op_dist = &WeightedIndex::new(weights).unwrap();
+                            let batch_rng = SmallRng::from_rng(&mut thread_rng).unwrap();
+                            let ops = |mut brng: SmallRng| {
+                                (0..weights.iter().sum::<u32>())
+                                    .map(move |_| (op_dist.sample(&mut brng), key_dist.sample(&mut brng)))
+                            };
+                            for (op, index) in ops(batch_rng.clone()) {
+                                if op != 0 {
+                                    key_states[index][0].fetch_max(tid as u32, Relaxed);
+                                }
+                            }
+                            barrier.wait();
+                            for (op, index) in ops(batch_rng.clone()) {
+                                if op != 0 && key_states[index][0].load(Relaxed) == tid as u32 {
+                                    key_states[index][1].fetch_or(1 << (29 + op), Relaxed);
+                                }
+                            }
+                            barrier.wait();
+                            for (op, index) in ops(batch_rng.clone()) {
+                                let state = key_states[index][1].load(Relaxed);
+                                let old_batch: u32 = state & u32::MAX >> 2;
+                                let is_inserted = (state >> (29 + 1) & 1) != 0;
+                                let is_removed = (state >> (29 + 2) & 1) != 0;
+                                match op {
+                                    0 => {
+                                        if let Some(v) = tree.lookup_to_vec(&keys[index]) {
+                                            assert!(
+                                                v == old_batch.to_ne_bytes() || v == batch.to_ne_bytes() && is_inserted
+                                            );
+                                        } else {
+                                            assert!(old_batch == 0 || is_removed);
+                                        }
+                                    }
+                                    1 => {
+                                        assert_eq!(
+                                            tree.insert(&keys[index], &batch.to_ne_bytes()).is_some(),
+                                            old_batch != 0
+                                        );
+                                    }
+                                    2 => {
+                                        assert_eq!(tree.remove(&keys[index]).is_some(), old_batch != 0);
+                                    }
+                                    _ => unreachable!(),
+                                }
+                            }
+                            barrier.wait();
+                            for (op, index) in ops(batch_rng.clone()) {
+                                if op != 0 && key_states[index][0].load(Relaxed) == tid as u32 {
+                                    key_states[index][0].store(0, Relaxed);
+                                    key_states[index][1].store(if op == 1 { batch } else { 0 }, Relaxed);
+                                }
+                            }
+                            barrier.wait();
+                            if let Some(f) = &mut after_batch {
+                                f(batch, tree);
+                            }
+                            barrier.wait();
+                        }
+                    })
+                })
+                .collect();
+            while !join_handles.is_empty() {
+                join_handles = join_handles
+                    .into_iter()
+                    .filter_map(|x| {
+                        if x.is_finished() {
+                            x.join().unwrap();
+                            None
+                        } else {
+                            Some(x)
+                        }
+                    })
+                    .collect();
+                std::thread::sleep(std::time::Duration::from_millis(1));
+            }
+        })
+    }
 }

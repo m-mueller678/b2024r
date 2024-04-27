@@ -9,3 +9,7 @@ indxvec = "1.9"
 bytemuck = { version = "1.15.0",features = ["derive"] }
 rand = { version = "0.8.5",features = ["small_rng"] }
 bstr = "1.9.1"
+
+[dev-dependencies]
+random_word = { version = "0.4.3",features = ["en"] }
+rayon = "1.10.0"

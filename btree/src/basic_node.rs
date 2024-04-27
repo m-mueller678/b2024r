@@ -507,7 +507,7 @@ mod tests {
     #[test]
     fn leaf() {
         let rng = &mut SmallRng::seed_from_u64(42);
-        let keys = crate::test_util::bin_key_generator(10..=50);
+        let keys = crate::test_util::ascii_bin_generator(10..=50);
         let mut keys: Vec<Vec<u8>> = (0..50).map(|_| keys(rng)).collect();
         keys.sort();
         keys.dedup();
@@ -515,7 +515,7 @@ mod tests {
         let mut leaf = Guarded::<Exclusive, _>::wrap_mut(leaf);
         for (_k, keys) in subslices(&keys, 5).enumerate() {
             let kc = keys.len();
-            leaf.init(keys[1].as_slice(), keys[kc - 2].as_slice(), ()).unwrap();
+            leaf.init(keys[1].as_slice(), keys[kc - 2].as_slice(), [0; 3]);
             let insert_range = 2..kc - 2;
             let mut to_insert: Vec<&[u8]> = keys[insert_range.clone()].iter().map(|x| x.as_slice()).collect();
             let mut inserted = HashSet::new();
@@ -534,7 +534,7 @@ mod tests {
                 }
                 for (_i, k) in keys.iter().enumerate() {
                     let expected = Some(k).filter(|_| inserted.contains(k.as_slice()));
-                    let actual = leaf.s().lookup_leaf(k).unwrap().map(|v| v.load_slice_to_vec());
+                    let actual = leaf.s().lookup_leaf(k).map(|v| v.load_slice_to_vec());
                     assert_eq!(expected, actual.as_ref());
                 }
             }
