@@ -15,12 +15,14 @@ use std::ptr::slice_from_raw_parts_mut;
 use std::sync::atomic::Ordering::{Acquire, Relaxed, Release};
 use std::thread::yield_now;
 
+mod unwind;
 mod wrappable;
 
 use crate::lock::LockState;
 pub use access_impl::optimistic_release;
 pub use lock::{Guard, SeqLock};
 pub use seqlock_macros::SeqlockAccessors;
+pub use unwind::catch as catch_optimistic;
 pub use wrappable::{SeqLockWrappable, Wrapper};
 
 #[derive(Debug)]
@@ -72,7 +74,7 @@ impl SeqLockMode for Optimistic {
     type SharedDowngrade = Optimistic;
 
     fn release_error() -> ! {
-        std::panic::panic_any(OptimisticLockError)
+        unwind::start()
     }
 
     fn acquire(lock: &LockState) -> Self::GuardData {
@@ -291,11 +293,11 @@ impl<'a, M: SeqLockMode, T: SeqLockWrappable + Pod> Guarded<'a, M, [T]> {
         let ptr = M::as_ptr(&self.p);
         let byte_len = ptr.len() * size_of::<T>();
         if byte_len % size_of::<U>() != 0 {
-            return M::release_error();
+            M::release_error();
         }
         let ptr = ptr as *mut U;
         if !ptr.is_aligned() {
-            return M::release_error();
+            M::release_error();
         }
         unsafe { Guarded::wrap_unchecked(slice_from_raw_parts_mut(ptr, byte_len / size_of::<U>())) }
     }
@@ -344,7 +346,7 @@ impl<'a, M: SeqLockMode, T: SeqLockWrappable + Pod> Guarded<'a, M, [T]> {
     pub fn index(self, i: usize) -> T::Wrapper<Guarded<'a, M, T>> {
         let ptr: *mut [T] = self.as_ptr();
         if i >= ptr.len() {
-            return M::release_error();
+            M::release_error()
         }
         unsafe { Guarded::wrap_unchecked((ptr as *mut T).add(i)) }
     }
@@ -360,7 +362,7 @@ impl<'a, M: SeqLockMode, T: SeqLockWrappable + Pod> Guarded<'a, M, [T]> {
         };
         if let Some(upper) = upper {
             if upper > len {
-                return M::release_error();
+                M::release_error()
             }
             len = upper;
         }
@@ -371,7 +373,7 @@ impl<'a, M: SeqLockMode, T: SeqLockWrappable + Pod> Guarded<'a, M, [T]> {
         };
         if let Some(lower) = lower {
             if lower > len {
-                return M::release_error();
+                M::release_error()
             }
             len -= lower;
             start = unsafe { start.add(lower) };

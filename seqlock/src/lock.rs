@@ -18,14 +18,6 @@ pub struct SeqLock<T> {
     data: UnsafeCell<T>,
 }
 
-struct NoDrop;
-
-impl Drop for NoDrop {
-    fn drop(&mut self) {
-        panic!();
-    }
-}
-
 impl<T: SeqLockWrappable> SeqLock<T> {
     pub fn new(x: T) -> Self {
         SeqLock { lock: LockState { version: Default::default() }, data: UnsafeCell::new(x) }

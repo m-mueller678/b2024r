@@ -176,7 +176,7 @@ impl<'a, V: BasicNodeVariant> W<Guarded<'a, Exclusive, BasicNode<V>>> {
         let mut left = Guarded::<Exclusive, _>::wrap_mut(left);
         let count = self.count().load() as usize;
         let low_count = count / 2;
-        parent_insert(self.prefix_len().load() as usize, self.s().key(low_count));
+        parent_insert(self.prefix_len().load() as usize, self.s().key(low_count))?;
         let sep_key = self.s().prefix().join(self.s().key(low_count));
         left.init(self.s().lower_fence(), sep_key, self.s().lower().get().load());
         let sep_record_offset = self.s().slots().index(low_count).load() as usize;
@@ -415,7 +415,7 @@ impl<'a, V: BasicNodeVariant, M: SeqLockMode> W<Guarded<'a, M, BasicNode<V>>> {
     {
         let prefix_len = self.prefix_len().load() as usize;
         if prefix_len > key.len() {
-            return Err(M::release_error());
+            M::release_error();
         }
         let truncated = &key[prefix_len..];
         self.find_truncated(truncated)
@@ -436,7 +436,7 @@ impl<'a, V: BasicNodeVariant, M: SeqLockMode> W<Guarded<'a, M, BasicNode<V>>> {
         }
         let slots = self.slots();
         if slots.len() != heads.len() {
-            return M::release_error();
+            M::release_error()
         }
         let key_position = (matching_head_range.start..=matching_head_range.end - 1).binary_by(|i| {
             let key = self.key(i);
