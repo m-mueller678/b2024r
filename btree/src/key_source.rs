@@ -10,7 +10,7 @@ pub fn common_prefix(a: impl SourceSlice, b: impl SourceSlice) -> usize {
 
 pub fn key_head(k: impl SourceSlice) -> u32 {
     let mut buffer = [0u8; 4];
-    k.write_to(&mut Guarded::wrap_mut(&mut buffer[..k.len()]));
+    k.write_to(&mut Guarded::wrap_mut(&mut buffer[..k.len().min(4)]));
     u32::from_be_bytes(buffer)
 }
 
