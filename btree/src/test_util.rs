@@ -89,7 +89,7 @@ pub fn path_generator<R: Rng>(min_len_range: RangeInclusive<usize>) -> impl Fn(&
     let words = random_word::all(Lang::En);
     let word_dist = Uniform::new(0, words.len());
     let len_dist = Uniform::new(min_len_range.start(), min_len_range.end());
-    let cardinality_dist = Uniform::new(0, 6);
+    let cardinality_dist = Uniform::new(1, 6);
     move |rng| {
         let target_len = len_dist.sample(rng);
         let mut key = Vec::new();
@@ -101,7 +101,7 @@ pub fn path_generator<R: Rng>(min_len_range: RangeInclusive<usize>) -> impl Fn(&
             let group_rng = &mut SmallRng::seed_from_u64(group_seed);
             let card = cardinality_dist.sample(group_rng);
             let next_word_id = rng.gen_range(0..card);
-            let next_word = words.choose(group_rng).unwrap();
+            let next_word = words[word_dist.sample(group_rng)];
             group_seed = hash((group_seed, next_word_id));
             key.extend_from_slice(next_word.as_bytes());
         }

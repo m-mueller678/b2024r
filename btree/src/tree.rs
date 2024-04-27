@@ -139,7 +139,7 @@ mod tests {
     use crate::Tree;
     use rand::distributions::{Distribution, Uniform, WeightedIndex};
     use rand::rngs::SmallRng;
-    use rand::{Rng, SeedableRng};
+    use rand::SeedableRng;
     use std::sync::atomic::AtomicU32;
     use std::sync::atomic::Ordering::Relaxed;
     use std::sync::Barrier;
@@ -148,16 +148,17 @@ mod tests {
         threads: usize,
         batches: u32,
         key_count: usize,
-        op_weights: &(impl Fn(usize, u32) -> [u32; 3] + Sync),
-        after_batch: &mut (impl FnMut(u32, &Tree) + Send),
+        op_weights: (impl Fn(usize, u32) -> [u32; 3] + Sync),
+        mut after_batch: (impl FnMut(u32, &Tree) + Send),
     ) {
         let keys = &mixed_test_keys(key_count);
         let key_dist = &Uniform::new(0, keys.len());
         let key_states: &Vec<_> = &(0..keys.len()).map(|_| [AtomicU32::new(0), AtomicU32::new(0)]).collect();
         let barrier = &Barrier::new(threads);
         let tree = &Tree::new();
+        let op_weights = &op_weights;
+        let mut after_batch = Some(&mut after_batch);
         std::thread::scope(|scope| {
-            let mut after_batch = Some(after_batch);
             let mut join_handles: Vec<_> = (0..threads)
                 .map(|tid| {
                     let mut after_batch = after_batch.take();
@@ -241,5 +242,10 @@ mod tests {
                 std::thread::sleep(std::time::Duration::from_millis(1));
             }
         })
+    }
+
+    #[test]
+    fn single_insert_lookup() {
+        batch_ops(1, 3, 6_000, |t, b| [3_000, 1_000, 0], |_, _| {});
     }
 }
