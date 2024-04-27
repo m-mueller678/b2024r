@@ -225,7 +225,7 @@ impl<'a, M: SeqLockMode, T: SeqLockWrappable + ?Sized> Guarded<'a, M, T> {
         T: Pod,
     {
         assert_eq!(size_of::<U>(), size_of::<T>());
-        assert_eq!(align_of::<T>() & align_of::<U>(), 0);
+        assert_eq!(align_of::<T>() % align_of::<U>(), 0);
         unsafe { Guarded::wrap_unchecked(self.as_ptr() as *mut U) }
     }
 

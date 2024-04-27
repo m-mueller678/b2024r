@@ -9,15 +9,17 @@ use std::hash::{DefaultHasher, Hash, Hasher};
 use std::ops::RangeInclusive;
 
 pub fn mixed_test_keys(count: usize) -> Vec<Vec<u8>> {
-    assert!(count > CHUNK_SIZE * KEY_KINDS);
-    const CHUNK_SIZE: usize = 1 << 10;
     const KEY_KINDS: usize = 5;
+    assert!(count >= KEY_KINDS);
+    let chunk_size = (1 << 10).min(count / KEY_KINDS);
     let kind_distr = Uniform::new(0, KEY_KINDS);
     let mut keys = vec![Vec::new(); count];
-    keys.par_chunks_mut(CHUNK_SIZE).enumerate().for_each(|(i, mut chunk)| {
-        if i == 0 {
-            for i in 0..256 {
-                chunk[i + 1] = vec![i as u8];
+    keys.par_chunks_mut(chunk_size).enumerate().for_each(|(i, mut chunk)| {
+        if i == 0 && chunk_size > 300 {
+            for i in 0..(256) {
+                if i + 1 < chunk.len() {
+                    chunk[i + 1] = vec![i as u8];
+                }
             }
             chunk = &mut chunk[257..]
         }
