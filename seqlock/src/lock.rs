@@ -1,6 +1,4 @@
-use crate::{
-    Exclusive, Guarded, Optimistic, OptimisticLockError, SeqLockMode, SeqLockModeImpl, SeqLockWrappable, Wrapper,
-};
+use crate::{Exclusive, Guarded, Optimistic, SeqLockMode, SeqLockModeImpl, SeqLockWrappable, Wrapper};
 use std::cell::UnsafeCell;
 use std::mem::forget;
 use std::ops::{Deref, DerefMut};

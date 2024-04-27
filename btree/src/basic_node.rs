@@ -1,6 +1,6 @@
 use crate::key_source::{common_prefix, key_head, SourceSlice};
 use crate::node::{CommonNodeHead, Node, PAGE_HEAD_SIZE, PAGE_SIZE};
-use crate::page_id::PageId;
+use crate::page::PageId;
 use crate::W;
 use bstr::BString;
 use bytemuck::{Pod, Zeroable};

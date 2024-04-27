@@ -1,7 +1,5 @@
 #![allow(unused_variables)]
-use crate::{
-    Exclusive, Optimistic, OptimisticLockError, SeqLockMode, SeqLockModeExclusiveImpl, SeqLockModeImpl, Shared,
-};
+use crate::{Exclusive, Optimistic, SeqLockMode, SeqLockModeExclusiveImpl, SeqLockModeImpl, Shared};
 use bytemuck::Pod;
 use std::cmp::Ordering;
 use std::mem::{size_of, size_of_val, MaybeUninit};

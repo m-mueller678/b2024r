@@ -6,7 +6,7 @@ extern crate core;
 mod basic_node;
 mod key_source;
 mod node;
-mod page_id;
+mod page;
 #[cfg(test)]
 mod test_util;
 mod tree;

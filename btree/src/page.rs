@@ -1,6 +1,7 @@
 use crate::node::{CommonNodeHead, PAGE_HEAD_SIZE, PAGE_SIZE};
 use bytemuck::{Pod, Zeroable};
 use seqlock::{Guard, Guarded, SeqLock, SeqLockMode, SeqLockWrappable, SeqlockAccessors};
+use std::collections::{BTreeMap, HashMap};
 use std::mem::size_of;
 use std::ptr;
 use std::sync::Mutex;
@@ -19,9 +20,9 @@ impl PageId {
         ALLOCATOR.free(self);
     }
 
-    // TODO this is currently unsafe, but will be replaced by a more robust and safe implementation.
     pub fn to_page(self) -> &'static Page {
-        unsafe { &*ptr::with_exposed_provenance(self.0 as usize) }
+        // TODO make this efficient
+        ALL_PAGES.lock().unwrap()[&self.0]
     }
 
     pub fn from_page(p: &'static Page) -> Self {
@@ -52,6 +53,7 @@ trait PageAllocator {
     fn free(&self, p: PageId);
 }
 
+static ALL_PAGES: Mutex<BTreeMap<u64, &'static Page>> = Mutex::new(BTreeMap::new());
 static ALLOCATOR: DefaultPageAllocator = DefaultPageAllocator { freed: Mutex::new(Vec::new()) };
 struct DefaultPageAllocator {
     freed: Mutex<Vec<PageId>>,
@@ -62,7 +64,10 @@ impl PageAllocator for DefaultPageAllocator {
         if let Some(pid) = self.freed.lock().unwrap().pop() {
             return pid;
         }
-        PageId::from_page(Box::leak(Box::new(Page { lock: SeqLock::new(PageTail::zeroed()) })))
+        let page = Box::leak(Box::new(Page { lock: SeqLock::new(PageTail::zeroed()) }));
+        let page_id = PageId::from_page(page);
+        ALL_PAGES.lock().unwrap().insert(page_id.0, page);
+        page_id
     }
 
     fn free(&self, p: PageId) {

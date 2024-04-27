@@ -1,6 +1,6 @@
 use crate::basic_node::{BasicNode, BasicNodeInner, BasicNodeLeaf};
 use crate::node::node_tag;
-use crate::page_id::{PageId, PAGE_TAIL_SIZE};
+use crate::page::{PageId, PAGE_TAIL_SIZE};
 use bytemuck::{Pod, Zeroable};
 use seqlock::{Exclusive, Optimistic, OptimisticLockError, SeqlockAccessors};
 use std::mem::ManuallyDrop;
@@ -21,7 +21,6 @@ impl Tree {
     fn try_insert(&self, k: &[u8], val: &[u8]) -> Option<()> {
         let mut parent = self.meta.lock::<Optimistic>();
         let node_pid = parent.s().cast::<MetadataPage>().root().load();
-        parent.check();
         let mut node = node_pid.lock::<Optimistic>();
         parent.check();
         while node.s().common().tag().load() == node_tag::BASIC_INNER {
