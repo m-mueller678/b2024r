@@ -42,7 +42,7 @@ pub struct Guard<'a, M: SeqLockMode, T: SeqLockWrappable + ?Sized> {
 impl<'a, M: SeqLockMode, T: SeqLockWrappable + ?Sized> Drop for Guard<'a, M, T> {
     fn drop(&mut self) {
         if panicking() {
-            todo!()
+            assert!(!M::EXCLUSIVE);
         } else {
             M::release(self.lock, self.guard_data);
         }

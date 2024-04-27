@@ -344,14 +344,14 @@ impl<'a, V: BasicNodeVariant, M: SeqLockMode> W<Guarded<'a, M, BasicNode<V>>> {
         assert_eq!(calculated, tracked);
     }
     fn lower(self) -> Guarded<'a, M, [V::ValueSlice; 3]> {
-        assert!(V::IS_LEAF);
+        assert!(!V::IS_LEAF);
         assert_eq!(4 % align_of::<[V::ValueSlice; 3]>(), 0);
         unsafe { self.0.map_ptr(|x| addr_of_mut!((*x).0._data) as *mut [V::ValueSlice; 3]) }
     }
     fn round_up(x: usize) -> usize {
         x + (x % 2)
     }
-    const HEAD_OFFSET: usize = offset_of!(BasicNodeData, _data) + V::LOWER_HEAD_SLOTS;
+    const HEAD_OFFSET: usize = offset_of!(BasicNodeData, _data) + V::LOWER_HEAD_SLOTS * 4;
 
     fn heads(self) -> Guarded<'a, M, [u32]> {
         let count = self.count().load() as usize;

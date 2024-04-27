@@ -49,6 +49,7 @@ pub trait SeqLockMode: SeqLockModeImpl + 'static {
     type GuardData: Copy;
     type ReleaseData;
     const PESSIMISTIC: bool;
+    const EXCLUSIVE: bool;
 
     fn acquire(s: &LockState) -> Self::GuardData;
     fn release(s: &LockState, d: Self::GuardData) -> Self::ReleaseData;
@@ -69,6 +70,7 @@ impl SeqLockMode for Optimistic {
     type GuardData = u64;
     type ReleaseData = ();
     const PESSIMISTIC: bool = false;
+    const EXCLUSIVE: bool = false;
 
     type SharedDowngrade = Optimistic;
 
@@ -100,6 +102,7 @@ pub trait SeqLockModePessimistic: SeqLockMode {}
 
 impl SeqLockMode for Exclusive {
     const PESSIMISTIC: bool = true;
+    const EXCLUSIVE: bool = true;
     type SharedDowngrade = Shared;
     type GuardData = ();
     type ReleaseData = u64;
@@ -129,6 +132,7 @@ impl SeqLockMode for Exclusive {
 
 impl SeqLockMode for Shared {
     const PESSIMISTIC: bool = false;
+    const EXCLUSIVE: bool = false;
     type SharedDowngrade = Shared;
     type GuardData = ();
     type ReleaseData = u64;
