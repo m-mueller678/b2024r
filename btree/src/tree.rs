@@ -1,4 +1,5 @@
-use crate::basic_node::{BasicNode, BasicNodeLeaf};
+use std::mem::ManuallyDrop;
+use crate::basic_node::{BasicNode, BasicNodeInner, BasicNodeLeaf};
 use crate::page_id::{PageId, PAGE_TAIL_SIZE};
 use bytemuck::{Pod, Zeroable};
 use seqlock::{Exclusive, Optimistic, OptimisticLockError, SeqlockAccessors};
@@ -18,13 +19,23 @@ impl Tree {
     }
 
     fn try_insert(&self,k:&[u8],val:&[u8])->Result<Option<()>,OptimisticLockError>{
-        let mut parent = self.meta.lock::<Optimistic>();
+        let mut parent = ManuallyDrop::new(self.meta.lock::<Optimistic>());
         let node_pid = parent.s().cast::<MetadataPage>().root().load();
-        parent.check_or_release()?;
-        let mut node = node_pid.lock::<Optimistic>();
+        parent.check()?;
+        let mut node = ManuallyDrop::new(node_pid.lock::<Optimistic>());
+        parent.check()?;
         while node.s().common().tag().load() == node_tag::BASIC_INNER{
-            node.
+            let child_pid = node.cast::<BasicNode<BasicNodeInner>>().lookup_inner(k,true)?;
+            parent = node;
+            parent.check();
+            node = ManuallyDrop::new(child_pid.lock());
+            parent.check();
         }
+        let node = node.0.upgrade();
+        node.b().cast::<BasicNode<BasicNodeLeaf>>().insert_leaf(k,val);
+
+        parent.check();
+        node.check();
         Ok(())
     }
 }

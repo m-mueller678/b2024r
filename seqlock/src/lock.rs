@@ -52,11 +52,17 @@ pub struct Guard<'a, M: SeqLockMode, T: SeqLockWrappable> {
 
 impl<'a, T: SeqLockWrappable> Guard<'a, Optimistic, T> {
     pub fn release(self) -> Result<(), OptimisticLockError> {
-        Optimistic::release(self.lock, self.guard_data).map(|_| ())
+        self.check();
+        std::mem::forget(self);
+
     }
 
     pub fn check_or_release(self)->Result<Self,OptimisticLockError>{
         Optimistic::release(self.lock, self.guard_data).map(|_| self)
+    }
+
+    pub fn check(&self)->Result<(),OptimisticLockError>{
+        Optimistic::release(self.lock, self.guard_data).map(|_| ())
     }
 
     pub fn upgrade(self) -> Result<Guard<'a, Exclusive, T>, OptimisticLockError> {

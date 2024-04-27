@@ -507,11 +507,11 @@ impl<'a> W<Guarded<'a, Optimistic, BasicNode<BasicNodeInner>>> {
             Err(i)=>{i}
             Ok(i)=>i+high_on_equal as usize
         };
-        if index==0{
-            PageId::from_3x16(self.lower().load());
+        Ok(if index==0{
+            PageId::from_3x16(self.lower().load())
         }else{
-            PageId::from_3x16(self.val(index-1)?.as_array());
-        }
+            PageId::from_3x16(self.val(index-1)?.as_array().load())
+        })
     }
 }
 
