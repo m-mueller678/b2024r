@@ -1,5 +1,5 @@
 use bytemuck::Pod;
-use seqlock::{Exclusive, Guard, Guarded, SeqLockMode, SeqLockWrappable};
+use seqlock::{Exclusive, Guarded, SeqLockMode, SeqLockWrappable};
 use std::collections::Bound;
 use std::marker::PhantomData;
 use std::ops::RangeBounds;

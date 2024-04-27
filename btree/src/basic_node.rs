@@ -6,11 +6,10 @@ use bstr::BString;
 use bytemuck::{Pod, Zeroable};
 use indxvec::Search;
 use seqlock::{
-    Exclusive, Guarded, Never, Optimistic, OptimisticLockError, SeqLockMode, SeqLockModePessimistic, SeqLockWrappable,
-    SeqlockAccessors, Shared, Wrapper,
+    Exclusive, Guarded, Never, Optimistic, SeqLockMode, SeqLockModePessimistic, SeqLockWrappable, SeqlockAccessors,
+    Shared, Wrapper,
 };
 use std::any::type_name;
-use std::cmp::Ordering;
 use std::marker::PhantomData;
 use std::mem::{align_of, offset_of, size_of};
 use std::ops::Range;

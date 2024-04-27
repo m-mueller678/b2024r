@@ -2,8 +2,7 @@ use crate::basic_node::{BasicNode, BasicNodeInner, BasicNodeLeaf};
 use crate::node::node_tag;
 use crate::page::{PageId, PAGE_TAIL_SIZE};
 use bytemuck::{Pod, Zeroable};
-use seqlock::{Exclusive, Optimistic, OptimisticLockError, SeqlockAccessors};
-use std::mem::ManuallyDrop;
+use seqlock::{Exclusive, Optimistic, SeqlockAccessors};
 
 struct Tree {
     meta: PageId,
@@ -30,7 +29,7 @@ impl Tree {
             node = child_pid.lock();
             parent.check();
         }
-        let mut node = node.upgrade();
+        let node = node.upgrade();
         //node.b().cast::<BasicNode<BasicNodeLeaf>>().insert_leaf(k,val);
 
         todo!()

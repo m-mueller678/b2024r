@@ -1,9 +1,8 @@
 use crate::node::{CommonNodeHead, PAGE_HEAD_SIZE, PAGE_SIZE};
 use bytemuck::{Pod, Zeroable};
-use seqlock::{Guard, Guarded, SeqLock, SeqLockMode, SeqLockWrappable, SeqlockAccessors};
-use std::collections::{BTreeMap, HashMap};
+use seqlock::{Guard, SeqLock, SeqLockMode, SeqlockAccessors};
+use std::collections::BTreeMap;
 use std::mem::size_of;
-use std::ptr;
 use std::sync::Mutex;
 
 #[derive(Copy, Clone, Zeroable, Pod, SeqlockAccessors)]
@@ -83,7 +82,7 @@ pub const PAGE_TAIL_SIZE: usize = PAGE_SIZE - PAGE_HEAD_SIZE;
 pub struct PageTail {
     pub common: CommonNodeHead,
     #[seq_lock_skip_accessor]
-    _pad: [u8; { PAGE_TAIL_SIZE - size_of::<CommonNodeHead>() }],
+    _pad: [u8; PAGE_TAIL_SIZE - size_of::<CommonNodeHead>()],
 }
 
 #[repr(align(4096))]
