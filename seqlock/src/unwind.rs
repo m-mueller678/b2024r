@@ -3,7 +3,7 @@ use std::panic::{catch_unwind, panic_any, resume_unwind, UnwindSafe};
 pub struct OptimisticError;
 
 pub fn start() -> ! {
-    panic_any(OptimisticError);
+    resume_unwind(Box::new(OptimisticError));
 }
 
 pub fn repeat<R, F: FnOnce() -> R + UnwindSafe>(mut f: impl FnMut() -> F) -> R {

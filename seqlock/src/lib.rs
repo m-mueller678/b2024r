@@ -309,6 +309,7 @@ impl<'a, M: SeqLockMode, T: SeqLockWrappable + Pod> Guarded<'a, M, [T]> {
     where
         M: SeqLockModeExclusive,
     {
+        assert_eq!(self.len(), x.len());
         unsafe { M::store_slice::<T>(&mut self.p, x) }
     }
     pub fn move_within_by<const MOVE_UP: bool>(&mut self, src_range: Range<usize>, distance: usize)

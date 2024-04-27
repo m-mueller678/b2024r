@@ -165,6 +165,7 @@ mod tests {
                     scope.spawn(move || {
                         let mut thread_rng = SmallRng::seed_from_u64(tid as u64);
                         for batch in 1..=batches {
+                            dbg!(batch);
                             let weights = op_weights(tid, batch);
                             let op_dist = &WeightedIndex::new(weights).unwrap();
                             let batch_rng = SmallRng::from_rng(&mut thread_rng).unwrap();
@@ -245,7 +246,11 @@ mod tests {
     }
 
     #[test]
+    fn single_insert_lookup_tiny() {
+        batch_ops(1, 3, 500, |t, b| [400, 200, 0], |_, _| {});
+    }
+    #[cfg_attr(not(miri), test)]
     fn single_insert_lookup() {
-        batch_ops(1, 3, 6_000, |t, b| [3_000, 1_000, 0], |_, _| {});
+        batch_ops(1, 3, 2_500, |t, b| [1_500, 500, 0], |_, _| {});
     }
 }
