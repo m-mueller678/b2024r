@@ -12,6 +12,8 @@ mod page;
 mod test_util;
 mod tree;
 
+pub use tree::Tree;
+
 const MAX_KEY_SIZE: usize = 512;
 
 use seqlock::seqlock_wrapper;

@@ -6,7 +6,7 @@ use crate::W;
 use bytemuck::{Pod, Zeroable};
 use seqlock::{Exclusive, Guard, Guarded, Optimistic, SeqlockAccessors};
 
-struct Tree {
+pub struct Tree {
     meta: PageId,
 }
 
@@ -77,13 +77,26 @@ impl Tree {
             }
             Err(()) => {
                 let mut parent = parent.upgrade();
-                let could_split =
-                    Self::split_locked_node(k, &mut leaf, parent.b().0.cast::<BasicNode<BasicNodeInner>>());
-                could_split.unwrap();
+                if Self::split_locked_node(k, &mut leaf, parent.b().0.cast::<BasicNode<BasicNodeInner>>()).is_err() {
+                    let parent_id = PageId::from_address_in_page::<PageTail>(parent.as_ptr());
+                    drop(parent);
+                    drop(node);
+                    return self.split_and_insert(parent_id, k, val);
+                }
                 drop(parent);
                 node.b().0.cast::<BasicNode<BasicNodeLeaf>>().insert_leaf(k, val).unwrap()
             }
         }
+    }
+
+    pub fn lookup_to_vec(&self, k: &[u8]) -> Option<Vec<u8>> {
+        seqlock::unwind::repeat(|| || self.try_lookup(k).map(|v| v.load_slice_to_vec()))
+    }
+
+    pub fn try_lookup(&self, k: &[u8]) -> Option<Guard<'static, Optimistic, [u8]>> {
+        let [_parent, node] = self.descend(k, None);
+        let key: Guarded<'static, _, _> = node.cast::<BasicNode<BasicNodeLeaf>>().lookup_leaf(k)?;
+        Some(node.map(|_| key))
     }
 
     fn split_locked_node<N: Node>(

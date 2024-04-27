@@ -33,13 +33,13 @@ impl<T: SeqLockWrappable> SeqLock<T> {
     }
 }
 
-pub struct Guard<'a, M: SeqLockMode, T: SeqLockWrappable> {
+pub struct Guard<'a, M: SeqLockMode, T: SeqLockWrappable + ?Sized> {
     lock: &'a LockState,
     guard_data: M::GuardData,
     access: ManuallyDrop<T::Wrapper<Guarded<'a, M, T>>>,
 }
 
-impl<'a, M: SeqLockMode, T: SeqLockWrappable> Drop for Guard<'a, M, T> {
+impl<'a, M: SeqLockMode, T: SeqLockWrappable + ?Sized> Drop for Guard<'a, M, T> {
     fn drop(&mut self) {
         if panicking() {
             todo!()
@@ -94,7 +94,7 @@ impl<'a, T: SeqLockWrappable> Guard<'a, Exclusive, T> {
 }
 
 impl<'a, M: SeqLockMode, T: SeqLockWrappable> Guard<'a, M, T> {
-    pub fn map<U: SeqLockWrappable + 'static>(
+    pub fn map<U: SeqLockWrappable + ?Sized + 'static>(
         mut self,
         f: impl FnOnce(T::Wrapper<Guarded<'a, M, T>>) -> U::Wrapper<Guarded<'a, M, U>>,
     ) -> Guard<'a, M, U> {
@@ -107,7 +107,7 @@ impl<'a, M: SeqLockMode, T: SeqLockWrappable> Guard<'a, M, T> {
     }
 }
 
-impl<'a, M: SeqLockMode, T: SeqLockWrappable> Deref for Guard<'a, M, T> {
+impl<'a, M: SeqLockMode, T: SeqLockWrappable + ?Sized> Deref for Guard<'a, M, T> {
     type Target = T::Wrapper<Guarded<'a, M, T>>;
 
     fn deref(&self) -> &Self::Target {
