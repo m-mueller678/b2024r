@@ -4,12 +4,10 @@ use bytemuck::{Pod, Zeroable};
 use seqlock::{Guarded, SeqLockMode, SeqLockWrappable, SeqlockAccessors, Wrapper};
 use std::mem::size_of;
 
-pub mod node_tag{
-    pub const BASIC_INNER:u8 = 0;
-    pub const BASIC_LEAF:u8 = 1;
+pub mod node_tag {
+    pub const BASIC_INNER: u8 = 0;
+    pub const BASIC_LEAF: u8 = 1;
 }
-
-
 
 pub const PAGE_SIZE: usize = 1 << 10;
 pub const PAGE_HEAD_SIZE: usize = 8;
@@ -18,8 +16,8 @@ pub const PAGE_HEAD_SIZE: usize = 8;
 #[repr(C)]
 #[seq_lock_wrapper(W)]
 pub struct CommonNodeHead {
-    pub tag:u8,
-    _pad:u8,
+    pub tag: u8,
+    _pad: u8,
     pub prefix_len: u16,
     pub count: u16,
     pub lower_fence_len: u16,
@@ -33,12 +31,8 @@ impl<'a, N: Node, M: SeqLockMode> W<Guarded<'a, M, N>> {
         unsafe { self.0.map_ptr(|x| x as *mut CommonNodeHead) }
     }
 
-    pub fn slice<T: SeqLockWrappable + Pod>(
-        self,
-        offset: usize,
-        count: usize,
-    ) -> Result<Guarded<'a, M, [T]>, M::ReleaseError> {
-        self.as_bytes().try_slice(offset..offset + count * size_of::<T>())?.try_cast_slice::<T>()
+    pub fn slice<T: SeqLockWrappable + Pod>(self, offset: usize, count: usize) -> Guarded<'a, M, [T]> {
+        self.as_bytes().slice(offset..offset + count * size_of::<T>()).cast_slice::<T>()
     }
 
     #[allow(clippy::wrong_self_convention)]
@@ -47,18 +41,18 @@ impl<'a, N: Node, M: SeqLockMode> W<Guarded<'a, M, N>> {
         self.0.cast::<[u8; SIZE]>().as_slice()
     }
 
-    pub fn lower_fence(self) -> Result<Guarded<'a, M, [u8]>, M::ReleaseError> {
+    pub fn lower_fence(self) -> Guarded<'a, M, [u8]> {
         let lf = W::rewrap(self.s()).common_head().lower_fence_len().load() as usize;
         self.slice(size_of::<BasicNodeData>() - lf, lf)
     }
 
-    pub fn prefix(self) -> Result<Guarded<'a, M, [u8]>, M::ReleaseError> {
+    pub fn prefix(self) -> Guarded<'a, M, [u8]> {
         let lf = W::rewrap(self.s()).common_head().lower_fence_len().load() as usize;
         let pf = W::rewrap(self.s()).common_head().prefix_len().load() as usize;
         self.slice(size_of::<BasicNodeData>() - lf, pf)
     }
 
-    pub fn upper_fence(self) -> Result<Guarded<'a, M, [u8]>, M::ReleaseError> {
+    pub fn upper_fence(self) -> Guarded<'a, M, [u8]> {
         let uf = W::rewrap(self.s()).common_head().upper_fence_len().load() as usize;
         let lf = W::rewrap(self.s()).common_head().lower_fence_len().load() as usize;
         self.slice(size_of::<BasicNodeData>() - lf - uf, uf)

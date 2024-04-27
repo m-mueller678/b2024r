@@ -6,6 +6,7 @@ use std::mem::forget;
 use std::ops::{Deref, DerefMut};
 use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering::{Acquire, Relaxed};
+use std::thread::panicking;
 
 unsafe impl<T: Send> Send for SeqLock<T> {}
 unsafe impl<T: Send + Sync> Sync for SeqLock<T> {}
@@ -34,12 +35,7 @@ impl<T: SeqLockWrappable> SeqLock<T> {
 
     pub fn lock<M: SeqLockMode>(&self) -> Guard<M, T> {
         let guard_data = M::acquire(&self.lock);
-        Guard {
-            lock: &self.lock,
-            guard_data,
-            access: unsafe { Guarded::wrap_unchecked(self.data.get()) },
-            _no_drop: NoDrop,
-        }
+        Guard { lock: &self.lock, guard_data, access: unsafe { Guarded::wrap_unchecked(self.data.get()) } }
     }
 }
 
@@ -47,35 +43,36 @@ pub struct Guard<'a, M: SeqLockMode, T: SeqLockWrappable> {
     lock: &'a LockState,
     guard_data: M::GuardData,
     access: T::Wrapper<Guarded<'a, M, T>>,
-    _no_drop: NoDrop,
+}
+
+impl<'a, M: SeqLockMode, T: SeqLockWrappable> Drop for Guard<'a, M, T> {
+    fn drop(&mut self) {
+        if panicking() {
+            todo!()
+        } else {
+            M::release(self.lock, self.guard_data);
+        }
+    }
 }
 
 impl<'a, T: SeqLockWrappable> Guard<'a, Optimistic, T> {
-    pub fn release(self) -> Result<(), OptimisticLockError> {
-        self.check();
-        std::mem::forget(self);
-
+    pub fn release_unchecked(self) {
+        forget(self);
     }
 
-    pub fn check_or_release(self)->Result<Self,OptimisticLockError>{
-        Optimistic::release(self.lock, self.guard_data).map(|_| self)
+    pub fn check(&self) {
+        drop(self.clone())
     }
 
-    pub fn check(&self)->Result<(),OptimisticLockError>{
-        Optimistic::release(self.lock, self.guard_data).map(|_| ())
-    }
-
-    pub fn upgrade(self) -> Result<Guard<'a, Exclusive, T>, OptimisticLockError> {
-        forget(self._no_drop);
+    pub fn upgrade(self) -> Guard<'a, Exclusive, T> {
         if self.lock.version.compare_exchange(self.guard_data, self.guard_data + 1, Acquire, Relaxed).is_ok() {
-            Ok(Guard {
+            Guard {
                 lock: self.lock,
                 guard_data: (),
                 access: unsafe { Guarded::wrap_unchecked(Optimistic::as_ptr(&self.access.get().p)) },
-                _no_drop: NoDrop,
-            })
+            }
         } else {
-            Err(OptimisticLockError(()))
+            Optimistic::release_error()
         }
     }
 }
@@ -86,23 +83,17 @@ impl<'a, T: SeqLockWrappable> Clone for Guard<'a, Optimistic, T> {
             lock: self.lock,
             guard_data: self.guard_data,
             access: unsafe { Guarded::wrap_unchecked(Optimistic::as_ptr(&self.access.get().p)) },
-            _no_drop: NoDrop,
         }
     }
 }
 
 impl<'a, T: SeqLockWrappable> Guard<'a, Exclusive, T> {
-    pub fn release(self) {
-        Exclusive::release(self.lock, ()).unwrap();
-        forget(self);
-    }
-
     pub fn downgrade(self) -> Guard<'a, Optimistic, T> {
-        let guard_data = Exclusive::release(self.lock, ()).unwrap();
+        let guard_data = Exclusive::release(self.lock, ());
         let lock = self.lock;
         let ptr = Exclusive::as_ptr(&self.access.get().p);
         forget(self);
-        Guard { lock, guard_data, access: unsafe { Guarded::wrap_unchecked(ptr) }, _no_drop: NoDrop }
+        Guard { lock, guard_data, access: unsafe { Guarded::wrap_unchecked(ptr) } }
     }
 }
 

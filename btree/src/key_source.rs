@@ -1,5 +1,5 @@
 use bytemuck::Pod;
-use seqlock::{Exclusive, Guarded, SeqLockMode, SeqLockWrappable};
+use seqlock::{Exclusive, Guard, Guarded, SeqLockMode, SeqLockWrappable};
 use std::collections::Bound;
 use std::marker::PhantomData;
 use std::ops::RangeBounds;
@@ -61,7 +61,7 @@ where
     }
 
     fn slice(self, b: impl RangeBounds<usize>) -> Self {
-        self.try_slice(b).unwrap()
+        Guarded::slice(self, b)
     }
 
     fn len(self) -> usize {

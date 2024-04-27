@@ -3,7 +3,7 @@ use core::mem::{size_of, MaybeUninit};
 use std::cmp::Ordering;
 use std::sync::atomic::{compiler_fence, AtomicU64, AtomicU8, Ordering::*};
 
-pub fn optimistic_release(lock: &AtomicU64, expected: u64) -> Result<(), OptimisticLockError> {
+pub fn optimistic_release(lock: &AtomicU64, expected: u64)  {
     compiler_fence(Acquire);
     if lock.load(Relaxed) == expected {
         Ok(())

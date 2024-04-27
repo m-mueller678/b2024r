@@ -44,22 +44,19 @@ mod lock;
 
 #[allow(private_bounds)]
 pub trait SeqLockMode: SeqLockModeImpl + 'static {
-    type ReleaseError: Into<OptimisticLockError> + From<Never> + Debug;
-    type SharedDowngrade: SeqLockMode<ReleaseError = Self::ReleaseError>;
-    type GuardData;
+    type SharedDowngrade: SeqLockMode;
+    type GuardData: Copy;
     type ReleaseData;
+    const PESSIMISTIC: bool;
 
     fn acquire(s: &LockState) -> Self::GuardData;
-    fn release(s: &LockState, d: Self::GuardData) -> Result<Self::ReleaseData, Self::ReleaseError>;
+    fn release(s: &LockState, d: Self::GuardData) -> Self::ReleaseData;
 
-    fn release_error() -> Self::ReleaseError;
+    fn release_error() -> !;
 }
 
 #[allow(private_bounds)]
-pub trait SeqLockModeExclusive:
-    SeqLockMode<ReleaseError = Never> + SeqLockModeExclusiveImpl + SeqLockModePessimistic
-{
-}
+pub trait SeqLockModeExclusive: SeqLockModeExclusiveImpl + SeqLockModePessimistic {}
 
 pub struct Optimistic;
 
@@ -68,14 +65,14 @@ pub struct Exclusive;
 pub struct Shared;
 
 impl SeqLockMode for Optimistic {
-    type ReleaseError = OptimisticLockError;
     type GuardData = u64;
     type ReleaseData = ();
+    const PESSIMISTIC: bool = false;
 
     type SharedDowngrade = Optimistic;
 
-    fn release_error() -> Self::ReleaseError {
-        OptimisticLockError(())
+    fn release_error() -> ! {
+        std::panic::panic_any(OptimisticLockError)
     }
 
     fn acquire(lock: &LockState) -> Self::GuardData {
@@ -89,7 +86,7 @@ impl SeqLockMode for Optimistic {
         }
     }
 
-    fn release(lock: &LockState, guard: Self::GuardData) -> Result<Self::ReleaseData, Self::ReleaseError> {
+    fn release(lock: &LockState, guard: Self::GuardData) -> Self::ReleaseData {
         optimistic_release(&lock.version, guard)
     }
 }
@@ -97,15 +94,16 @@ impl SeqLockMode for Optimistic {
 impl SeqLockModeExclusive for Exclusive {}
 impl SeqLockModePessimistic for Exclusive {}
 impl SeqLockModePessimistic for Shared {}
-pub trait SeqLockModePessimistic: SeqLockMode<ReleaseError = Never> {}
+
+pub trait SeqLockModePessimistic: SeqLockMode {}
 
 impl SeqLockMode for Exclusive {
-    type ReleaseError = Never;
+    const PESSIMISTIC: bool = true;
     type SharedDowngrade = Shared;
     type GuardData = ();
     type ReleaseData = u64;
 
-    fn release_error() -> Self::ReleaseError {
+    fn release_error() -> ! {
         unreachable!()
     }
 
@@ -122,14 +120,14 @@ impl SeqLockMode for Exclusive {
         }
     }
 
-    fn release(lock: &LockState, (): ()) -> Result<Self::ReleaseData, Self::ReleaseError> {
+    fn release(lock: &LockState, (): ()) -> Self::ReleaseData {
         let prev = lock.version.fetch_add(1, Release);
-        Ok(prev + 1)
+        prev + 1
     }
 }
 
 impl SeqLockMode for Shared {
-    type ReleaseError = Never;
+    const PESSIMISTIC: bool = false;
     type SharedDowngrade = Shared;
     type GuardData = ();
     type ReleaseData = u64;
@@ -138,11 +136,11 @@ impl SeqLockMode for Shared {
         unimplemented!()
     }
 
-    fn release(_s: &LockState, _d: Self::GuardData) -> Result<Self::ReleaseData, Self::ReleaseError> {
+    fn release(_s: &LockState, _d: Self::GuardData) -> Self::ReleaseData {
         unimplemented!()
     }
 
-    fn release_error() -> Self::ReleaseError {
+    fn release_error() -> ! {
         unreachable!()
     }
 }
@@ -289,24 +287,17 @@ impl<'a, M: SeqLockMode, T: SeqLockWrappable + Pod> Guarded<'a, M, [T]> {
         self.as_ptr().is_empty()
     }
 
-    pub fn try_cast_slice<U: Pod + SeqLockWrappable>(self) -> Result<Guarded<'a, M, [U]>, M::ReleaseError> {
+    pub fn cast_slice<U: Pod + SeqLockWrappable>(self) -> Guarded<'a, M, [U]> {
         let ptr = M::as_ptr(&self.p);
         let byte_len = ptr.len() * size_of::<T>();
         if byte_len % size_of::<U>() != 0 {
-            return Err(M::release_error());
+            return M::release_error();
         }
         let ptr = ptr as *mut U;
         if !ptr.is_aligned() {
-            return Err(M::release_error());
+            return M::release_error();
         }
-        Ok(unsafe { Guarded::wrap_unchecked(slice_from_raw_parts_mut(ptr, byte_len / size_of::<U>())) })
-    }
-
-    pub fn cast_slice<U: Pod + SeqLockWrappable>(self) -> Guarded<'a, M, [U]>
-    where
-        M: SeqLockModePessimistic,
-    {
-        self.try_cast_slice::<U>().unwrap()
+        unsafe { Guarded::wrap_unchecked(slice_from_raw_parts_mut(ptr, byte_len / size_of::<U>())) }
     }
 
     pub fn mem_cmp(&self, other: &[T]) -> Ordering {
@@ -350,29 +341,15 @@ impl<'a, M: SeqLockMode, T: SeqLockWrappable + Pod> Guarded<'a, M, [T]> {
         }
     }
 
-    pub fn index(self, i: usize) -> T::Wrapper<Guarded<'a, M, T>>
-    where
-        M: SeqLockModePessimistic,
-    {
-        self.try_index(i).unwrap()
-    }
-
-    pub fn try_index(self, i: usize) -> Result<T::Wrapper<Guarded<'a, M, T>>, M::ReleaseError> {
+    pub fn index(self, i: usize) -> T::Wrapper<Guarded<'a, M, T>> {
         let ptr: *mut [T] = self.as_ptr();
         if i >= ptr.len() {
-            return Err(M::release_error());
+            return M::release_error();
         }
-        Ok(unsafe { Guarded::wrap_unchecked((ptr as *mut T).add(i)) })
+        unsafe { Guarded::wrap_unchecked((ptr as *mut T).add(i)) }
     }
 
-    pub fn slice(self, x: impl RangeBounds<usize>) -> Self
-    where
-        M: SeqLockModePessimistic,
-    {
-        self.try_slice(x).unwrap()
-    }
-
-    pub fn try_slice(self, x: impl RangeBounds<usize>) -> Result<Self, M::ReleaseError> {
+    pub fn slice(self, x: impl RangeBounds<usize>) -> Self {
         let ptr: *mut [T] = self.as_ptr();
         let mut start = ptr as *mut T;
         let mut len = ptr.len();
@@ -383,7 +360,7 @@ impl<'a, M: SeqLockMode, T: SeqLockWrappable + Pod> Guarded<'a, M, [T]> {
         };
         if let Some(upper) = upper {
             if upper > len {
-                return Err(M::release_error());
+                return M::release_error();
             }
             len = upper;
         }
@@ -394,12 +371,12 @@ impl<'a, M: SeqLockMode, T: SeqLockWrappable + Pod> Guarded<'a, M, [T]> {
         };
         if let Some(lower) = lower {
             if lower > len {
-                return Err(M::release_error());
+                return M::release_error();
             }
             len -= lower;
             start = unsafe { start.add(lower) };
         }
-        Ok(unsafe { Guarded::wrap_unchecked(slice_from_raw_parts_mut(start, len)) })
+        unsafe { Guarded::wrap_unchecked(slice_from_raw_parts_mut(start, len)) }
     }
 
     pub fn as_array<const LEN: usize>(self) -> Guarded<'a, M, [T; LEN]> {

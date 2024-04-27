@@ -16,10 +16,7 @@ impl<T> Wrapper<T> for T {
     fn wrap(x: T) -> Self {
         x
     }
-    fn get(&self) -> &T
-    where
-        T: Sized,
-    {
+    fn get(&self) -> &T {
         self
     }
     fn dewrap(self) -> T {

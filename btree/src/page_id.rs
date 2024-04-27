@@ -1,11 +1,11 @@
-use std::mem::size_of;
 use crate::node::{CommonNodeHead, PAGE_HEAD_SIZE, PAGE_SIZE};
 use bytemuck::{Pod, Zeroable};
 use seqlock::{Guard, Guarded, SeqLock, SeqLockMode, SeqLockWrappable, SeqlockAccessors};
+use std::mem::size_of;
 use std::ptr;
 use std::sync::Mutex;
 
-#[derive(Copy, Clone,Zeroable,Pod,SeqlockAccessors)]
+#[derive(Copy, Clone, Zeroable, Pod, SeqlockAccessors)]
 #[seq_lock_wrapper(crate::W)]
 #[repr(transparent)]
 pub struct PageId(#[seq_lock_skip_accessor] u64);
@@ -20,11 +20,11 @@ impl PageId {
     }
 
     // TODO this is currently unsafe, but will be replaced by a more robust and safe implementation.
-    pub fn to_page(self)->&'static Page{
+    pub fn to_page(self) -> &'static Page {
         unsafe { &*ptr::with_exposed_provenance(self.0 as usize) }
     }
 
-    pub fn from_page(p:&'static Page)->Self{
+    pub fn from_page(p: &'static Page) -> Self {
         PageId((p as *const Page).expose_provenance() as u64)
     }
 
@@ -74,9 +74,9 @@ pub const PAGE_TAIL_SIZE: usize = PAGE_SIZE - PAGE_HEAD_SIZE;
 
 #[derive(Zeroable, Pod, Clone, Copy, SeqlockAccessors)]
 #[seq_lock_wrapper(crate::W)]
-#[repr(C,align(8))]
+#[repr(C, align(8))]
 pub struct PageTail {
-    pub common:CommonNodeHead,
+    pub common: CommonNodeHead,
     #[seq_lock_skip_accessor]
     _pad: [u8; { PAGE_TAIL_SIZE - size_of::<CommonNodeHead>() }],
 }

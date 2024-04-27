@@ -1,17 +1,20 @@
 use crate::key_source::{common_prefix, key_head, SourceSlice};
 use crate::node::{CommonNodeHead, Node, PAGE_HEAD_SIZE, PAGE_SIZE};
+use crate::page_id::PageId;
 use crate::W;
 use bstr::BString;
 use bytemuck::{Pod, Zeroable};
 use indxvec::Search;
-use seqlock::{Exclusive, Guarded, Never, SeqLockMode, SeqLockModePessimistic, SeqLockWrappable, SeqlockAccessors, Shared, Wrapper, Optimistic, OptimisticLockError};
+use seqlock::{
+    Exclusive, Guarded, Never, Optimistic, OptimisticLockError, SeqLockMode, SeqLockModePessimistic, SeqLockWrappable,
+    SeqlockAccessors, Shared, Wrapper,
+};
 use std::any::type_name;
 use std::cmp::Ordering;
 use std::marker::PhantomData;
 use std::mem::{align_of, offset_of, size_of};
 use std::ops::Range;
 use std::ptr::addr_of_mut;
-use crate::page_id::PageId;
 
 #[derive(Copy, Clone, Zeroable, Pod)]
 #[repr(align(8))]
@@ -20,7 +23,7 @@ pub struct BasicNodeData {
     common: CommonNodeHead,
     heap_bump: u16,
     heap_freed: u16,
-    _pad:u16,
+    _pad: u16,
     hints: [u32; 16],
     _data: [u32; BASIC_NODE_DATA_SIZE],
 }
@@ -79,39 +82,27 @@ impl<'a, V: BasicNodeVariant> W<Guarded<'a, Exclusive, BasicNode<V>>> {
         let offset = offset / size_of::<T>();
         self.b().as_bytes().cast_slice::<T>().move_within_by::<UP>(offset..offset + count, dist);
     }
-    fn heap_write_new(
-        &mut self,
-        key: impl SourceSlice,
-        val: impl SourceSlice<V::ValueSlice>,
-        write_slot: usize,
-    ) -> Result<(), Never> {
+    fn heap_write_new(&mut self, key: impl SourceSlice, val: impl SourceSlice<V::ValueSlice>, write_slot: usize) {
         let size = Self::record_size(key.len(), val.len());
         let offset = self.heap_bump().load() as usize - size;
-        self.heap_write_record(key, val, offset)?;
+        self.heap_write_record(key, val, offset);
         self.heap_bump_mut().store(offset as u16);
-        self.b().slots()?.index(write_slot).store(offset as u16);
-        Ok(())
+        self.b().slots().index(write_slot).store(offset as u16);
     }
 
-    pub fn heap_write_record(
-        &mut self,
-        key: impl SourceSlice,
-        val: impl SourceSlice<V::ValueSlice>,
-        offset: usize,
-    ) -> Result<(), Never> {
+    pub fn heap_write_record(&mut self, key: impl SourceSlice, val: impl SourceSlice<V::ValueSlice>, offset: usize) {
         let len = key.len();
-        self.b().u16(offset)?.store(len as u16);
+        self.b().u16(offset).store(len as u16);
         if V::IS_LEAF {
-            self.b().u16(offset + 2)?.store(val.len() as u16);
+            self.b().u16(offset + 2).store(val.len() as u16);
         }
         if !V::IS_LEAF {
-            val.write_to(&mut self.b().slice(offset + 2, 3)?);
+            val.write_to(&mut self.b().slice(offset + 2, 3));
         }
-        key.write_to(&mut self.b().slice(offset + V::RECORD_TO_KEY_OFFSET, len)?);
+        key.write_to(&mut self.b().slice(offset + V::RECORD_TO_KEY_OFFSET, len));
         if V::IS_LEAF {
-            val.write_to(&mut self.b().slice(offset + V::RECORD_TO_KEY_OFFSET + len, val.len())?);
+            val.write_to(&mut self.b().slice(offset + V::RECORD_TO_KEY_OFFSET + len, val.len()));
         }
-        Ok(())
     }
 
     #[allow(clippy::result_unit_err)]
@@ -120,7 +111,7 @@ impl<'a, V: BasicNodeVariant> W<Guarded<'a, Exclusive, BasicNode<V>>> {
             assert_eq!(val.len(), 3);
         }
         let key = &key[self.prefix_len().load() as usize..];
-        let index = self.s().find_truncated(key)?;
+        let index = self.s().find_truncated(key);
         let count = self.count().load() as usize;
         loop {
             let new_heap_start;
@@ -128,9 +119,9 @@ impl<'a, V: BasicNodeVariant> W<Guarded<'a, Exclusive, BasicNode<V>>> {
                 Ok(existing) => {
                     new_heap_start = Self::HEAD_OFFSET + Self::reserved_head_count(count) * 4 + count * 2;
                     if Self::record_size(key.len(), val.len()) <= (self.heap_bump().load() as usize - new_heap_start) {
-                        let old_size = self.s().stored_record_size(self.s().slots()?.index(existing).load() as usize)?;
+                        let old_size = self.s().stored_record_size(self.s().slots().index(existing).load() as usize);
                         self.heap_freed_mut().update(|x| x + old_size as u16);
-                        self.heap_write_new(key, val, existing)?;
+                        self.heap_write_new(key, val, existing);
                         return Ok(());
                     }
                 }
@@ -159,8 +150,8 @@ impl<'a, V: BasicNodeVariant> W<Guarded<'a, Exclusive, BasicNode<V>>> {
                         }
                         self.relocate_by::<true, u32>(Self::HEAD_OFFSET + 4 * insert_at, count - insert_at, 1);
                         self.count_mut().store(count as u16 + 1);
-                        self.b().heads()?.index(insert_at).store(key_head(key));
-                        self.heap_write_new(key, val, insert_at)?;
+                        self.b().heads().index(insert_at).store(key_head(key));
+                        self.heap_write_new(key, val, insert_at);
                         return Ok(());
                     }
                 }
@@ -170,7 +161,7 @@ impl<'a, V: BasicNodeVariant> W<Guarded<'a, Exclusive, BasicNode<V>>> {
             {
                 return Err(());
             }
-            self.compactify()?;
+            self.compactify();
         }
     }
 
@@ -186,79 +177,72 @@ impl<'a, V: BasicNodeVariant> W<Guarded<'a, Exclusive, BasicNode<V>>> {
         let mut left = Guarded::<Exclusive, _>::wrap_mut(left);
         let count = self.count().load() as usize;
         let low_count = count / 2;
-        parent_insert(self.prefix_len().load() as usize, self.s().key(low_count)?)?;
-        let sep_key = self.s().prefix()?.join(self.s().key(low_count)?);
-        left.init(self.s().lower_fence()?, sep_key, self.s().lower().get().load())?;
-        let sep_record_offset = self.s().slots()?.index(low_count).load() as usize;
-        let lower = self.s().slice::<[V::ValueSlice; 3]>(sep_record_offset, 1)?.index(1).get().load();
-        right.init(sep_key, self.s().upper_fence()?, lower)?;
+        parent_insert(self.prefix_len().load() as usize, self.s().key(low_count));
+        let sep_key = self.s().prefix().join(self.s().key(low_count));
+        left.init(self.s().lower_fence(), sep_key, self.s().lower().get().load());
+        let sep_record_offset = self.s().slots().index(low_count).load() as usize;
+        let lower = self.s().slice::<[V::ValueSlice; 3]>(sep_record_offset, 1).index(1).get().load();
+        right.init(sep_key, self.s().upper_fence(), lower);
         if V::IS_LEAF {
             left.count_mut().store(low_count as u16);
-            self.copy_records(&mut left, 0..low_count, 0)?;
+            self.copy_records(&mut left, 0..low_count, 0);
             right.count_mut().store((count - low_count) as u16);
-            self.copy_records(right, low_count..count, 0)?;
+            self.copy_records(right, low_count..count, 0);
         } else {
             left.count_mut().store(low_count as u16);
-            self.copy_records(&mut left, 0..low_count, 0)?;
+            self.copy_records(&mut left, 0..low_count, 0);
             right.count_mut().store((count - low_count - 1) as u16);
-            self.copy_records(right, low_count..count, 0)?;
+            self.copy_records(right, low_count..count, 0);
         }
         self.store(left.load()); //TODO optimize copy
         Ok(())
     }
 
-    fn merge(&mut self, right: &mut W<Guarded<Exclusive, BasicNode<V>>>) -> Result<(), Never> {
+    fn merge(&mut self, right: &mut W<Guarded<Exclusive, BasicNode<V>>>) {
         let tmp = &mut BasicNode::<V>::zeroed();
         let mut tmp = Guarded::<Exclusive, _>::wrap_mut(tmp);
         let left_count = self.count().load() as usize;
         let right_count = right.count().load() as usize;
-        tmp.init(self.s().lower_fence()?, right.s().upper_fence()?, self.s().lower().get().load())?;
+        tmp.init(self.s().lower_fence(), right.s().upper_fence(), self.s().lower().get().load());
         if V::IS_LEAF {
             tmp.count_mut().store((left_count + right_count) as u16);
-            self.copy_records(&mut tmp, 0..left_count, 0)?;
-            right.copy_records(&mut tmp, 0..right_count, left_count)?;
+            self.copy_records(&mut tmp, 0..left_count, 0);
+            right.copy_records(&mut tmp, 0..right_count, left_count);
         } else {
             tmp.count_mut().store((left_count + right_count + 1) as u16);
-            self.copy_records(&mut tmp, 0..left_count, 0)?;
-            right.copy_records(&mut tmp, 0..right_count, left_count + 1)?;
+            self.copy_records(&mut tmp, 0..left_count, 0);
+            right.copy_records(&mut tmp, 0..right_count, left_count + 1);
             tmp.heap_write_new(
-                self.s().upper_fence()?.slice(tmp.prefix_len().load() as usize..),
+                self.s().upper_fence().slice(tmp.prefix_len().load() as usize..),
                 right.s().lower().as_slice(),
                 left_count,
-            )?;
+            );
         }
         self.store(tmp.load()); //TODO optimize copy
-        Ok(())
     }
 
-    fn copy_records(
-        &self,
-        dst: &mut W<Guarded<Exclusive, BasicNode<V>>>,
-        src_range: Range<usize>,
-        dst_start: usize,
-    ) -> Result<(), Never> {
+    fn copy_records(&self, dst: &mut W<Guarded<Exclusive, BasicNode<V>>>, src_range: Range<usize>, dst_start: usize) {
         let dst_range = dst_start..(src_range.end + dst_start - src_range.start);
         let prefix_grow = dst.prefix_len().load() as usize - self.prefix_len().load() as usize;
         for src_i in src_range.clone() {
-            dst.heap_write_new(self.s().key(src_i)?.slice(prefix_grow..), self.s().val(src_i)?, src_i - dst_start)?;
+            dst.heap_write_new(self.s().key(src_i).slice(prefix_grow..), self.s().val(src_i), src_i - dst_start);
         }
         if prefix_grow == 0 {
-            self.s().heads()?.slice(src_range).copy_to(&mut dst.b().heads()?.slice(dst_range));
+            self.s().heads().slice(src_range).copy_to(&mut dst.b().heads().slice(dst_range));
         } else {
             for (src_i, dst_i) in src_range.zip(dst_range) {
-                let head = key_head(self.s().key(src_i)?.slice(prefix_grow..));
-                dst.b().heads()?.index(dst_i).store(head);
+                let head = key_head(self.s().key(src_i).slice(prefix_grow..));
+                dst.b().heads().index(dst_i).store(head);
             }
         }
-        Ok(())
     }
 
     fn remove(&mut self, key: &[u8]) -> Result<Option<()>, Never> {
-        let Ok(index) = self.s().find(key)? else {
+        let Ok(index) = self.s().find(key) else {
             return Ok(None);
         };
-        let offset = self.s().slots()?.index(index).load() as usize;
-        let record_size = self.s().stored_record_size(offset)?;
+        let offset = self.s().slots().index(index).load() as usize;
+        let record_size = self.s().stored_record_size(offset);
         self.heap_freed_mut().update(|x| x + record_size as u16);
         let count = self.count().load() as usize;
         {
@@ -277,7 +261,7 @@ impl<'a, V: BasicNodeVariant> W<Guarded<'a, Exclusive, BasicNode<V>>> {
             }
         }
         self.count_mut().store((count - 1) as u16);
-        self.s().validate()?;
+        self.s().validate();
         Ok(Some(()))
     }
 
@@ -289,7 +273,7 @@ impl<'a, V: BasicNodeVariant> W<Guarded<'a, Exclusive, BasicNode<V>>> {
         }
     }
 
-    pub fn init(&mut self, lf: impl SourceSlice, uf: impl SourceSlice, lower: [V::ValueSlice; 3]) -> Result<(), Never> {
+    pub fn init(&mut self, lf: impl SourceSlice, uf: impl SourceSlice, lower: [V::ValueSlice; 3]) {
         assert_eq!(size_of::<BasicNode<V>>(), PAGE_SIZE - PAGE_HEAD_SIZE);
         self.count_mut().store(0);
         self.prefix_len_mut().store(common_prefix(lf, uf) as u16);
@@ -301,43 +285,41 @@ impl<'a, V: BasicNodeVariant> W<Guarded<'a, Exclusive, BasicNode<V>>> {
         if V::IS_LEAF {
             self.b().lower().get_mut().store(lower);
         }
-        lf.write_to(&mut self.b().lower_fence()?);
-        uf.write_to(&mut self.b().upper_fence()?);
-        Ok(())
+        lf.write_to(&mut self.b().lower_fence());
+        uf.write_to(&mut self.b().upper_fence());
     }
 
-    fn compactify(&mut self) -> Result<(), Never> {
+    fn compactify(&mut self) {
         let buffer = &mut [0u8; size_of::<BasicNodeData>()];
         let heap_end = self.s().heap_end();
         let mut dst_offset = heap_end;
         for i in 0..self.count().load() as usize {
-            let offset = self.s().slots().unwrap().index(i).load() as usize;
-            let lens = self.s().slice::<u16>(offset, 2).unwrap();
+            let offset = self.s().slots().index(i).load() as usize;
+            let lens = self.s().slice::<u16>(offset, 2);
             let record_len = V::RECORD_TO_KEY_OFFSET
                 + Self::round_up(
                     lens.index(0).load() as usize + if V::IS_LEAF { lens.index(1).load() as usize } else { 0 },
                 );
             dst_offset -= record_len;
-            self.s().slice(offset, record_len)?.load_slice(&mut buffer[dst_offset..][..record_len]);
-            self.b().slots().unwrap().index(i).store(dst_offset as u16);
+            self.s().slice(offset, record_len).load_slice(&mut buffer[dst_offset..][..record_len]);
+            self.b().slots().index(i).store(dst_offset as u16);
         }
-        self.b().slice::<u8>(dst_offset, heap_end - dst_offset)?.store_slice(&buffer[dst_offset..heap_end]);
+        self.b().slice::<u8>(dst_offset, heap_end - dst_offset).store_slice(&buffer[dst_offset..heap_end]);
         debug_assert_eq!(self.heap_bump().load() + self.heap_freed().load(), dst_offset as u16);
         self.heap_freed_mut().store(0);
         self.heap_bump_mut().store(dst_offset as u16);
-        Ok(())
     }
 }
 
 impl<'a, V: BasicNodeVariant, M: SeqLockMode> W<Guarded<'a, M, BasicNode<V>>> {
-    fn stored_record_size(self, offset: usize) -> Result<usize, M::ReleaseError>
+    fn stored_record_size(self, offset: usize) -> usize
     where
         Self: Copy,
     {
-        Ok(Self::round_up(
-            self.u16(offset)?.load() as usize
-                + if V::IS_LEAF { 4 + self.s().u16(offset + 2)?.load() as usize } else { 8 },
-        ))
+        Self::round_up(
+            self.u16(offset).load() as usize
+                + if V::IS_LEAF { 4 + self.s().u16(offset + 2).load() as usize } else { 8 },
+        )
     }
 
     fn heap_end(self) -> usize
@@ -347,23 +329,21 @@ impl<'a, V: BasicNodeVariant, M: SeqLockMode> W<Guarded<'a, M, BasicNode<V>>> {
         size_of::<BasicNodeData>()
             - Self::round_up(self.lower_fence_len().load() as usize + self.upper_fence_len().load() as usize)
     }
-    fn u16(self, offset: usize) -> Result<Guarded<'a, M, u16>, M::ReleaseError> {
-        self.slice::<u16>(offset, 1)?.try_index(0)
+    fn u16(self, offset: usize) -> Guarded<'a, M, u16> {
+        self.slice::<u16>(offset, 1).index(0)
     }
-    fn validate(self) -> Result<(), M::ReleaseError>
+    fn validate(self)
     where
         M: SeqLockModePessimistic,
         Self: Copy,
     {
         if !cfg!(debug_assertions) {
-            return Ok(());
+            return;
         }
-        let record_size_sum: usize =
-            self.s().slots()?.iter().map(|x| self.stored_record_size(x.load() as usize).unwrap()).sum();
+        let record_size_sum: usize = self.s().slots().iter().map(|x| self.stored_record_size(x.load() as usize)).sum();
         let calculated = self.heap_end() - record_size_sum;
         let tracked = self.heap_bump().load() as usize + self.heap_freed().load() as usize;
         assert_eq!(calculated, tracked);
-        Ok(())
     }
     fn lower(self) -> Guarded<'a, M, [V::ValueSlice; 3]> {
         assert!(V::IS_LEAF);
@@ -375,7 +355,7 @@ impl<'a, V: BasicNodeVariant, M: SeqLockMode> W<Guarded<'a, M, BasicNode<V>>> {
     }
     const HEAD_OFFSET: usize = offset_of!(BasicNodeData, _data) + V::LOWER_HEAD_SLOTS;
 
-    fn heads(self) -> Result<Guarded<'a, M, [u32]>, M::ReleaseError> {
+    fn heads(self) -> Guarded<'a, M, [u32]> {
         let count = self.count().load() as usize;
         self.slice(Self::HEAD_OFFSET, count)
     }
@@ -383,30 +363,30 @@ impl<'a, V: BasicNodeVariant, M: SeqLockMode> W<Guarded<'a, M, BasicNode<V>>> {
     fn reserved_head_count(count: usize) -> usize {
         count.next_multiple_of(HEAD_RESERVATION)
     }
-    fn slots(self) -> Result<Guarded<'a, M, [u16]>, M::ReleaseError> {
+    fn slots(self) -> Guarded<'a, M, [u16]> {
         let count = self.count().load() as usize;
         let i = Self::reserved_head_count(count);
         self.slice(Self::HEAD_OFFSET + 4 * i, count)
     }
 
-    fn key(self, index: usize) -> Result<Guarded<'a, M, [u8]>, M::ReleaseError> {
-        let offset = self.s().slots().unwrap().try_index(index)?.load() as usize;
-        let len = self.s().u16(offset)?.load();
+    fn key(self, index: usize) -> Guarded<'a, M, [u8]> {
+        let offset = self.s().slots().index(index).load() as usize;
+        let len = self.s().u16(offset).load();
         self.slice(offset + V::RECORD_TO_KEY_OFFSET, len as usize)
     }
 
-    fn val(self, index: usize) -> Result<Guarded<'a, M, [V::ValueSlice]>, M::ReleaseError> {
-        let offset = self.s().slots().unwrap().try_index(index)?.load() as usize;
+    fn val(self, index: usize) -> Guarded<'a, M, [V::ValueSlice]> {
+        let offset = self.s().slots().index(index).load() as usize;
         if V::IS_LEAF {
-            let key_len = self.s().u16(offset)?.load() as usize;
-            let val_len = self.s().u16(offset + 2)?.load() as usize;
+            let key_len = self.s().u16(offset).load() as usize;
+            let val_len = self.s().u16(offset + 2).load() as usize;
             self.slice(offset + V::RECORD_TO_KEY_OFFSET + key_len, val_len)
         } else {
             self.slice(offset + V::RECORD_TO_KEY_OFFSET + 2, 3)
         }
     }
 
-    pub fn print(self) -> Result<(), M::ReleaseError>
+    pub fn print(self)
     where
         Self: Copy,
     {
@@ -420,23 +400,17 @@ impl<'a, V: BasicNodeVariant, M: SeqLockMode> W<Guarded<'a, M, BasicNode<V>>> {
             self.heap_freed().load()
         );
         for i in 0..self.count().load() as usize {
-            let offset = self.slots()?.try_index(i)?.load() as usize;
-            eprint!(
-                "{i:4}:{:04x}->[0x{:08x}][{}]",
-                offset,
-                self.heads()?.try_index(i)?.load(),
-                self.u16(offset)?.load()
-            );
+            let offset = self.slots().index(i).load() as usize;
+            eprint!("{i:4}:{:04x}->[0x{:08x}][{}]", offset, self.heads().index(i).load(), self.u16(offset).load());
             if V::IS_LEAF {
-                eprintln!("{:?}", BString::new(self.key(i)?.load_slice_to_vec()))
+                eprintln!("{:}", BString::new(self.key(i).load_slice_to_vec()))
             } else {
                 todo!()
             }
         }
-        Ok(())
     }
 
-    fn find(self, key: &[u8]) -> Result<Result<usize, usize>, M::ReleaseError>
+    fn find(self, key: &[u8]) -> Result<usize, usize>
     where
         Self: Copy,
     {
@@ -448,46 +422,43 @@ impl<'a, V: BasicNodeVariant, M: SeqLockMode> W<Guarded<'a, M, BasicNode<V>>> {
         self.find_truncated(truncated)
     }
 
-    fn find_truncated(self, truncated: &[u8]) -> Result<Result<usize, usize>, <M as SeqLockMode>::ReleaseError>
+    fn find_truncated(self, truncated: &[u8]) -> Result<usize, usize>
     where
         Self: Copy,
     {
         let needle_head = key_head(truncated);
-        let heads = self.heads()?;
+        let heads = self.heads();
         if heads.is_empty() {
-            return Ok(Err(0));
+            return Err(0);
         }
-        let matching_head_range = (0..=heads.len() - 1)
-            .binary_all(|i| heads.s().try_index(i).map(|x| x.load()).unwrap_or(0).cmp(&needle_head));
+        let matching_head_range = (0..=heads.len() - 1).binary_all(|i| heads.s().index(i).load().cmp(&needle_head));
         if matching_head_range.is_empty() {
-            return Ok(Err(matching_head_range.start));
+            return Err(matching_head_range.start);
         }
-        let slots = self.slots()?;
+        let slots = self.slots();
         if slots.len() != heads.len() {
-            return Err(M::release_error());
+            return M::release_error();
         }
         let key_position = (matching_head_range.start..=matching_head_range.end - 1).binary_by(|i| {
-            let Ok(key) = self.key(i) else {
-                return Ordering::Equal;
-            };
+            let key = self.key(i);
             key.mem_cmp(truncated)
         });
-        Ok(key_position)
+        key_position
     }
 }
 
 impl<'a, M: SeqLockMode> W<Guarded<'a, M, BasicNode<BasicNodeLeaf>>> {
-    pub fn lookup_leaf(self, key: &[u8]) -> Result<Option<Guarded<'a, M, [u8]>>, M::ReleaseError>
+    pub fn lookup_leaf(self, key: &[u8]) -> Option<Guarded<'a, M, [u8]>>
     where
         Self: Copy,
     {
-        if let Ok(i) = self.find(key)? {
-            let offset = self.slots()?.try_index(i)?.load() as usize;
-            let val_start = self.u16(offset)?.load() as usize + offset + BasicNodeLeaf::RECORD_TO_KEY_OFFSET;
-            let val_len = self.u16(offset + 2)?.load() as usize;
-            Ok(Some(self.slice(val_start, val_len)?))
+        if let Ok(i) = self.find(key) {
+            let offset = self.slots().index(i).load() as usize;
+            let val_start = self.u16(offset).load() as usize + offset + BasicNodeLeaf::RECORD_TO_KEY_OFFSET;
+            let val_len = self.u16(offset + 2).load() as usize;
+            Some(self.slice(val_start, val_len))
         } else {
-            Ok(None)
+            None
         }
     }
 }
@@ -496,22 +467,22 @@ impl<'a> W<Guarded<'a, Exclusive, BasicNode<BasicNodeLeaf>>> {
     #[allow(clippy::result_unit_err)]
     pub fn insert_leaf(&mut self, key: &[u8], val: &[u8]) -> Result<(), ()> {
         let x = self.insert(key, val);
-        self.s().validate()?;
+        self.s().validate();
         x
     }
 }
 
 impl<'a> W<Guarded<'a, Optimistic, BasicNode<BasicNodeInner>>> {
-    pub fn lookup_inner(&self, key: &[u8], high_on_equal:bool) -> Result<PageId, OptimisticLockError> {
-        let index = match self.find(key)?{
-            Err(i)=>{i}
-            Ok(i)=>i+high_on_equal as usize
+    pub fn lookup_inner(&self, key: &[u8], high_on_equal: bool) -> PageId {
+        let index = match self.find(key) {
+            Err(i) => i,
+            Ok(i) => i + high_on_equal as usize,
         };
-        Ok(if index==0{
+        if index == 0 {
             PageId::from_3x16(self.lower().load())
-        }else{
-            PageId::from_3x16(self.val(index-1)?.as_array().load())
-        })
+        } else {
+            PageId::from_3x16(self.val(index - 1).as_array().load())
+        }
     }
 }
 
@@ -519,7 +490,7 @@ impl<'a> W<Guarded<'a, Exclusive, BasicNode<BasicNodeInner>>> {
     #[allow(clippy::result_unit_err)]
     pub fn insert_inner(&mut self, key: &[u8], pid: u64) -> Result<(), ()> {
         let x = self.insert(key, &bytemuck::cast::<u64, [u16; 4]>(pid)[..3]);
-        self.s().validate().unwrap();
+        self.s().validate();
         x
     }
 }
