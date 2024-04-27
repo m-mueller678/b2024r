@@ -4,6 +4,13 @@ use bytemuck::{Pod, Zeroable};
 use seqlock::{Guarded, SeqLockMode, SeqLockWrappable, SeqlockAccessors, Wrapper};
 use std::mem::size_of;
 
+pub mod node_tag{
+    pub const BASIC_INNER:u8 = 0;
+    pub const BASIC_LEAF:u8 = 1;
+}
+
+
+
 pub const PAGE_SIZE: usize = 1 << 10;
 pub const PAGE_HEAD_SIZE: usize = 8;
 
@@ -11,6 +18,8 @@ pub const PAGE_HEAD_SIZE: usize = 8;
 #[repr(C)]
 #[seq_lock_wrapper(W)]
 pub struct CommonNodeHead {
+    pub tag:u8,
+    _pad:u8,
     pub prefix_len: u16,
     pub count: u16,
     pub lower_fence_len: u16,

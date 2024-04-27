@@ -55,6 +55,10 @@ impl<'a, T: SeqLockWrappable> Guard<'a, Optimistic, T> {
         Optimistic::release(self.lock, self.guard_data).map(|_| ())
     }
 
+    pub fn check_or_release(self)->Result<Self,OptimisticLockError>{
+        Optimistic::release(self.lock, self.guard_data).map(|_| self)
+    }
+
     pub fn upgrade(self) -> Result<Guard<'a, Exclusive, T>, OptimisticLockError> {
         forget(self._no_drop);
         if self.lock.version.compare_exchange(self.guard_data, self.guard_data + 1, Acquire, Relaxed).is_ok() {

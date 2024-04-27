@@ -4,15 +4,14 @@ use crate::W;
 use bstr::BString;
 use bytemuck::{Pod, Zeroable};
 use indxvec::Search;
-use seqlock::{
-    Exclusive, Guarded, Never, SeqLockMode, SeqLockModePessimistic, SeqLockWrappable, SeqlockAccessors, Shared, Wrapper,
-};
+use seqlock::{Exclusive, Guarded, Never, SeqLockMode, SeqLockModePessimistic, SeqLockWrappable, SeqlockAccessors, Shared, Wrapper, Optimistic, OptimisticLockError};
 use std::any::type_name;
 use std::cmp::Ordering;
 use std::marker::PhantomData;
 use std::mem::{align_of, offset_of, size_of};
 use std::ops::Range;
 use std::ptr::addr_of_mut;
+use crate::page_id::PageId;
 
 #[derive(Copy, Clone, Zeroable, Pod)]
 #[repr(align(8))]
@@ -21,6 +20,7 @@ pub struct BasicNodeData {
     common: CommonNodeHead,
     heap_bump: u16,
     heap_freed: u16,
+    _pad:u16,
     hints: [u32; 16],
     _data: [u32; BASIC_NODE_DATA_SIZE],
 }
@@ -498,6 +498,20 @@ impl<'a> W<Guarded<'a, Exclusive, BasicNode<BasicNodeLeaf>>> {
         let x = self.insert(key, val);
         self.s().validate()?;
         x
+    }
+}
+
+impl<'a> W<Guarded<'a, Optimistic, BasicNode<BasicNodeInner>>> {
+    pub fn lookup_inner(&self, key: &[u8], high_on_equal:bool) -> Result<PageId, OptimisticLockError> {
+        let index = match self.find(key)?{
+            Err(i)=>{i}
+            Ok(i)=>i+high_on_equal as usize
+        };
+        if index==0{
+            PageId::from_3x16(self.lower().load());
+        }else{
+            PageId::from_3x16(self.val(index-1)?.as_array());
+        }
     }
 }
 
