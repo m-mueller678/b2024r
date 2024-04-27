@@ -280,7 +280,7 @@ impl<'a, V: BasicNodeVariant> W<Guarded<'a, Exclusive, BasicNode<V>>> {
         self.upper_fence_len_mut().store(uf.len() as u16);
         let heap_end = self.s().heap_end() as u16;
         self.heap_bump_mut().store(heap_end);
-        if V::IS_LEAF {
+        if !V::IS_LEAF {
             self.b().lower().get_mut().store(lower);
         }
         lf.write_to(&mut self.b().lower_fence());
