@@ -84,9 +84,13 @@ unsafe impl<V: BasicNodeVariant> Node for BasicNode<V> {
         let mut right = parent_insert(this.prefix_len().load() as usize, this.s().key(low_count))?;
         let right = &mut right.b().0.cast::<BasicNode<V>>();
         let sep_key = this.s().prefix().join(this.s().key(low_count));
-        left.init(this.s().lower_fence(), sep_key, this.s().lower().get().load());
+        left.init(
+            this.s().lower_fence(),
+            sep_key,
+            if V::IS_LEAF { Zeroable::zeroed() } else { this.s().lower().get().load() },
+        );
         let sep_record_offset = this.s().slots().index(low_count).load() as usize;
-        let lower = this.s().slice::<[V::ValueSlice; 3]>(sep_record_offset, 1).index(1).get().load();
+        let lower = this.s().slice::<[V::ValueSlice; 3]>(sep_record_offset, 1).index(0).get().load();
         right.init(sep_key, this.s().upper_fence(), lower);
         if V::IS_LEAF {
             left.count_mut().store(low_count as u16);
@@ -222,8 +226,8 @@ impl<'a, V: BasicNodeVariant> W<Guarded<'a, Exclusive, BasicNode<V>>> {
     fn copy_records(&self, dst: &mut W<Guarded<Exclusive, BasicNode<V>>>, src_range: Range<usize>, dst_start: usize) {
         let dst_range = dst_start..(src_range.end + dst_start - src_range.start);
         let prefix_grow = dst.prefix_len().load() as usize - self.prefix_len().load() as usize;
-        for src_i in src_range.clone() {
-            dst.heap_write_new(self.s().key(src_i).slice(prefix_grow..), self.s().val(src_i), src_i - dst_start);
+        for (src_i, dst_i) in src_range.clone().zip(dst_range.clone()) {
+            dst.heap_write_new(self.s().key(src_i).slice(prefix_grow..), self.s().val(src_i), dst_i);
         }
         if prefix_grow == 0 {
             self.s().heads().slice(src_range).copy_to(&mut dst.b().heads().slice(dst_range));
