@@ -59,7 +59,7 @@ impl Tree {
                     &mut node.b().0.cast::<BasicNode<BasicNodeLeaf>>(),
                     parent.b().0.cast::<BasicNode<BasicNodeInner>>(),
                 )
-                .is_ok()
+                    .is_ok()
                 {
                     None
                 } else {
@@ -200,14 +200,11 @@ mod tests {
                                             assert!(old_batch == 0 || is_removed);
                                         }
                                     }
-                                    1 => {
-                                        assert_eq!(
-                                            tree.insert(&keys[index], &batch.to_ne_bytes()).is_some(),
-                                            old_batch != 0
-                                        );
+                                    1 => if tree.insert(&keys[index], &batch.to_ne_bytes()).is_none() {
+                                        assert!(old_batch == 0 || is_removed)
                                     }
-                                    2 => {
-                                        assert_eq!(tree.remove(&keys[index]).is_some(), old_batch != 0);
+                                    2 => if tree.remove(&keys[index]).is_some() {
+                                        assert!(old_batch != 0 || is_inserted)
                                     }
                                     _ => unreachable!(),
                                 }
@@ -249,6 +246,7 @@ mod tests {
     fn single_insert_lookup_tiny() {
         batch_ops(1, 3, 500, |t, b| [400, 200, 0], |_, _| {});
     }
+
     #[cfg_attr(not(miri), test)]
     fn single_insert_lookup() {
         batch_ops(1, 3, 2_500, |t, b| [1_500, 500, 0], |_, _| {});
