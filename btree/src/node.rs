@@ -6,8 +6,8 @@ use seqlock::{Exclusive, Guard, Guarded, SeqLockMode, SeqLockWrappable, SeqlockA
 use std::mem::size_of;
 
 pub mod node_tag {
-    pub const BASIC_INNER: u8 = 0;
-    pub const BASIC_LEAF: u8 = 1;
+    pub const BASIC_INNER: u8 = 250;
+    pub const BASIC_LEAF: u8 = 251;
 }
 
 pub const PAGE_SIZE: usize = 1 << 10;

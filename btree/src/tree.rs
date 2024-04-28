@@ -53,12 +53,7 @@ impl Tree {
             if node.page_id() == split_target {
                 let mut node = node.upgrade();
                 let mut parent = parent.upgrade();
-                if parent.page_id() == self.meta {
-                    let mut new_root = PageId::alloc().lock::<Exclusive>();
-                    new_root.b().0.cast::<BasicNode<BasicNodeInner>>().init(&[][..], &[][..], node.page_id().to_3x16());
-                    parent.b().0.cast::<MetadataPage>().root_mut().store(new_root.page_id());
-                    parent = new_root
-                }
+                self.ensure_parent_not_root(&mut node, &mut parent);
                 debug_assert!(node.common().tag().load() == node_tag::BASIC_INNER);
                 if Self::split_locked_node(
                     k,
@@ -82,18 +77,37 @@ impl Tree {
         }
     }
 
+    fn ensure_parent_not_root(
+        &self,
+        mut node: &mut Guard<'static, Exclusive, PageTail>,
+        parent: &mut Guard<'static, Exclusive, PageTail>,
+    ) {
+        if parent.page_id() == self.meta {
+            let mut new_root = PageId::alloc().lock::<Exclusive>();
+            new_root.b().0.cast::<BasicNode<BasicNodeInner>>().init(&[][..], &[][..], node.page_id().to_3x16());
+            parent.b().0.cast::<MetadataPage>().root_mut().store(new_root.page_id());
+            *parent = new_root
+        }
+    }
+
     fn try_insert(&self, k: &[u8], val: &[u8]) -> Option<()> {
         let [parent, node] = self.descend(k, None);
         let mut node = node.upgrade();
-        let mut leaf = node.b().0.cast::<BasicNode<BasicNodeLeaf>>();
-        match leaf.insert_leaf(k, val) {
+        match node.b().0.cast::<BasicNode<BasicNodeLeaf>>().insert_leaf(k, val) {
             Ok(x) => {
                 parent.release_unchecked();
                 x
             }
             Err(()) => {
                 let mut parent = parent.upgrade();
-                if Self::split_locked_node(k, &mut leaf, parent.b().0.cast::<BasicNode<BasicNodeInner>>()).is_err() {
+                self.ensure_parent_not_root(&mut node, &mut parent);
+                if Self::split_locked_node(
+                    k,
+                    &mut node.b().0.cast::<BasicNode<BasicNodeLeaf>>(),
+                    parent.b().0.cast::<BasicNode<BasicNodeInner>>(),
+                )
+                .is_err()
+                {
                     let parent_id = parent.page_id();
                     drop(parent);
                     drop(node);
