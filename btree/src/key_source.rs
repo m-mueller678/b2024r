@@ -21,7 +21,7 @@ pub trait SourceSlice<T: Pod + SeqLockWrappable = u8>: Copy {
     }
     fn to_stack_buffer<const SIZE: usize, R>(self, f: impl FnOnce(&mut [T]) -> R) -> R {
         let mut buffer = <[T; SIZE]>::zeroed();
-        self.write_to(&mut Guarded::wrap_mut(&mut buffer[..]));
+        self.write_to(&mut Guarded::wrap_mut(&mut buffer[..self.len()]));
         f(&mut buffer[..self.len()])
     }
     fn write_suffix_to_offset(self, dst: Guarded<Exclusive, [T]>, offset: usize) {
