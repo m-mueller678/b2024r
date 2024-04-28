@@ -50,9 +50,15 @@ impl Tree {
     fn split_and_insert(&self, split_target: PageId, k: &[u8], val: &[u8]) -> Option<()> {
         let parent_id = {
             let [parent, node] = self.descend(k, Some(split_target));
-            if PageId::from_address_in_page::<PageTail>(parent.as_ptr()) == split_target {
+            if node.page_id() == split_target {
                 let mut node = node.upgrade();
                 let mut parent = parent.upgrade();
+                if parent.page_id() == self.meta {
+                    let mut new_root = PageId::alloc().lock::<Exclusive>();
+                    new_root.b().0.cast::<BasicNode<BasicNodeInner>>().init(&[][..], &[][..], node.page_id().to_3x16());
+                    parent.b().0.cast::<MetadataPage>().root_mut().store(new_root.page_id());
+                    parent = new_root
+                }
                 debug_assert!(node.common().tag().load() == node_tag::BASIC_INNER);
                 if Self::split_locked_node(
                     k,
@@ -63,7 +69,7 @@ impl Tree {
                 {
                     None
                 } else {
-                    Some(PageId::from_address_in_page::<PageTail>(parent.as_ptr()))
+                    Some(parent.page_id())
                 }
             } else {
                 None
@@ -88,7 +94,7 @@ impl Tree {
             Err(()) => {
                 let mut parent = parent.upgrade();
                 if Self::split_locked_node(k, &mut leaf, parent.b().0.cast::<BasicNode<BasicNodeInner>>()).is_err() {
-                    let parent_id = PageId::from_address_in_page::<PageTail>(parent.as_ptr());
+                    let parent_id = parent.page_id();
                     drop(parent);
                     drop(node);
                     return self.split_and_insert(parent_id, k, val);

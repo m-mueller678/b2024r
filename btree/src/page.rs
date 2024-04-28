@@ -1,6 +1,7 @@
 use crate::node::{CommonNodeHead, PAGE_HEAD_SIZE, PAGE_SIZE};
+use crate::W;
 use bytemuck::{Pod, Zeroable};
-use seqlock::{Guard, SeqLock, SeqLockMode, SeqlockAccessors};
+use seqlock::{Guard, Guarded, SeqLock, SeqLockMode, SeqlockAccessors};
 use std::collections::BTreeMap;
 use std::mem::{forget, size_of};
 use std::ops::Deref;
@@ -57,7 +58,7 @@ impl PageId {
         PageId((p as *const Page).expose_provenance() as u64)
     }
 
-    pub fn from_address_in_page<T>(p: *mut T) -> Self {
+    fn from_address_in_page<T>(p: *mut T) -> Self {
         PageId((p.addr() as u64) & (u64::MAX << 12))
     }
 
@@ -77,6 +78,12 @@ impl PageId {
 
     pub fn lock<M: SeqLockMode>(self) -> Guard<'static, M, PageTail> {
         self.to_page().lock.lock()
+    }
+}
+
+impl<M: SeqLockMode> W<Guarded<'_, M, PageTail>> {
+    pub fn page_id(&self) -> PageId {
+        PageId::from_address_in_page::<PageTail>(self.as_ptr())
     }
 }
 
