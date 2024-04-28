@@ -1,5 +1,5 @@
 use crate::key_source::{common_prefix, key_head, SourceSlice};
-use crate::node::{CommonNodeHead, Node, PAGE_HEAD_SIZE, PAGE_SIZE};
+use crate::node::{node_tag, CommonNodeHead, Node, PAGE_HEAD_SIZE, PAGE_SIZE};
 use crate::page::{PageId, PageTail};
 use crate::W;
 use bstr::BString;
@@ -272,6 +272,7 @@ impl<'a, V: BasicNodeVariant> W<Guarded<'a, Exclusive, BasicNode<V>>> {
     }
 
     pub fn init(&mut self, lf: impl SourceSlice, uf: impl SourceSlice, lower: [V::ValueSlice; 3]) {
+        self.b().common_head().tag_mut().store(if V::IS_LEAF { node_tag::BASIC_LEAF } else { node_tag::BASIC_INNER });
         assert_eq!(size_of::<BasicNode<V>>(), PAGE_SIZE - PAGE_HEAD_SIZE);
         self.count_mut().store(0);
         self.prefix_len_mut().store(common_prefix(lf, uf) as u16);
