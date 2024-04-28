@@ -89,7 +89,7 @@ fn hash(h: impl Hash) -> u64 {
 
 pub fn path_generator<R: Rng>(min_len_range: RangeInclusive<usize>) -> impl Fn(&mut R) -> Vec<u8> {
     let words =
-        if cfg!(miri) { &["time", "people", "world", "system", "water", "book"] } else { random_word::all(Lang::En) };
+        if cfg!(miri) { &["ab", "anti", "antibody", "antics", "the", "there","then"] } else { random_word::all(Lang::En) };
     let word_dist = Uniform::new(0, words.len());
     let len_dist = Uniform::new(min_len_range.start(), min_len_range.end());
     let cardinality_dist = Uniform::new(1, 6);
