@@ -101,7 +101,7 @@ pub fn path_generator<R: Rng>(min_len_range: RangeInclusive<usize>) -> impl Fn(&
         let mut key = Vec::new();
         let mut group_seed = 0;
         while key.len() < target_len {
-            if key.is_empty() {
+            if !key.is_empty() {
                 key.push(b'/')
             }
             let group_rng = &mut SmallRng::seed_from_u64(group_seed);

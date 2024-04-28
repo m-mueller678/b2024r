@@ -205,11 +205,15 @@ mod tests {
                                 }
                             }
                             barrier.wait();
-                            for (op, index) in ops(batch_rng.clone()) {
+                            for (_op_index,(op, index)) in ops(batch_rng.clone()).enumerate() {
                                 let state = key_states[index][1].load(Relaxed);
                                 let old_batch: u32 = state & u32::MAX >> 2;
                                 let is_inserted = (state >> (29 + 1) & 1) != 0;
                                 let is_removed = (state >> (29 + 2) & 1) != 0;
+                                if b"integrability/apatite/suasion/eradication/placarded/typecasts/yahoos/repristinations".as_slice() == &keys[index]{
+                                    dbg!();
+                                }
+                                dbg!(bstr::BStr::new(&keys[index]));
                                 match op {
                                     0 => {
                                         if let Some(v) = tree.lookup_to_vec(&keys[index]) {

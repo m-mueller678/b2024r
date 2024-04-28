@@ -1,6 +1,7 @@
 #![allow(clippy::missing_safety_doc)]
 #![feature(exposed_provenance)]
 #![feature(strict_provenance)]
+#![feature(is_sorted)]
 
 extern crate core;
 
