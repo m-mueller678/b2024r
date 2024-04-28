@@ -60,14 +60,17 @@ impl<'a, T: SeqLockWrappable> Guard<'a, Optimistic, T> {
 
     pub fn upgrade(self) -> Guard<'a, Exclusive, T> {
         if self.lock.version.compare_exchange(self.guard_data, self.guard_data + 1, Acquire, Relaxed).is_ok() {
-            Guard {
+            let x = Guard {
                 lock: self.lock,
                 guard_data: (),
                 access: ManuallyDrop::new(unsafe {
                     Guarded::wrap_unchecked(Optimistic::as_ptr(&(*self.access).get().p))
                 }),
-            }
+            };
+            self.release_unchecked();
+            x
         } else {
+            forget(self);
             Optimistic::release_error()
         }
     }
