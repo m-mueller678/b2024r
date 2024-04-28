@@ -385,7 +385,7 @@ impl<'a, V: BasicNodeVariant, M: SeqLockMode> W<Guarded<'a, M, BasicNode<V>>> {
             let val_len = self.s().u16(offset + 2).load() as usize;
             self.slice(offset + V::RECORD_TO_KEY_OFFSET + key_len, val_len)
         } else {
-            self.slice(offset + V::RECORD_TO_KEY_OFFSET + 2, 3)
+            self.slice(offset + 2, 3)
         }
     }
 

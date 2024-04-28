@@ -3,6 +3,7 @@ use crate::W;
 use bytemuck::{Pod, Zeroable};
 use seqlock::{Guard, Guarded, SeqLock, SeqLockMode, SeqlockAccessors};
 use std::collections::BTreeMap;
+use std::fmt::{Debug, Formatter};
 use std::mem::{forget, size_of};
 use std::ops::Deref;
 use std::sync::Mutex;
@@ -11,6 +12,12 @@ use std::sync::Mutex;
 #[seq_lock_wrapper(crate::W)]
 #[repr(transparent)]
 pub struct PageId(#[seq_lock_skip_accessor] u64);
+
+impl Debug for PageId {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        (std::ptr::without_provenance::<u8>(self.0 as usize)).fmt(f)
+    }
+}
 
 pub struct UncommittedPageId(PageId);
 
