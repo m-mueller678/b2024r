@@ -59,7 +59,7 @@ impl Tree {
                     &mut node.b().0.cast::<BasicNode<BasicNodeLeaf>>(),
                     parent.b().0.cast::<BasicNode<BasicNodeInner>>(),
                 )
-                    .is_ok()
+                .is_ok()
                 {
                     None
                 } else {
@@ -200,11 +200,15 @@ mod tests {
                                             assert!(old_batch == 0 || is_removed);
                                         }
                                     }
-                                    1 => if tree.insert(&keys[index], &batch.to_ne_bytes()).is_none() {
-                                        assert!(old_batch == 0 || is_removed)
+                                    1 => {
+                                        if tree.insert(&keys[index], &batch.to_ne_bytes()).is_none() {
+                                            assert!(old_batch == 0 || is_removed)
+                                        }
                                     }
-                                    2 => if tree.remove(&keys[index]).is_some() {
-                                        assert!(old_batch != 0 || is_inserted)
+                                    2 => {
+                                        if tree.remove(&keys[index]).is_some() {
+                                            assert!(old_batch != 0 || is_inserted)
+                                        }
                                     }
                                     _ => unreachable!(),
                                 }
