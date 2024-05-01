@@ -1,7 +1,7 @@
 use crate::key_source::{common_prefix, key_head, SourceSlice};
 use crate::node::{node_tag, CommonNodeHead, Node, PAGE_HEAD_SIZE, PAGE_SIZE};
 use crate::page::{PageId, PageTail};
-use crate::W;
+use crate::{MAX_KEY_SIZE, W};
 use bstr::BString;
 use bytemuck::{Pod, Zeroable};
 use indxvec::Search;
@@ -11,7 +11,7 @@ use seqlock::{
 };
 use std::any::type_name;
 use std::marker::PhantomData;
-use std::mem::{align_of, offset_of, size_of};
+use std::mem::{align_of, offset_of, size_of, swap};
 use std::ops::Range;
 use std::ptr::addr_of_mut;
 
@@ -509,6 +509,10 @@ impl<'a> W<Guarded<'a, Optimistic, BasicNode<BasicNodeInner>>> {
             Err(i) => i,
             Ok(i) => i + high_on_equal as usize,
         };
+        self.index_child(index)
+    }
+
+    pub fn index_child(&self,index:usize)->PageId{
         if index == 0 {
             PageId::from_3x16(self.lower().load())
         } else {
@@ -523,6 +527,22 @@ impl<'a> W<Guarded<'a, Exclusive, BasicNode<BasicNodeInner>>> {
         let x = self.insert(key, &pid.to_3x16());
         self.s().validate();
         x.map(|x| debug_assert!(x.is_none()))
+    }
+
+    pub fn validate_inter_node_fences(mut this: W<Guarded<Exclusive,BasicNode<BasicNodeInner>>> , lb:&mut &mut[u8;MAX_KEY_SIZE],hb:&mut &mut [u8;MAX_KEY_SIZE],mut ll:usize,mut hl:usize){
+        assert!(this.s().lower_fence().mem_cmp(&lb[..ll]).is_eq());
+        assert!(this.s().upper_fence().mem_cmp(&hb[..hl]).is_eq());
+        let prefix = this.prefix_len().load() as usize;
+        let count = this.count().load() as usize;
+        for (i,k) in (0..count).map(|i|this.s().key(i)).chain(
+            std::iter::once(this.s().upper_fence().slice(prefix..))
+        ).enumerate(){
+            k.write_to(&mut Guarded::wrap_mut(&mut hb[prefix..][..k.len()]));
+            hl = k.len() + prefix;
+            this.optimistic().index_child(i).lock::<Exclusive>().cast::<BasicNode<BasicNodeInner>>().validate_inter_node_fences(lb, hb,ll,hl);
+            swap(hb,lb);
+            ll=hl;
+        }
     }
 }
 

@@ -2,7 +2,7 @@ use crate::basic_node::{BasicNode, BasicNodeInner, BasicNodeLeaf};
 use crate::key_source::SourceSlice;
 use crate::node::{node_tag, Node};
 use crate::page::{PageId, PageTail, PAGE_TAIL_SIZE};
-use crate::W;
+use crate::{MAX_KEY_SIZE, W};
 use bytemuck::{Pod, Zeroable};
 use seqlock::{Exclusive, Guard, Guarded, Optimistic, SeqlockAccessors};
 
@@ -23,6 +23,14 @@ impl Tree {
         meta.lock::<Exclusive>().b().0.cast::<MetadataPage>().root_mut().store(root);
         root.lock::<Exclusive>().b().0.cast::<BasicNode<BasicNodeLeaf>>().init(&[][..], &[][..], [0u8; 3]);
         Tree { meta }
+    }
+
+    fn validate_fences_exclusive(&self){
+        let mut low_buffer = [0u8;MAX_KEY_SIZE];
+        let mut high_buffer = [0u8;MAX_KEY_SIZE];
+
+
+        let meta = PageId::alloc();
     }
 
     pub fn remove(&self, k: &[u8]) -> Option<()> {
