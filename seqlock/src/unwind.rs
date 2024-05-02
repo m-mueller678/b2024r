@@ -1,4 +1,4 @@
-use std::panic::{catch_unwind, panic_any, resume_unwind, UnwindSafe};
+use std::panic::{catch_unwind, resume_unwind, UnwindSafe};
 
 pub struct OptimisticError;
 

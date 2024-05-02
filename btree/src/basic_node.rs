@@ -512,7 +512,7 @@ impl<'a> W<Guarded<'a, Optimistic, BasicNode<BasicNodeInner>>> {
         self.index_child(index)
     }
 
-    pub fn index_child(&self,index:usize)->PageId{
+    pub fn index_child(&self, index: usize) -> PageId {
         if index == 0 {
             PageId::from_3x16(self.lower().load())
         } else {
@@ -529,19 +529,33 @@ impl<'a> W<Guarded<'a, Exclusive, BasicNode<BasicNodeInner>>> {
         x.map(|x| debug_assert!(x.is_none()))
     }
 
-    pub fn validate_inter_node_fences(mut this: W<Guarded<Exclusive,BasicNode<BasicNodeInner>>> , lb:&mut &mut[u8;MAX_KEY_SIZE],hb:&mut &mut [u8;MAX_KEY_SIZE],mut ll:usize,mut hl:usize){
-        assert!(this.s().lower_fence().mem_cmp(&lb[..ll]).is_eq());
-        assert!(this.s().upper_fence().mem_cmp(&hb[..hl]).is_eq());
-        let prefix = this.prefix_len().load() as usize;
-        let count = this.count().load() as usize;
-        for (i,k) in (0..count).map(|i|this.s().key(i)).chain(
-            std::iter::once(this.s().upper_fence().slice(prefix..))
-        ).enumerate(){
+    pub fn validate_inter_node_fences<'b>(
+        self,
+        lb: &mut &'b mut [u8; MAX_KEY_SIZE],
+        hb: &mut &'b mut [u8; MAX_KEY_SIZE],
+        mut ll: usize,
+        mut hl: usize,
+    ) {
+        assert!(self.s().lower_fence().mem_cmp(&lb[..ll]).is_eq());
+        assert!(self.s().upper_fence().mem_cmp(&hb[..hl]).is_eq());
+        let prefix = self.prefix_len().load() as usize;
+        let count = self.count().load() as usize;
+        for (i, k) in (0..count)
+            .map(|i| self.s().key(i))
+            .chain(std::iter::once(self.s().upper_fence().slice(prefix..)))
+            .enumerate()
+        {
             k.write_to(&mut Guarded::wrap_mut(&mut hb[prefix..][..k.len()]));
             hl = k.len() + prefix;
-            this.optimistic().index_child(i).lock::<Exclusive>().cast::<BasicNode<BasicNodeInner>>().validate_inter_node_fences(lb, hb,ll,hl);
-            swap(hb,lb);
-            ll=hl;
+            self.optimistic()
+                .index_child(i)
+                .lock::<Exclusive>()
+                .b()
+                .0
+                .cast::<BasicNode<BasicNodeInner>>()
+                .validate_inter_node_fences(lb, hb, ll, hl);
+            swap(hb, lb);
+            ll = hl;
         }
     }
 }

@@ -25,12 +25,18 @@ impl Tree {
         Tree { meta }
     }
 
-    fn validate_fences_exclusive(&self){
-        let mut low_buffer = [0u8;MAX_KEY_SIZE];
-        let mut high_buffer = [0u8;MAX_KEY_SIZE];
-
-
-        let meta = PageId::alloc();
+    fn validate_fences_exclusive(&self) {
+        let mut low_buffer = [0u8; MAX_KEY_SIZE];
+        let mut high_buffer = [0u8; MAX_KEY_SIZE];
+        let meta = self.meta.lock::<Exclusive>();
+        let mut root = meta.s().cast::<MetadataPage>().root().load().lock::<Exclusive>();
+        drop(meta);
+        root.b().0.cast::<BasicNode<BasicNodeInner>>().validate_inter_node_fences(
+            &mut &mut low_buffer,
+            &mut &mut high_buffer,
+            0,
+            0,
+        );
     }
 
     pub fn remove(&self, k: &[u8]) -> Option<()> {
@@ -38,7 +44,9 @@ impl Tree {
     }
 
     pub fn insert(&self, k: &[u8], val: &[u8]) -> Option<()> {
-        seqlock::unwind::repeat(|| || self.try_insert(k, val))
+        let x = seqlock::unwind::repeat(|| || self.try_insert(k, val));
+        self.validate_fences_exclusive();
+        x
     }
 
     fn descend(&self, k: &[u8], stop_at: Option<PageId>) -> [Guard<'static, Optimistic, PageTail>; 2] {
@@ -87,7 +95,7 @@ impl Tree {
 
     fn ensure_parent_not_root(
         &self,
-        mut node: &mut Guard<'static, Exclusive, PageTail>,
+        node: &mut Guard<'static, Exclusive, PageTail>,
         parent: &mut Guard<'static, Exclusive, PageTail>,
     ) {
         if parent.page_id() == self.meta {
