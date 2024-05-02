@@ -32,6 +32,7 @@ const BASIC_NODE_DATA_SIZE: usize = (PAGE_SIZE - PAGE_HEAD_SIZE - size_of::<Comm
 #[repr(transparent)]
 #[derive(Clone, Copy, Zeroable, SeqlockAccessors)]
 #[seq_lock_wrapper(W)]
+#[seq_lock_accessor(tag: u8 = 0.common.tag)]
 #[seq_lock_accessor(prefix_len: u16 = 0.common.prefix_len)]
 #[seq_lock_accessor(count: u16 = 0.common.count)]
 #[seq_lock_accessor(lower_fence_len: u16 = 0.common.lower_fence_len)]
@@ -539,6 +540,9 @@ impl<'a> W<Guarded<'a, Exclusive, BasicNode<BasicNodeInner>>> {
     ) {
         assert!(self.s().lower_fence().mem_cmp(&lb[..ll]).is_eq());
         assert!(self.s().upper_fence().mem_cmp(&hb[..hl]).is_eq());
+        if self.s().tag().load() != node_tag::BASIC_INNER {
+            return;
+        }
         let prefix = self.prefix_len().load() as usize;
         let count = self.count().load() as usize;
         for (i, k) in (0..count)
