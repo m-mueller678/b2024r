@@ -152,7 +152,7 @@ impl<'a, V: BasicNodeVariant> W<Guarded<'a, Exclusive, BasicNode<V>>> {
 
     #[allow(clippy::result_unit_err)]
     fn insert(&mut self, key: &[u8], val: &[V::ValueSlice]) -> Result<Option<()>, ()> {
-        assert!(key < self.s().upper_fence().load_slice_to_vec().as_slice());
+        assert!(key < self.s().upper_fence().load_slice_to_vec().as_slice() || self.s().upper_fence().is_empty());
         assert!(key >= self.s().lower_fence().load_slice_to_vec().as_slice());
 
         assert!((0..self.s().count().load()).map(|i| self.s().key(i as usize).load_slice_to_vec()).is_sorted());
@@ -495,6 +495,7 @@ impl<'a, M: SeqLockMode> W<Guarded<'a, M, BasicNode<BasicNodeLeaf>>> {
 impl<'a> W<Guarded<'a, Exclusive, BasicNode<BasicNodeLeaf>>> {
     #[allow(clippy::result_unit_err)]
     pub fn insert_leaf(&mut self, key: &[u8], val: &[u8]) -> Result<Option<()>, ()> {
+        self.s().validate();
         let x = self.insert(key, val);
         self.s().validate();
         x

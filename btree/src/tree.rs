@@ -3,6 +3,7 @@ use crate::key_source::SourceSlice;
 use crate::node::{node_tag, Node};
 use crate::page::{PageId, PageTail, PAGE_TAIL_SIZE};
 use crate::{MAX_KEY_SIZE, W};
+use bstr::BStr;
 use bytemuck::{Pod, Zeroable};
 use seqlock::{Exclusive, Guard, Guarded, Optimistic, SeqlockAccessors};
 
@@ -50,16 +51,19 @@ impl Tree {
     }
 
     fn descend(&self, k: &[u8], stop_at: Option<PageId>) -> [Guard<'static, Optimistic, PageTail>; 2] {
+        println!("descending {}", BStr::new(k));
         let mut parent = self.meta.lock::<Optimistic>();
         let node_pid = parent.s().cast::<MetadataPage>().root().load();
         let mut node = node_pid.lock::<Optimistic>();
         parent.check();
         while node.s().common().tag().load() == node_tag::BASIC_INNER && Some(node_pid) != stop_at {
+            node.cast::<BasicNode<BasicNodeInner>>().print();
             let child = node.cast::<BasicNode<BasicNodeInner>>().lookup_inner(k, true).lock();
             parent.release_unchecked();
             parent = node;
             node = child;
         }
+        println!("descend done");
         [parent, node]
     }
 
