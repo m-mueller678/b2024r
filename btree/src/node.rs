@@ -1,9 +1,12 @@
+use std::{eprint, eprintln};
+use std::fmt::Formatter;
 use crate::basic_node::BasicNodeData;
-use crate::page::PageTail;
+use crate::page::{PageId, PageTail};
 use crate::W;
 use bytemuck::{Pod, Zeroable};
 use seqlock::{Exclusive, Guard, Guarded, SeqLockMode, SeqLockWrappable, SeqlockAccessors, Shared, Wrapper};
 use std::mem::size_of;
+use bstr::BString;
 
 pub mod node_tag {
     pub const BASIC_INNER: u8 = 250;
@@ -32,6 +35,10 @@ pub unsafe trait Node: SeqLockWrappable + Pod {
         this: &mut W<Guarded<Exclusive, Self>>,
         parent_insert: impl FnOnce(usize, Guarded<'_, Shared, [u8]>) -> Result<Guard<'static, Exclusive, PageTail>, ()>,
     ) -> Result<(), ()>;
+    fn format(this:&W<Guarded<Exclusive,Self>>,f:&mut Formatter)->std::fmt::Result
+        where
+            Self: Copy,
+    ;
 }
 
 impl<'a, N: Node, M: SeqLockMode> W<Guarded<'a, M, N>> {

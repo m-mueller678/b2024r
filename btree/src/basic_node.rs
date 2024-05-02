@@ -10,6 +10,7 @@ use seqlock::{
     SeqlockAccessors, Shared, Wrapper,
 };
 use std::any::type_name;
+use std::fmt::{Debug, Formatter};
 use std::marker::PhantomData;
 use std::mem::{align_of, offset_of, size_of, swap};
 use std::ops::Range;
@@ -72,13 +73,38 @@ impl BasicNodeVariant for BasicNodeInner {
 }
 
 unsafe impl<V: BasicNodeVariant> Node for BasicNode<V> {
+
+    fn format(this:&W<Guarded<Exclusive,Self>>,f:&mut Formatter)->std::fmt::Result
+        where
+            Self: Copy,
+    {
+        let mut s=f.debug_struct(std::any::type_name::<Self>());
+        macro_rules! field {
+            ($($f:ident,)*) => {$(s.field(std::stringify!($f),&this.$f().load());)*};
+        }
+        field!(count,lower_fence_len,upper_fence_len,prefix_len,heap_bump,heap_freed,);
+        s.field("lf",&BString::new(this.s().lower_fence().cast_slice::<u8>().load_slice_to_vec()));
+        s.field("uf",&BString::new(this.s().upper_fence().cast_slice::<u8>().load_slice_to_vec()));
+        s.field("records",&(0..this.count().load() as usize).format_with(|i,f|{
+            let offset = this.s().slots().index(i).load() as usize;
+            if V::IS_LEAF {
+                eprintln!("{:?}", BString::new(this.val(i).cast_slice::<u8>().load_slice_to_vec()));
+            } else {
+                eprintln!("{:?}", PageId::from_3x16(this.val(i).as_array::<3>().cast::<[u16; 3]>().load()));
+            }
+            let val=3;
+            let head=this.s().heads().index(i).load();
+            let kl=this..u16(offset).load());
+            f(format_args!("{i:4}:{offset:04x}->[0x{head:08x}][{kl:3}] -> {val}");
+        }));
+        s.finish()
+    }
+
+
     fn split(
         this: &mut W<Guarded<Exclusive, Self>>,
         parent_insert: impl FnOnce(usize, Guarded<'_, Shared, [u8]>) -> Result<Guard<'static, Exclusive, PageTail>, ()>,
     ) -> Result<(), ()> {
-        dbg!();
-        this.s().print();
-        assert!((0..this.s().count().load()).map(|i| this.s().key(i as usize).load_slice_to_vec()).is_sorted());
         // TODO tail compression
         assert!(V::IS_LEAF);
         let left = &mut BasicNode::<V>::zeroed();
@@ -107,10 +133,6 @@ unsafe impl<V: BasicNodeVariant> Node for BasicNode<V> {
             right.count_mut().store((count - low_count - 1) as u16);
             this.copy_records(right, low_count..count, 0);
         }
-        dbg!("left");
-        left.s().print();
-        dbg!("right");
-        right.s().print();
         assert!((0..left.s().count().load()).map(|i| left.s().key(i as usize).load_slice_to_vec()).is_sorted());
         assert!((0..right.s().count().load()).map(|i| right.s().key(i as usize).load_slice_to_vec()).is_sorted());
 
@@ -153,12 +175,6 @@ impl<'a, V: BasicNodeVariant> W<Guarded<'a, Exclusive, BasicNode<V>>> {
 
     #[allow(clippy::result_unit_err)]
     fn insert(&mut self, key: &[u8], val: &[V::ValueSlice]) -> Result<Option<()>, ()> {
-        assert!(key < self.s().upper_fence().load_slice_to_vec().as_slice() || self.s().upper_fence().is_empty());
-        assert!(key >= self.s().lower_fence().load_slice_to_vec().as_slice());
-
-        assert!((0..self.s().count().load()).map(|i| self.s().key(i as usize).load_slice_to_vec()).is_sorted());
-
-        self.s().print();
         if !V::IS_LEAF {
             assert_eq!(val.len(), 3);
         }
@@ -412,33 +428,6 @@ impl<'a, V: BasicNodeVariant, M: SeqLockMode> W<Guarded<'a, M, BasicNode<V>>> {
         }
     }
 
-    pub fn print(self)
-    where
-        Self: Copy,
-    {
-        eprintln!("#{}", type_name::<V>());
-        dbg!(
-            self.count().load(),
-            self.lower_fence_len().load(),
-            self.upper_fence_len().load(),
-            self.prefix_len().load(),
-            self.heap_bump().load(),
-            self.heap_freed().load()
-        );
-        eprintln!("lf: {:?}", BString::new(self.lower_fence().cast_slice::<u8>().load_slice_to_vec()));
-        eprintln!("uf: {:?}", BString::new(self.upper_fence().cast_slice::<u8>().load_slice_to_vec()));
-        for i in 0..self.count().load() as usize {
-            let offset = self.slots().index(i).load() as usize;
-            eprint!("{i:4}:{:04x}->[0x{:08x}][{:3}]", offset, self.heads().index(i).load(), self.u16(offset).load());
-            eprint!("{:} -> ", BString::new(self.key(i).load_slice_to_vec()));
-            if V::IS_LEAF {
-                eprintln!("{:?}", BString::new(self.val(i).cast_slice::<u8>().load_slice_to_vec()));
-            } else {
-                eprintln!("{:?}", PageId::from_3x16(self.val(i).as_array::<3>().cast::<[u16; 3]>().load()));
-            }
-        }
-    }
-
     fn find(self, key: &[u8]) -> Result<usize, usize>
     where
         Self: Copy,
@@ -481,7 +470,6 @@ impl<'a, M: SeqLockMode> W<Guarded<'a, M, BasicNode<BasicNodeLeaf>>> {
     where
         Self: Copy,
     {
-        self.print();
         if let Ok(i) = self.find(key) {
             let offset = self.slots().index(i).load() as usize;
             let val_start = self.u16(offset).load() as usize + offset + BasicNodeLeaf::RECORD_TO_KEY_OFFSET;
@@ -505,8 +493,6 @@ impl<'a> W<Guarded<'a, Exclusive, BasicNode<BasicNodeLeaf>>> {
 
 impl<'a> W<Guarded<'a, Optimistic, BasicNode<BasicNodeInner>>> {
     pub fn lookup_inner(&self, key: &[u8], high_on_equal: bool) -> PageId {
-        eprintln!("lookup inner");
-        self.print();
         let index = match self.find(key) {
             Err(i) => i,
             Ok(i) => i + high_on_equal as usize,
