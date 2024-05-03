@@ -1,6 +1,5 @@
 use rand::distributions::{Distribution, Uniform};
 use rand::rngs::SmallRng;
-use rand::seq::SliceRandom;
 use rand::{Rng, SeedableRng};
 use random_word::Lang;
 use rayon::prelude::*;
@@ -16,7 +15,7 @@ pub fn mixed_test_keys(count: usize) -> Vec<Vec<u8>> {
     let mut keys = vec![Vec::new(); count];
     keys.par_chunks_mut(chunk_size).enumerate().for_each(|(i, mut chunk)| {
         if i == 0 && chunk_size > 300 {
-            for i in 0..(256) {
+            for i in 0..256 {
                 if i + 1 < chunk.len() {
                     chunk[i + 1] = vec![i as u8];
                 }

@@ -1,12 +1,10 @@
-use std::{eprint, eprintln};
-use std::fmt::{Debug, Formatter};
 use crate::basic_node::{BasicNode, BasicNodeData, BasicNodeInner, BasicNodeLeaf};
-use crate::page::{Page, PageId, PageTail};
+use crate::page::{Page, PageTail};
 use crate::W;
 use bytemuck::{Pod, Zeroable};
 use seqlock::{Exclusive, Guard, Guarded, SeqLockMode, SeqLockWrappable, SeqlockAccessors, Shared, Wrapper};
+use std::fmt::{Debug, Formatter};
 use std::mem::size_of;
-use bstr::BString;
 
 pub mod node_tag {
     pub const BASIC_INNER: u8 = 250;
@@ -29,17 +27,17 @@ pub struct CommonNodeHead {
 }
 
 #[no_mangle]
-pub unsafe fn print_node(p:*const Page){
+pub unsafe fn print_node(p: *const Page) {
     let tail = p.byte_offset(PAGE_HEAD_SIZE as isize).cast::<PageTail>();
-    println!("{:#?}",Guarded::<Shared,PageTail>::wrap_unchecked(tail as * mut PageTail));
+    println!("{:#?}", Guarded::<Shared, PageTail>::wrap_unchecked(tail as *mut PageTail));
 }
 
-impl Debug for W<Guarded<'_,Shared,PageTail>>{
+impl Debug for W<Guarded<'_, Shared, PageTail>> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        match self.cast::<BasicNode<BasicNodeLeaf>>().tag().load(){
-            node_tag::BASIC_LEAF=>Node::format(&self.cast::<BasicNode<BasicNodeLeaf>>(),f),
-            node_tag::BASIC_INNER=>Node::format(&self.cast::<BasicNode<BasicNodeInner>>(),f),
-            x=>write!(f,"UnknownNode{{tag:0x{x:x}}}"),
+        match self.cast::<BasicNode<BasicNodeLeaf>>().tag().load() {
+            node_tag::BASIC_LEAF => Node::format(&self.cast::<BasicNode<BasicNodeLeaf>>(), f),
+            node_tag::BASIC_INNER => Node::format(&self.cast::<BasicNode<BasicNodeInner>>(), f),
+            x => write!(f, "UnknownNode{{tag:0x{x:x}}}"),
         }
     }
 }
@@ -51,10 +49,9 @@ pub unsafe trait Node: SeqLockWrappable + Pod {
         this: &mut W<Guarded<Exclusive, Self>>,
         parent_insert: impl FnOnce(usize, Guarded<'_, Shared, [u8]>) -> Result<Guard<'static, Exclusive, PageTail>, ()>,
     ) -> Result<(), ()>;
-    fn format(this:&W<Guarded<Shared,Self>>,f:&mut Formatter)->std::fmt::Result
-        where
-            Self: Copy,
-    ;
+    fn format(this: &W<Guarded<Shared, Self>>, f: &mut Formatter) -> std::fmt::Result
+    where
+        Self: Copy;
 }
 
 impl<'a, N: Node, M: SeqLockMode> W<Guarded<'a, M, N>> {

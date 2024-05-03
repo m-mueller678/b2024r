@@ -3,7 +3,6 @@ use crate::key_source::SourceSlice;
 use crate::node::{node_tag, Node};
 use crate::page::{PageId, PageTail, PAGE_TAIL_SIZE};
 use crate::{MAX_KEY_SIZE, W};
-use bstr::BStr;
 use bytemuck::{Pod, Zeroable};
 use seqlock::{Exclusive, Guard, Guarded, Optimistic, SeqlockAccessors};
 
@@ -289,11 +288,11 @@ mod tests {
 
     #[test]
     fn single_insert_lookup_tiny() {
-        batch_ops(1, 3, 500, |t, b| [400, 200, 0], |_, _| {});
+        batch_ops(1, 3, 500, |_, _| [400, 200, 0], |_, _| {});
     }
 
     #[cfg_attr(not(miri), test)]
     fn single_insert_lookup() {
-        batch_ops(1, 3, 2_500, |t, b| [1_500, 500, 0], |_, _| {});
+        batch_ops(1, 3, 2_500, |_, _| [1_500, 500, 0], |_, _| {});
     }
 }

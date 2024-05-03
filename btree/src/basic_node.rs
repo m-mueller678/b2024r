@@ -5,17 +5,16 @@ use crate::{MAX_KEY_SIZE, W};
 use bstr::BString;
 use bytemuck::{Pod, Zeroable};
 use indxvec::Search;
+use itertools::Itertools;
 use seqlock::{
     Exclusive, Guard, Guarded, Never, Optimistic, SeqLockMode, SeqLockModePessimistic, SeqLockWrappable,
     SeqlockAccessors, Shared, Wrapper,
 };
-use std::any::type_name;
 use std::fmt::{Debug, Formatter};
 use std::marker::PhantomData;
 use std::mem::{align_of, offset_of, size_of, swap};
 use std::ops::Range;
 use std::ptr::addr_of_mut;
-use itertools::Itertools;
 
 #[derive(Copy, Clone, Zeroable, Pod)]
 #[repr(align(8))]
@@ -74,33 +73,31 @@ impl BasicNodeVariant for BasicNodeInner {
 }
 
 unsafe impl<V: BasicNodeVariant> Node for BasicNode<V> {
-
-    fn format(this:&W<Guarded<Shared,Self>>,f:&mut Formatter)->std::fmt::Result
-        where
-            Self: Copy,
+    fn format(this: &W<Guarded<Shared, Self>>, f: &mut Formatter) -> std::fmt::Result
+    where
+        Self: Copy,
     {
-        let mut s=f.debug_struct(std::any::type_name::<Self>());
+        let mut s = f.debug_struct(std::any::type_name::<Self>());
         macro_rules! field {
             ($($f:ident,)*) => {$(s.field(std::stringify!($f),&this.$f().load());)*};
         }
-        field!(count,lower_fence_len,upper_fence_len,prefix_len,heap_bump,heap_freed,);
-        s.field("lf",&BString::new(this.s().lower_fence().cast_slice::<u8>().load_slice_to_vec()));
-        s.field("uf",&BString::new(this.s().upper_fence().cast_slice::<u8>().load_slice_to_vec()));
-        let records_fmt=(0..this.count().load() as usize).format_with(",",|i,f|{
+        field!(count, lower_fence_len, upper_fence_len, prefix_len, heap_bump, heap_freed,);
+        s.field("lf", &BString::new(this.s().lower_fence().cast_slice::<u8>().load_slice_to_vec()));
+        s.field("uf", &BString::new(this.s().upper_fence().cast_slice::<u8>().load_slice_to_vec()));
+        let records_fmt = (0..this.count().load() as usize).format_with(",", |i, f| {
             let offset = this.s().slots().index(i).load() as usize;
-            let val :&dyn Debug= if V::IS_LEAF {
+            let val: &dyn Debug = if V::IS_LEAF {
                 &BString::new(this.s().val(i).cast_slice::<u8>().load_slice_to_vec())
             } else {
                 &PageId::from_3x16(this.s().val(i).as_array::<3>().cast::<[u16; 3]>().load())
             };
-            let head=this.s().heads().index(i).load();
-            let kl=this.s().u16(offset).load();
+            let head = this.s().heads().index(i).load();
+            let kl = this.s().u16(offset).load();
             f(&mut format_args!("{i:4}:{offset:04x}->[0x{head:08x}][{kl:3}] -> {val:?}"))
         });
-        s.field("records",&format_args!("{}",records_fmt));
+        s.field("records", &format_args!("{}", records_fmt));
         s.finish()
     }
-
 
     fn split(
         this: &mut W<Guarded<Exclusive, Self>>,
