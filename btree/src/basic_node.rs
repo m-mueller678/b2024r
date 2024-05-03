@@ -15,6 +15,7 @@ use std::marker::PhantomData;
 use std::mem::{align_of, offset_of, size_of, swap};
 use std::ops::Range;
 use std::ptr::addr_of_mut;
+use itertools::Itertools;
 
 #[derive(Copy, Clone, Zeroable, Pod)]
 #[repr(align(8))]
@@ -33,7 +34,7 @@ const BASIC_NODE_DATA_SIZE: usize = (PAGE_SIZE - PAGE_HEAD_SIZE - size_of::<Comm
 #[repr(transparent)]
 #[derive(Clone, Copy, Zeroable, SeqlockAccessors)]
 #[seq_lock_wrapper(W)]
-#[seq_lock_accessor(tag: u8 = 0.common.tag)]
+#[seq_lock_accessor(pub tag: u8 = 0.common.tag)]
 #[seq_lock_accessor(prefix_len: u16 = 0.common.prefix_len)]
 #[seq_lock_accessor(count: u16 = 0.common.count)]
 #[seq_lock_accessor(lower_fence_len: u16 = 0.common.lower_fence_len)]
@@ -74,7 +75,7 @@ impl BasicNodeVariant for BasicNodeInner {
 
 unsafe impl<V: BasicNodeVariant> Node for BasicNode<V> {
 
-    fn format(this:&W<Guarded<Exclusive,Self>>,f:&mut Formatter)->std::fmt::Result
+    fn format(this:&W<Guarded<Shared,Self>>,f:&mut Formatter)->std::fmt::Result
         where
             Self: Copy,
     {
@@ -85,18 +86,18 @@ unsafe impl<V: BasicNodeVariant> Node for BasicNode<V> {
         field!(count,lower_fence_len,upper_fence_len,prefix_len,heap_bump,heap_freed,);
         s.field("lf",&BString::new(this.s().lower_fence().cast_slice::<u8>().load_slice_to_vec()));
         s.field("uf",&BString::new(this.s().upper_fence().cast_slice::<u8>().load_slice_to_vec()));
-        s.field("records",&(0..this.count().load() as usize).format_with(|i,f|{
+        let records_fmt=(0..this.count().load() as usize).format_with(",",|i,f|{
             let offset = this.s().slots().index(i).load() as usize;
-            if V::IS_LEAF {
-                eprintln!("{:?}", BString::new(this.val(i).cast_slice::<u8>().load_slice_to_vec()));
+            let val :&dyn Debug= if V::IS_LEAF {
+                &BString::new(this.s().val(i).cast_slice::<u8>().load_slice_to_vec())
             } else {
-                eprintln!("{:?}", PageId::from_3x16(this.val(i).as_array::<3>().cast::<[u16; 3]>().load()));
-            }
-            let val=3;
+                &PageId::from_3x16(this.s().val(i).as_array::<3>().cast::<[u16; 3]>().load())
+            };
             let head=this.s().heads().index(i).load();
-            let kl=this..u16(offset).load());
-            f(format_args!("{i:4}:{offset:04x}->[0x{head:08x}][{kl:3}] -> {val}");
-        }));
+            let kl=this.s().u16(offset).load();
+            f(&mut format_args!("{i:4}:{offset:04x}->[0x{head:08x}][{kl:3}] -> {val:?}"))
+        });
+        s.field("records",&format_args!("{}",records_fmt));
         s.finish()
     }
 

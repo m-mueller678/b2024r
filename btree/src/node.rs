@@ -1,7 +1,7 @@
 use std::{eprint, eprintln};
-use std::fmt::Formatter;
-use crate::basic_node::BasicNodeData;
-use crate::page::{PageId, PageTail};
+use std::fmt::{Debug, Formatter};
+use crate::basic_node::{BasicNode, BasicNodeData, BasicNodeInner, BasicNodeLeaf};
+use crate::page::{Page, PageId, PageTail};
 use crate::W;
 use bytemuck::{Pod, Zeroable};
 use seqlock::{Exclusive, Guard, Guarded, SeqLockMode, SeqLockWrappable, SeqlockAccessors, Shared, Wrapper};
@@ -28,6 +28,22 @@ pub struct CommonNodeHead {
     pub upper_fence_len: u16,
 }
 
+#[no_mangle]
+pub unsafe fn print_node(p:*const Page){
+    let tail = p.byte_offset(PAGE_HEAD_SIZE as isize).cast::<PageTail>();
+    println!("{:#?}",Guarded::<Shared,PageTail>::wrap_unchecked(tail as * mut PageTail));
+}
+
+impl Debug for W<Guarded<'_,Shared,PageTail>>{
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self.cast::<BasicNode<BasicNodeLeaf>>().tag().load(){
+            node_tag::BASIC_LEAF=>Node::format(&self.cast::<BasicNode<BasicNodeLeaf>>(),f),
+            node_tag::BASIC_INNER=>Node::format(&self.cast::<BasicNode<BasicNodeInner>>(),f),
+            x=>write!(f,"UnknownNode{{tag:0x{x:x}}}"),
+        }
+    }
+}
+
 pub unsafe trait Node: SeqLockWrappable + Pod {
     /// fails iff parent_insert fails.
     /// if node is near empty, no split is performed and parent_insert is not called.
@@ -35,7 +51,7 @@ pub unsafe trait Node: SeqLockWrappable + Pod {
         this: &mut W<Guarded<Exclusive, Self>>,
         parent_insert: impl FnOnce(usize, Guarded<'_, Shared, [u8]>) -> Result<Guard<'static, Exclusive, PageTail>, ()>,
     ) -> Result<(), ()>;
-    fn format(this:&W<Guarded<Exclusive,Self>>,f:&mut Formatter)->std::fmt::Result
+    fn format(this:&W<Guarded<Shared,Self>>,f:&mut Formatter)->std::fmt::Result
         where
             Self: Copy,
     ;
