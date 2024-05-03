@@ -130,7 +130,8 @@ impl Tree {
                     return self.split_and_insert(parent_id, k, val);
                 }
                 drop(parent);
-                node.b().0.cast::<BasicNode<BasicNodeLeaf>>().insert_leaf(k, val).unwrap()
+                // TODO could descend from parent
+                return self.try_insert(k, val);
             }
         }
     }
@@ -201,7 +202,6 @@ mod tests {
                     scope.spawn(move || {
                         let mut thread_rng = SmallRng::seed_from_u64(tid as u64);
                         for batch in 1..=batches {
-                            dbg!(batch);
                             let weights = op_weights(tid, batch);
                             let op_dist = &WeightedIndex::new(weights).unwrap();
                             let batch_rng = SmallRng::from_rng(&mut thread_rng).unwrap();
@@ -221,15 +221,11 @@ mod tests {
                                 }
                             }
                             barrier.wait();
-                            for (_op_index,(op, index)) in ops(batch_rng.clone()).enumerate() {
+                            for (_op_index, (op, index)) in ops(batch_rng.clone()).enumerate() {
                                 let state = key_states[index][1].load(Relaxed);
                                 let old_batch: u32 = state & u32::MAX >> 2;
                                 let is_inserted = (state >> (29 + 1) & 1) != 0;
                                 let is_removed = (state >> (29 + 2) & 1) != 0;
-                                if b"integrability/apatite/suasion/eradication/placarded/typecasts/yahoos/repristinations".as_slice() == &keys[index]{
-                                    dbg!();
-                                }
-                                dbg!(bstr::BStr::new(&keys[index]));
                                 match op {
                                     0 => {
                                         if let Some(v) = tree.lookup_to_vec(&keys[index]) {
@@ -295,4 +291,10 @@ mod tests {
     fn single_insert_lookup() {
         batch_ops(1, 3, 2_500, |_, _| [1_500, 500, 0], |_, _| {});
     }
+}
+
+#[derive(Ord, PartialOrd, Eq, PartialEq)]
+pub enum Supreme<T> {
+    X(T),
+    Sup,
 }

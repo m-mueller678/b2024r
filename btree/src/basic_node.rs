@@ -1,8 +1,9 @@
 use crate::key_source::{common_prefix, key_head, SourceSlice};
 use crate::node::{node_tag, CommonNodeHead, Node, PAGE_HEAD_SIZE, PAGE_SIZE};
 use crate::page::{PageId, PageTail};
+use crate::tree::Supreme;
 use crate::{MAX_KEY_SIZE, W};
-use bstr::BString;
+use bstr::{BStr, BString};
 use bytemuck::{Pod, Zeroable};
 use indxvec::Search;
 use itertools::Itertools;
@@ -73,10 +74,7 @@ impl BasicNodeVariant for BasicNodeInner {
 }
 
 unsafe impl<V: BasicNodeVariant> Node for BasicNode<V> {
-    fn format(this: &W<Guarded<Shared, Self>>, f: &mut Formatter) -> std::fmt::Result
-    where
-        Self: Copy,
-    {
+    fn format(this: &W<Guarded<Optimistic, Self>>, f: &mut Formatter) -> std::fmt::Result {
         let mut s = f.debug_struct(std::any::type_name::<Self>());
         macro_rules! field {
             ($($f:ident,)*) => {$(s.field(std::stringify!($f),&this.$f().load());)*};
@@ -84,7 +82,7 @@ unsafe impl<V: BasicNodeVariant> Node for BasicNode<V> {
         field!(count, lower_fence_len, upper_fence_len, prefix_len, heap_bump, heap_freed,);
         s.field("lf", &BString::new(this.s().lower_fence().cast_slice::<u8>().load_slice_to_vec()));
         s.field("uf", &BString::new(this.s().upper_fence().cast_slice::<u8>().load_slice_to_vec()));
-        let records_fmt = (0..this.count().load() as usize).format_with(",", |i, f| {
+        let records_fmt = (0..this.count().load() as usize).format_with(",\n", |i, f| {
             let offset = this.s().slots().index(i).load() as usize;
             let val: &dyn Debug = if V::IS_LEAF {
                 &BString::new(this.s().val(i).cast_slice::<u8>().load_slice_to_vec())
@@ -93,9 +91,10 @@ unsafe impl<V: BasicNodeVariant> Node for BasicNode<V> {
             };
             let head = this.s().heads().index(i).load();
             let kl = this.s().u16(offset).load();
-            f(&mut format_args!("{i:4}:{offset:04x}->[0x{head:08x}][{kl:3}] -> {val:?}"))
+            let key = BString::new(this.s().key(i).load_slice_to_vec());
+            f(&mut format_args!("{i:4}:{offset:04x}->[0x{head:08x}][{kl:3}] {key:?} -> {val:?}"))
         });
-        s.field("records", &format_args!("{}", records_fmt));
+        s.field("records", &format_args!("\n{}", records_fmt));
         s.finish()
     }
 
@@ -120,6 +119,8 @@ unsafe impl<V: BasicNodeVariant> Node for BasicNode<V> {
         let sep_record_offset = this.s().slots().index(low_count).load() as usize;
         let lower = this.s().slice::<[V::ValueSlice; 3]>(sep_record_offset, 1).index(0).get().load();
         right.init(sep_key, this.s().upper_fence(), lower);
+        dbg!(this.s().cast::<PageTail>());
+        this.s().validate();
         if V::IS_LEAF {
             left.count_mut().store(low_count as u16);
             this.copy_records(&mut left, 0..low_count, 0);
@@ -131,9 +132,8 @@ unsafe impl<V: BasicNodeVariant> Node for BasicNode<V> {
             right.count_mut().store((count - low_count - 1) as u16);
             this.copy_records(right, low_count..count, 0);
         }
-        assert!((0..left.s().count().load()).map(|i| left.s().key(i as usize).load_slice_to_vec()).is_sorted());
-        assert!((0..right.s().count().load()).map(|i| right.s().key(i as usize).load_slice_to_vec()).is_sorted());
-
+        left.s().validate();
+        right.s().validate();
         this.store(left.load()); //TODO optimize copy
         Ok(())
     }
@@ -173,6 +173,8 @@ impl<'a, V: BasicNodeVariant> W<Guarded<'a, Exclusive, BasicNode<V>>> {
 
     #[allow(clippy::result_unit_err)]
     fn insert(&mut self, key: &[u8], val: &[V::ValueSlice]) -> Result<Option<()>, ()> {
+        dbg!(self.s().cast::<PageTail>());
+        self.s().validate();
         if !V::IS_LEAF {
             assert_eq!(val.len(), 3);
         }
@@ -188,9 +190,7 @@ impl<'a, V: BasicNodeVariant> W<Guarded<'a, Exclusive, BasicNode<V>>> {
                         let old_size = self.s().stored_record_size(self.s().slots().index(existing).load() as usize);
                         self.heap_freed_mut().update(|x| x + old_size as u16);
                         self.heap_write_new(key, val, existing);
-                        assert!((0..self.s().count().load())
-                            .map(|i| self.s().key(i as usize).load_slice_to_vec())
-                            .is_sorted());
+                        self.s().validate();
                         return Ok(Some(()));
                     }
                 }
@@ -221,9 +221,8 @@ impl<'a, V: BasicNodeVariant> W<Guarded<'a, Exclusive, BasicNode<V>>> {
                         self.count_mut().store(count as u16 + 1);
                         self.b().heads().index(insert_at).store(key_head(key));
                         self.heap_write_new(key, val, insert_at);
-                        assert!((0..self.s().count().load())
-                            .map(|i| self.s().key(i as usize).load_slice_to_vec())
-                            .is_sorted());
+                        dbg!(BStr::new(key), insert_at, self.s().cast::<PageTail>());
+                        self.s().validate();
                         return Ok(None);
                     }
                 }
@@ -384,6 +383,15 @@ impl<'a, V: BasicNodeVariant, M: SeqLockMode> W<Guarded<'a, M, BasicNode<V>>> {
         let calculated = self.heap_end() - record_size_sum;
         let tracked = self.heap_bump().load() as usize + self.heap_freed().load() as usize;
         assert_eq!(calculated, tracked);
+        let keys_and_fences = std::iter::once(self.lower_fence().slice(self.prefix_len().load() as usize..))
+            .chain((0..self.count().load() as usize).map(|i| self.key(i)))
+            .map(|k| Supreme::X(k.load_slice_to_vec()))
+            .chain(std::iter::once(if self.upper_fence_len().load() == 0 {
+                Supreme::Sup
+            } else {
+                Supreme::X(self.upper_fence().slice(self.prefix_len().load() as usize..).load_slice_to_vec())
+            }));
+        assert!(keys_and_fences.is_sorted());
     }
     fn lower(self) -> Guarded<'a, M, [V::ValueSlice; 3]> {
         assert!(!V::IS_LEAF);
@@ -495,6 +503,7 @@ impl<'a> W<Guarded<'a, Optimistic, BasicNode<BasicNodeInner>>> {
             Err(i) => i,
             Ok(i) => i + high_on_equal as usize,
         };
+        dbg!(BStr::new(key), index, self.optimistic().cast::<PageTail>());
         self.index_child(index)
     }
 

@@ -2,7 +2,9 @@ use crate::basic_node::{BasicNode, BasicNodeData, BasicNodeInner, BasicNodeLeaf}
 use crate::page::{Page, PageTail};
 use crate::W;
 use bytemuck::{Pod, Zeroable};
-use seqlock::{Exclusive, Guard, Guarded, SeqLockMode, SeqLockWrappable, SeqlockAccessors, Shared, Wrapper};
+use seqlock::{
+    Exclusive, Guard, Guarded, Optimistic, SeqLockMode, SeqLockWrappable, SeqlockAccessors, Shared, Wrapper,
+};
 use std::fmt::{Debug, Formatter};
 use std::mem::size_of;
 
@@ -32,11 +34,11 @@ pub unsafe fn print_node(p: *const Page) {
     println!("{:#?}", Guarded::<Shared, PageTail>::wrap_unchecked(tail as *mut PageTail));
 }
 
-impl Debug for W<Guarded<'_, Shared, PageTail>> {
+impl<M: SeqLockMode> Debug for W<Guarded<'_, M, PageTail>> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        match self.cast::<BasicNode<BasicNodeLeaf>>().tag().load() {
-            node_tag::BASIC_LEAF => Node::format(&self.cast::<BasicNode<BasicNodeLeaf>>(), f),
-            node_tag::BASIC_INNER => Node::format(&self.cast::<BasicNode<BasicNodeInner>>(), f),
+        match self.optimistic().cast::<BasicNode<BasicNodeLeaf>>().tag().load() {
+            node_tag::BASIC_LEAF => Node::format(&self.optimistic().cast::<BasicNode<BasicNodeLeaf>>(), f),
+            node_tag::BASIC_INNER => Node::format(&self.optimistic().cast::<BasicNode<BasicNodeInner>>(), f),
             x => write!(f, "UnknownNode{{tag:0x{x:x}}}"),
         }
     }
@@ -49,7 +51,7 @@ pub unsafe trait Node: SeqLockWrappable + Pod {
         this: &mut W<Guarded<Exclusive, Self>>,
         parent_insert: impl FnOnce(usize, Guarded<'_, Shared, [u8]>) -> Result<Guard<'static, Exclusive, PageTail>, ()>,
     ) -> Result<(), ()>;
-    fn format(this: &W<Guarded<Shared, Self>>, f: &mut Formatter) -> std::fmt::Result
+    fn format(this: &W<Guarded<Optimistic, Self>>, f: &mut Formatter) -> std::fmt::Result
     where
         Self: Copy;
 }
