@@ -148,7 +148,7 @@ unsafe impl<V: NodeKind> Node for BasicNode<V> {
             left.init(this.s().lower_fence(), sep_key, this.s().lower().get().load());
             let mid_child = this
                 .s()
-                .slice::<[V::SliceType; 3]>(this.s().slots().index(low_count).load() as usize, 1)
+                .slice::<[V::SliceType; 3]>(this.s().slots().index(low_count).load() as usize + 2, 1)
                 .index(0)
                 .get()
                 .load();
