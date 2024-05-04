@@ -65,6 +65,10 @@ impl PageId {
         PageId((p as *const Page).expose_provenance() as u64)
     }
 
+    pub fn from_u64(x: u64) -> Self {
+        PageId(x)
+    }
+
     fn from_address_in_page<T>(p: *mut T) -> Self {
         PageId((p.addr() as u64) & (u64::MAX << 12))
     }

@@ -39,7 +39,7 @@ const BASIC_NODE_DATA_SIZE: usize = (PAGE_SIZE - PAGE_HEAD_SIZE - size_of::<Comm
 #[derive(Clone, Copy, Zeroable, SeqlockAccessors)]
 #[seq_lock_wrapper(W)]
 #[seq_lock_accessor(pub tag: u8 = 0.common.tag)]
-#[seq_lock_accessor(prefix_len: u16 = 0.common.prefix_len)]
+#[seq_lock_accessor(pub prefix_len: u16 = 0.common.prefix_len)]
 #[seq_lock_accessor(count: u16 = 0.common.count)]
 #[seq_lock_accessor(lower_fence_len: u16 = 0.common.lower_fence_len)]
 #[seq_lock_accessor(upper_fence_len: u16 = 0.common.upper_fence_len)]
@@ -169,7 +169,7 @@ unsafe impl<V: NodeKind> Node for BasicNode<V> {
 
     type DebugVal = V::DebugVal;
 
-    fn to_debug(this: W<Guarded<Shared, Self>>) -> (Vec<Vec<u8>>, Vec<Self::DebugVal>) {
+    fn to_debug_kv(this: W<Guarded<Shared, Self>>) -> (Vec<Vec<u8>>, Vec<Self::DebugVal>) {
         let range = 0..this.count().load() as usize;
         let keys = range.clone().map(|i| this.key(i).load_slice_to_vec()).collect();
         let vals = (0..1)
@@ -599,7 +599,7 @@ impl<'a> W<Guarded<'a, Exclusive, BasicNode<KindInner>>> {
 #[cfg(test)]
 mod tests {
     use crate::basic_node::{BasicNode, NodeKind};
-    use crate::node::{KindLeaf, Node};
+    use crate::node::{KindInner, KindLeaf, Node};
     use crate::page::PageId;
     use crate::test_util::subslices;
     use bytemuck::Zeroable;
@@ -653,12 +653,12 @@ mod tests {
         let mut n1 = p1.lock::<Exclusive>();
         let mut n1 = n1.b().0.cast::<BasicNode<V>>();
         n1.init(&[0][..], &[ufb, 1][..], lower);
-        let s1 = Node::to_debug(n1.s());
         for i in 0u64.. {
             if n1.insert(&i.to_be_bytes()[..], &val(i)).is_err() {
                 break;
             }
         }
+        let s1 = n1.s().to_debug();
         Node::split(
             &mut n1,
             |prefix, k| {
@@ -674,14 +674,22 @@ mod tests {
         Node::validate(n2.s());
         Node::merge(&mut n1, &mut n2, &[0]);
         Node::validate(n1.s());
-        assert!(s1 == Node::to_debug(n1.s()));
+        assert_eq!(s1, n1.s().to_debug());
         p1.free();
         p2.free();
     }
 
     #[test]
     fn split_merge_leaf() {
-        split_merge::<KindLeaf>(1, [0; 3], |i| i.to_be_bytes().to_vec());
-        split_merge::<KindLeaf>(0, [0; 3], |i| i.to_be_bytes().to_vec());
+        let val = |i: u64| i.to_be_bytes().to_vec();
+        split_merge::<KindLeaf>(1, [0; 3], val);
+        split_merge::<KindLeaf>(0, [0; 3], val);
+    }
+
+    #[test]
+    fn split_merge_inner() {
+        let fake_pid = |i| PageId::from_u64((i + 1) << 12).to_3x16().to_vec();
+        split_merge::<KindInner>(1, [0; 3], fake_pid);
+        split_merge::<KindInner>(0, [0; 3], fake_pid);
     }
 }

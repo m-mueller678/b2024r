@@ -44,7 +44,7 @@ impl<M: SeqLockMode> Debug for W<Guarded<'_, M, PageTail>> {
     }
 }
 
-#[derive(Eq, PartialEq)]
+#[derive(Eq, PartialEq, Debug)]
 pub struct DebugNode<V> {
     pub prefix_len: usize,
     pub lf: Vec<u8>,
@@ -55,7 +55,7 @@ pub struct DebugNode<V> {
 
 pub unsafe trait Node: SeqLockWrappable + Pod {
     const TAG: u8;
-    type DebugVal: Eq;
+    type DebugVal: Eq + Debug;
 
     /// fails iff parent_insert fails.
     /// if node is near empty, no split is performed and parent_insert is not called.
@@ -65,7 +65,7 @@ pub unsafe trait Node: SeqLockWrappable + Pod {
         ref_key: &[u8],
     ) -> Result<(), ()>;
 
-    fn to_debug(this: W<Guarded<Shared, Self>>) -> (Vec<Vec<u8>>, Vec<Self::DebugVal>);
+    fn to_debug_kv(this: W<Guarded<Shared, Self>>) -> (Vec<Vec<u8>>, Vec<Self::DebugVal>);
 
     fn merge(this: &mut W<Guarded<Exclusive, Self>>, right: &mut W<Guarded<Exclusive, Self>>, ref_key: &[u8]);
     fn format(this: &W<Guarded<Optimistic, Self>>, f: &mut Formatter) -> std::fmt::Result
@@ -85,7 +85,7 @@ pub trait NodeKind: Pod {
     const IS_LEAF: bool;
     type Lower;
     type SliceType: Pod + SeqLockWrappable;
-    type DebugVal: Eq;
+    type DebugVal: Eq + Debug;
 
     fn from_lower(x: Self::Lower) -> [Self::SliceType; 3];
     fn to_lower(x: [Self::SliceType; 3]) -> Self::Lower;
@@ -139,13 +139,24 @@ impl<'a, M: SeqLockMode> W<Guarded<'a, M, PageTail>> {
     }
 }
 
-impl<'a, M: SeqLockMode, N: Node> W<Guarded<'a, M, N>> {
-    pub fn upcast(self) -> W<Guarded<'a, M, PageTail>> {
-        self.0.cast::<PageTail>()
+impl<'a, N: Node> W<Guarded<'a, Shared, N>> {
+    pub fn to_debug(self) -> DebugNode<N::DebugVal> {
+        let (keys, values) = N::to_debug_kv(self);
+        let as_basic = self.cast::<BasicLeaf>();
+        DebugNode {
+            prefix_len: as_basic.prefix_len().load() as usize,
+            lf: as_basic.lower_fence().load_slice_to_vec(),
+            uf: as_basic.upper_fence().load_slice_to_vec(),
+            keys,
+            values,
+        }
     }
 }
 
 impl<'a, N: Node, M: SeqLockMode> W<Guarded<'a, M, N>> {
+    pub fn upcast(self) -> W<Guarded<'a, M, PageTail>> {
+        self.0.cast::<PageTail>()
+    }
     pub fn common_head(self) -> W<Guarded<'a, M, CommonNodeHead>> {
         unsafe { self.0.map_ptr(|x| x as *mut CommonNodeHead) }
     }
