@@ -1,5 +1,5 @@
 use crate::basic_node::{BasicInner, BasicLeaf, BasicNodeData};
-use crate::page::{Page, PageTail};
+use crate::page::{Page, PageId, PageTail};
 use crate::W;
 use bytemuck::{Pod, Zeroable};
 use seqlock::{
@@ -44,8 +44,18 @@ impl<M: SeqLockMode> Debug for W<Guarded<'_, M, PageTail>> {
     }
 }
 
+#[derive(Eq, PartialEq)]
+pub struct DebugNode<V> {
+    pub prefix_len: usize,
+    pub lf: Vec<u8>,
+    pub uf: Vec<u8>,
+    pub keys: Vec<Vec<u8>>,
+    pub values: Vec<V>,
+}
+
 pub unsafe trait Node: SeqLockWrappable + Pod {
     const TAG: u8;
+    type DebugVal: Eq;
 
     /// fails iff parent_insert fails.
     /// if node is near empty, no split is performed and parent_insert is not called.
@@ -55,11 +65,69 @@ pub unsafe trait Node: SeqLockWrappable + Pod {
         ref_key: &[u8],
     ) -> Result<(), ()>;
 
+    fn to_debug(this: W<Guarded<Shared, Self>>) -> (Vec<Vec<u8>>, Vec<Self::DebugVal>);
+
     fn merge(this: &mut W<Guarded<Exclusive, Self>>, right: &mut W<Guarded<Exclusive, Self>>, ref_key: &[u8]);
     fn format(this: &W<Guarded<Optimistic, Self>>, f: &mut Formatter) -> std::fmt::Result
     where
         Self: Copy;
     fn validate(this: W<Guarded<'_, Shared, Self>>);
+}
+
+#[derive(Clone, Copy, Zeroable, Pod)]
+#[repr(C)]
+pub struct KindInner;
+#[derive(Clone, Copy, Zeroable, Pod)]
+#[repr(C)]
+pub struct KindLeaf;
+
+pub trait NodeKind: Pod {
+    const IS_LEAF: bool;
+    type Lower;
+    type SliceType: Pod + SeqLockWrappable;
+    type DebugVal: Eq;
+
+    fn from_lower(x: Self::Lower) -> [Self::SliceType; 3];
+    fn to_lower(x: [Self::SliceType; 3]) -> Self::Lower;
+    fn to_debug(x: Vec<Self::SliceType>) -> Self::DebugVal;
+}
+
+impl NodeKind for KindInner {
+    const IS_LEAF: bool = false;
+    type Lower = PageId;
+    type SliceType = u16;
+    type DebugVal = PageId;
+
+    fn from_lower(x: Self::Lower) -> [Self::SliceType; 3] {
+        x.to_3x16()
+    }
+
+    fn to_lower(x: [Self::SliceType; 3]) -> Self::Lower {
+        PageId::from_3x16(x)
+    }
+
+    fn to_debug(x: Vec<Self::SliceType>) -> Self::DebugVal {
+        PageId::from_3x16(x.try_into().unwrap())
+    }
+}
+
+impl NodeKind for KindLeaf {
+    const IS_LEAF: bool = true;
+    type Lower = ();
+    type SliceType = u8;
+    type DebugVal = Vec<u8>;
+
+    fn from_lower(x: Self::Lower) -> [Self::SliceType; 3] {
+        unimplemented!();
+    }
+
+    fn to_lower(x: [Self::SliceType; 3]) -> Self::Lower {
+        unimplemented!();
+    }
+
+    fn to_debug(x: Vec<Self::SliceType>) -> Self::DebugVal {
+        x
+    }
 }
 
 impl<'a, M: SeqLockMode> W<Guarded<'a, M, PageTail>> {
