@@ -1,5 +1,6 @@
 use crate::basic_node::{BasicInner, BasicLeaf, BasicNode, BasicNodeData, BasicNodeInner, BasicNodeLeaf};
 use crate::page::{Page, PageTail};
+use crate::tree::Supreme;
 use crate::W;
 use bytemuck::{Pod, Zeroable};
 use seqlock::{
@@ -7,6 +8,7 @@ use seqlock::{
 };
 use std::fmt::{Debug, Formatter};
 use std::mem::size_of;
+use std::{assert, assert_eq, cfg};
 
 pub mod node_tag {
     pub const BASIC_INNER: u8 = 250;
@@ -52,10 +54,14 @@ pub unsafe trait Node: SeqLockWrappable + Pod {
     fn split(
         this: &mut W<Guarded<Exclusive, Self>>,
         parent_insert: impl FnOnce(usize, Guarded<'_, Shared, [u8]>) -> Result<Guard<'static, Exclusive, PageTail>, ()>,
+        ref_key: &[u8],
     ) -> Result<(), ()>;
+
+    fn merge(this: &mut W<Guarded<Exclusive, Self>>, right: &mut W<Guarded<Exclusive, Self>>, ref_key: &[u8]);
     fn format(this: &W<Guarded<Optimistic, Self>>, f: &mut Formatter) -> std::fmt::Result
     where
         Self: Copy;
+    fn validate(this: W<Guarded<'_, Shared, Self>>);
 }
 
 impl<'a, M: SeqLockMode> W<Guarded<'a, M, PageTail>> {

@@ -80,6 +80,24 @@ impl BasicNodeVariant for BasicNodeInner {
 }
 
 unsafe impl<V: BasicNodeVariant> Node for BasicNode<V> {
+    fn validate(this: W<Guarded<'_, Shared, Self>>) {
+        if !cfg!(debug_assertions) {
+            return;
+        }
+        let record_size_sum: usize = this.s().slots().iter().map(|x| this.stored_record_size(x.load() as usize)).sum();
+        let calculated = this.heap_end() - record_size_sum;
+        let tracked = this.heap_bump().load() as usize + this.heap_freed().load() as usize;
+        assert_eq!(calculated, tracked);
+        let keys_and_fences = std::iter::once(this.lower_fence().slice(this.prefix_len().load() as usize..))
+            .chain((0..this.count().load() as usize).map(|i| this.key(i)))
+            .map(|k| Supreme::X(k.load_slice_to_vec()))
+            .chain(std::iter::once(if this.upper_fence_len().load() == 0 {
+                Supreme::Sup
+            } else {
+                Supreme::X(this.upper_fence().slice(this.prefix_len().load() as usize..).load_slice_to_vec())
+            }));
+        assert!(keys_and_fences.is_sorted(), "not sorted: {:?}", this.upcast());
+    }
     fn format(this: &W<Guarded<Optimistic, Self>>, f: &mut Formatter) -> std::fmt::Result {
         let mut s = f.debug_struct(std::any::type_name::<Self>());
         macro_rules! field {
@@ -103,10 +121,38 @@ unsafe impl<V: BasicNodeVariant> Node for BasicNode<V> {
         s.field("records", &format_args!("\n{}", records_fmt));
         s.finish()
     }
+    fn merge(
+        this: &mut W<Guarded<Exclusive, BasicNode<V>>>,
+        right: &mut W<Guarded<Exclusive, BasicNode<V>>>,
+        ref_key: &[u8],
+    ) {
+        let tmp = &mut BasicNode::<V>::zeroed();
+        let mut tmp = Guarded::<Exclusive, _>::wrap_mut(tmp);
+        let left_count = this.count().load() as usize;
+        let right_count = right.count().load() as usize;
+        if V::IS_LEAF {
+            tmp.init(this.s().lower_fence(), right.s().upper_fence(), Zeroable::zeroed());
+            tmp.count_mut().store((left_count + right_count) as u16);
+            this.copy_records(&mut tmp, 0..left_count, 0, ref_key);
+            right.copy_records(&mut tmp, 0..right_count, left_count, ref_key);
+        } else {
+            tmp.init(this.s().lower_fence(), right.s().upper_fence(), this.s().lower().get().load());
+            tmp.count_mut().store((left_count + right_count + 1) as u16);
+            this.copy_records(&mut tmp, 0..left_count, 0, ref_key);
+            right.copy_records(&mut tmp, 0..right_count, left_count + 1, ref_key);
+            tmp.heap_write_new(
+                this.s().upper_fence().slice(tmp.prefix_len().load() as usize..),
+                right.s().lower().as_slice(),
+                left_count,
+            );
+        }
+        this.store(tmp.load()); //TODO optimize copy
+    }
 
     fn split(
         this: &mut W<Guarded<Exclusive, Self>>,
         parent_insert: impl FnOnce(usize, Guarded<'_, Shared, [u8]>) -> Result<Guard<'static, Exclusive, PageTail>, ()>,
+        ref_key: &[u8],
     ) -> Result<(), ()> {
         // TODO tail compression
         let left = &mut BasicNode::<V>::zeroed();
@@ -116,16 +162,17 @@ unsafe impl<V: BasicNodeVariant> Node for BasicNode<V> {
         let mut right = parent_insert(this.prefix_len().load() as usize, this.s().key(low_count))?;
         let right = &mut right.b().0.cast::<BasicNode<V>>();
         let sep_key = this.s().prefix().join(this.s().key(low_count));
-        this.s().validate();
+        Node::validate(this.s());
         if V::IS_LEAF {
             left.init(this.s().lower_fence(), sep_key, Zeroable::zeroed());
             right.init(sep_key, this.s().upper_fence(), Zeroable::zeroed());
             left.count_mut().store(low_count as u16);
-            this.copy_records(&mut left, 0..low_count, 0);
+            this.copy_records(&mut left, 0..low_count, 0, ref_key);
             right.count_mut().store((count - low_count) as u16);
-            this.copy_records(right, low_count..count, 0);
+            this.copy_records(right, low_count..count, 0, ref_key);
         } else {
-            left.init(sep_key, this.s().upper_fence(), this.s().lower().get().load());
+            eprintln!("split inner at {:?}", BString::new(this.s().key(low_count).load_slice_to_vec()));
+            left.init(this.s().lower_fence(), sep_key, this.s().lower().get().load());
             let mid_child = this
                 .s()
                 .slice::<[V::ValueSlice; 3]>(this.s().slots().index(low_count).load() as usize, 1)
@@ -134,12 +181,13 @@ unsafe impl<V: BasicNodeVariant> Node for BasicNode<V> {
                 .load();
             right.init(sep_key, this.s().upper_fence(), mid_child);
             left.count_mut().store(low_count as u16);
-            this.copy_records(&mut left, 0..low_count, 0);
+            this.copy_records(&mut left, 0..low_count, 0, ref_key);
             right.count_mut().store((count - low_count - 1) as u16);
-            this.copy_records(right, low_count + 1..count, 0);
+            this.copy_records(right, low_count + 1..count, 0, ref_key);
         }
-        left.s().validate();
-        right.s().validate();
+        dbg!(this.s().upcast(), left.s().upcast(), right.s().upcast());
+        Node::validate(left.s());
+        Node::validate(right.s());
         this.store(left.load()); //TODO optimize copy
         Ok(())
     }
@@ -181,7 +229,7 @@ impl<'a, V: BasicNodeVariant> W<Guarded<'a, Exclusive, BasicNode<V>>> {
 
     #[allow(clippy::result_unit_err)]
     fn insert(&mut self, key: &[u8], val: &[V::ValueSlice]) -> Result<Option<()>, ()> {
-        self.s().validate();
+        Node::validate(self.s());
         if !V::IS_LEAF {
             assert_eq!(val.len(), 3);
         }
@@ -197,7 +245,7 @@ impl<'a, V: BasicNodeVariant> W<Guarded<'a, Exclusive, BasicNode<V>>> {
                         let old_size = self.s().stored_record_size(self.s().slots().index(existing).load() as usize);
                         self.heap_freed_mut().update(|x| x + old_size as u16);
                         self.heap_write_new(key, val, existing);
-                        self.s().validate();
+                        Node::validate(self.s());
                         return Ok(Some(()));
                     }
                 }
@@ -228,7 +276,7 @@ impl<'a, V: BasicNodeVariant> W<Guarded<'a, Exclusive, BasicNode<V>>> {
                         self.count_mut().store(count as u16 + 1);
                         self.b().heads().index(insert_at).store(key_head(key));
                         self.heap_write_new(key, val, insert_at);
-                        self.s().validate();
+                        Node::validate(self.s());
                         return Ok(None);
                     }
                 }
@@ -236,47 +284,34 @@ impl<'a, V: BasicNodeVariant> W<Guarded<'a, Exclusive, BasicNode<V>>> {
             if self.heap_bump().load() as usize + (self.s().heap_freed().load() as usize)
                 < new_heap_start + Self::record_size(key.len(), val.len())
             {
-                self.s().validate();
+                Node::validate(self.s());
                 return Err(());
             }
             self.compactify();
         }
     }
 
-    fn merge(&mut self, right: &mut W<Guarded<Exclusive, BasicNode<V>>>) {
-        let tmp = &mut BasicNode::<V>::zeroed();
-        let mut tmp = Guarded::<Exclusive, _>::wrap_mut(tmp);
-        let left_count = self.count().load() as usize;
-        let right_count = right.count().load() as usize;
-        tmp.init(self.s().lower_fence(), right.s().upper_fence(), self.s().lower().get().load());
-        if V::IS_LEAF {
-            tmp.count_mut().store((left_count + right_count) as u16);
-            self.copy_records(&mut tmp, 0..left_count, 0);
-            right.copy_records(&mut tmp, 0..right_count, left_count);
-        } else {
-            tmp.count_mut().store((left_count + right_count + 1) as u16);
-            self.copy_records(&mut tmp, 0..left_count, 0);
-            right.copy_records(&mut tmp, 0..right_count, left_count + 1);
-            tmp.heap_write_new(
-                self.s().upper_fence().slice(tmp.prefix_len().load() as usize..),
-                right.s().lower().as_slice(),
-                left_count,
-            );
-        }
-        self.store(tmp.load()); //TODO optimize copy
-    }
-
-    fn copy_records(&self, dst: &mut W<Guarded<Exclusive, BasicNode<V>>>, src_range: Range<usize>, dst_start: usize) {
+    fn copy_records(
+        &self,
+        dst: &mut W<Guarded<Exclusive, BasicNode<V>>>,
+        src_range: Range<usize>,
+        dst_start: usize,
+        ref_key: &[u8],
+    ) {
         let dst_range = dst_start..(src_range.end + dst_start - src_range.start);
-        let prefix_grow = dst.prefix_len().load() as usize - self.prefix_len().load() as usize;
+        let dpl = dst.prefix_len().load() as usize;
+        let spl = self.prefix_len().load() as usize;
+        let restore_prefix = &ref_key[dpl..spl.min(dpl)];
+        let prefix_grow = if dpl > spl { dpl - spl } else { 0 };
         for (src_i, dst_i) in src_range.clone().zip(dst_range.clone()) {
-            dst.heap_write_new(self.s().key(src_i).slice(prefix_grow..), self.s().val(src_i), dst_i);
+            let key = restore_prefix.join(self.s().key(src_i).slice(prefix_grow..));
+            dst.heap_write_new(key, self.s().val(src_i), dst_i);
         }
-        if prefix_grow == 0 {
+        if dpl == spl {
             self.s().heads().slice(src_range).copy_to(&mut dst.b().heads().slice(dst_range));
         } else {
             for (src_i, dst_i) in src_range.zip(dst_range) {
-                let head = key_head(self.s().key(src_i).slice(prefix_grow..));
+                let head = key_head(dst.s().key(src_i));
                 dst.b().heads().index(dst_i).store(head);
             }
         }
@@ -306,7 +341,7 @@ impl<'a, V: BasicNodeVariant> W<Guarded<'a, Exclusive, BasicNode<V>>> {
             }
         }
         self.count_mut().store((count - 1) as u16);
-        self.s().validate();
+        Node::validate(self.s());
         Ok(Some(()))
     }
 
@@ -354,7 +389,7 @@ impl<'a, V: BasicNodeVariant> W<Guarded<'a, Exclusive, BasicNode<V>>> {
         debug_assert_eq!(self.heap_bump().load() + self.heap_freed().load(), dst_offset as u16);
         self.heap_freed_mut().store(0);
         self.heap_bump_mut().store(dst_offset as u16);
-        self.s().validate();
+        Node::validate(self.s());
     }
 }
 
@@ -379,28 +414,7 @@ impl<'a, V: BasicNodeVariant, M: SeqLockMode> W<Guarded<'a, M, BasicNode<V>>> {
     fn u16(self, offset: usize) -> Guarded<'a, M, u16> {
         self.slice::<u16>(offset, 1).index(0)
     }
-    fn validate(self)
-    where
-        M: SeqLockModePessimistic,
-        Self: Copy,
-    {
-        if !cfg!(debug_assertions) {
-            return;
-        }
-        let record_size_sum: usize = self.s().slots().iter().map(|x| self.stored_record_size(x.load() as usize)).sum();
-        let calculated = self.heap_end() - record_size_sum;
-        let tracked = self.heap_bump().load() as usize + self.heap_freed().load() as usize;
-        assert_eq!(calculated, tracked);
-        let keys_and_fences = std::iter::once(self.lower_fence().slice(self.prefix_len().load() as usize..))
-            .chain((0..self.count().load() as usize).map(|i| self.key(i)))
-            .map(|k| Supreme::X(k.load_slice_to_vec()))
-            .chain(std::iter::once(if self.upper_fence_len().load() == 0 {
-                Supreme::Sup
-            } else {
-                Supreme::X(self.upper_fence().slice(self.prefix_len().load() as usize..).load_slice_to_vec())
-            }));
-        assert!(keys_and_fences.is_sorted());
-    }
+
     fn lower(self) -> Guarded<'a, M, [V::ValueSlice; 3]> {
         assert!(!V::IS_LEAF);
         assert_eq!(4 % align_of::<[V::ValueSlice; 3]>(), 0);
@@ -498,9 +512,9 @@ impl<'a, M: SeqLockMode> W<Guarded<'a, M, BasicNode<BasicNodeLeaf>>> {
 impl<'a> W<Guarded<'a, Exclusive, BasicNode<BasicNodeLeaf>>> {
     #[allow(clippy::result_unit_err)]
     pub fn insert_leaf(&mut self, key: &[u8], val: &[u8]) -> Result<Option<()>, ()> {
-        self.s().validate();
+        Node::validate(self.s());
         let x = self.insert(key, val);
-        self.s().validate();
+        Node::validate(self.s());
         x
     }
 }
@@ -527,7 +541,7 @@ impl<'a> W<Guarded<'a, Exclusive, BasicNode<BasicNodeInner>>> {
     #[allow(clippy::result_unit_err)]
     pub fn insert_inner(&mut self, key: &[u8], pid: PageId) -> Result<(), ()> {
         let x = self.insert(key, &pid.to_3x16());
-        self.s().validate();
+        Node::validate(self.s());
         x.map(|x| debug_assert!(x.is_none()))
     }
 
@@ -538,8 +552,19 @@ impl<'a> W<Guarded<'a, Exclusive, BasicNode<BasicNodeInner>>> {
         mut ll: usize,
         mut hl: usize,
     ) {
-        assert!(self.s().lower_fence().mem_cmp(&lb[..ll]).is_eq());
-        assert!(self.s().upper_fence().mem_cmp(&hb[..hl]).is_eq());
+        //dbg!(self.s().upcast());
+        assert!(
+            self.s().lower_fence().mem_cmp(&lb[..ll]).is_eq(),
+            "wrong lf {:?}\n{:?}",
+            BStr::new(&lb[..ll]),
+            self.upcast()
+        );
+        assert!(
+            self.s().upper_fence().mem_cmp(&hb[..hl]).is_eq(),
+            "wrong uf {:?}\n{:?}",
+            BStr::new(&hb[..hl]),
+            self.upcast()
+        );
         if self.s().tag().load() != node_tag::BASIC_INNER {
             return;
         }
@@ -552,6 +577,7 @@ impl<'a> W<Guarded<'a, Exclusive, BasicNode<BasicNodeInner>>> {
         {
             k.write_to(&mut Guarded::wrap_mut(&mut hb[prefix..][..k.len()]));
             hl = k.len() + prefix;
+            let htmp = hb[..hl].to_vec();
             self.optimistic()
                 .index_child(i)
                 .lock::<Exclusive>()
@@ -559,15 +585,19 @@ impl<'a> W<Guarded<'a, Exclusive, BasicNode<BasicNodeInner>>> {
                 .0
                 .cast::<BasicInner>()
                 .validate_inter_node_fences(lb, hb, ll, hl);
+            assert_eq!(&hb[..hl], htmp);
             swap(hb, lb);
             ll = hl;
         }
+        swap(hb, lb);
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::basic_node::{BasicNode, BasicNodeLeaf};
+    use crate::basic_node::{BasicNode, BasicNodeLeaf, BasicNodeVariant};
+    use crate::node::Node;
+    use crate::page::PageId;
     use crate::test_util::subslices;
     use bytemuck::Zeroable;
     use rand::prelude::SliceRandom;
@@ -575,6 +605,7 @@ mod tests {
     use rand::SeedableRng;
     use seqlock::{Exclusive, Guarded};
     use std::collections::HashSet;
+    use std::io::BufRead;
 
     #[test]
     fn leaf() {
@@ -611,5 +642,46 @@ mod tests {
                 }
             }
         }
+    }
+
+    fn split_merge<V: BasicNodeVariant>(
+        ufb: u8,
+        lower: [V::ValueSlice; 3],
+        mut val: impl FnMut(u64) -> Vec<V::ValueSlice>,
+    ) {
+        let p1 = PageId::alloc();
+        let p2 = PageId::alloc();
+        let mut split_key = None;
+        let mut n1 = p1.lock::<Exclusive>();
+        let mut n1 = n1.b().0.cast::<BasicNode<V>>();
+        n1.init(&[0][..], &[ufb, 1][..], lower);
+        for i in 0u64.. {
+            if n1.insert(&i.to_be_bytes()[..], &val(i)).is_err() {
+                break;
+            }
+        }
+        Node::split(
+            &mut n1,
+            |prefix, k| {
+                split_key = Some((prefix, k.load_slice_to_vec()));
+                Ok(p2.lock())
+            },
+            &[0],
+        )
+        .unwrap();
+        let mut n2 = p2.lock::<Exclusive>();
+        let mut n2 = n2.b().0.cast::<BasicNode<V>>();
+        Node::validate(n1.s());
+        Node::validate(n2.s());
+        Node::merge(&mut n1, &mut n2, &[0]);
+        Node::validate(n1.s());
+        p1.free();
+        p2.free();
+    }
+
+    #[test]
+    fn split_merge_leaf() {
+        split_merge::<BasicNodeLeaf>(1, [0; 3], |i| i.to_be_bytes().to_vec());
+        split_merge::<BasicNodeLeaf>(0, [0; 3], |i| i.to_be_bytes().to_vec());
     }
 }

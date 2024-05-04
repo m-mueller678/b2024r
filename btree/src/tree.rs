@@ -147,13 +147,17 @@ impl Tree {
         leaf: &mut W<Guarded<Exclusive, N>>,
         mut parent: W<Guarded<Exclusive, BasicNode<BasicNodeInner>>>,
     ) -> Result<(), ()> {
-        N::split(leaf, |prefix_len, truncated| {
-            let new_node = PageId::alloc();
-            k[..prefix_len]
-                .join(truncated)
-                .to_stack_buffer::<{ crate::MAX_KEY_SIZE }, _>(|k| parent.b().insert_inner(k, new_node))?;
-            Ok(new_node.lock::<Exclusive>())
-        })
+        N::split(
+            leaf,
+            |prefix_len, truncated| {
+                let new_node = PageId::alloc();
+                k[..prefix_len]
+                    .join(truncated)
+                    .to_stack_buffer::<{ crate::MAX_KEY_SIZE }, _>(|k| parent.b().insert_inner(k, new_node))?;
+                Ok(new_node.lock::<Exclusive>())
+            },
+            k,
+        )
     }
 }
 
