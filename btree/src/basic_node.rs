@@ -125,7 +125,6 @@ unsafe impl<V: BasicNodeVariant> Node for BasicNode<V> {
         let sep_record_offset = this.s().slots().index(low_count).load() as usize;
         let lower = this.s().slice::<[V::ValueSlice; 3]>(sep_record_offset, 1).index(0).get().load();
         right.init(sep_key, this.s().upper_fence(), lower);
-        dbg!(this.s().cast::<PageTail>());
         this.s().validate();
         if V::IS_LEAF {
             left.count_mut().store(low_count as u16);
@@ -181,7 +180,6 @@ impl<'a, V: BasicNodeVariant> W<Guarded<'a, Exclusive, BasicNode<V>>> {
 
     #[allow(clippy::result_unit_err)]
     fn insert(&mut self, key: &[u8], val: &[V::ValueSlice]) -> Result<Option<()>, ()> {
-        dbg!(self.s().cast::<PageTail>());
         self.s().validate();
         if !V::IS_LEAF {
             assert_eq!(val.len(), 3);
@@ -229,7 +227,6 @@ impl<'a, V: BasicNodeVariant> W<Guarded<'a, Exclusive, BasicNode<V>>> {
                         self.count_mut().store(count as u16 + 1);
                         self.b().heads().index(insert_at).store(key_head(key));
                         self.heap_write_new(key, val, insert_at);
-                        dbg!(BStr::new(key), insert_at, self.s().cast::<PageTail>());
                         self.s().validate();
                         return Ok(None);
                     }
@@ -513,7 +510,6 @@ impl<'a> W<Guarded<'a, Optimistic, BasicNode<BasicNodeInner>>> {
             Err(i) => i,
             Ok(i) => i + high_on_equal as usize,
         };
-        dbg!(BStr::new(key), index, self.optimistic().cast::<PageTail>());
         self.index_child(index)
     }
 
