@@ -1,6 +1,6 @@
-use crate::basic_node::{BasicInner, BasicLeaf, BasicNode, BasicNodeInner};
+use crate::basic_node::{BasicInner, BasicLeaf, BasicNode};
 use crate::key_source::SourceSlice;
-use crate::node::{node_tag, Node};
+use crate::node::{node_tag, KindInner, Node};
 use crate::page::{PageId, PageTail, PAGE_TAIL_SIZE};
 use crate::{MAX_KEY_SIZE, W};
 use bytemuck::{Pod, Zeroable};
@@ -145,7 +145,7 @@ impl Tree {
     fn split_locked_node<N: Node>(
         k: &[u8],
         leaf: &mut W<Guarded<Exclusive, N>>,
-        mut parent: W<Guarded<Exclusive, BasicNode<BasicNodeInner>>>,
+        mut parent: W<Guarded<Exclusive, BasicNode<KindInner>>>,
     ) -> Result<(), ()> {
         N::split(
             leaf,

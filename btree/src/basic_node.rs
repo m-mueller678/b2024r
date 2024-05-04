@@ -18,11 +18,8 @@ use std::mem::{align_of, offset_of, size_of, swap};
 use std::ops::Range;
 use std::ptr::addr_of_mut;
 
-pub type BasicNodeLeaf = KindLeaf;
-pub type BasicNodeInner = KindInner;
-
-pub type BasicLeaf = BasicNode<BasicNodeLeaf>;
-pub type BasicInner = BasicNode<BasicNodeInner>;
+pub type BasicLeaf = BasicNode<KindLeaf>;
+pub type BasicInner = BasicNode<KindInner>;
 
 #[derive(Copy, Clone, Zeroable, Pod)]
 #[repr(align(8))]
@@ -499,14 +496,14 @@ impl<'a, V: NodeKind, M: SeqLockMode> W<Guarded<'a, M, BasicNode<V>>> {
     }
 }
 
-impl<'a, M: SeqLockMode> W<Guarded<'a, M, BasicNode<BasicNodeLeaf>>> {
+impl<'a, M: SeqLockMode> W<Guarded<'a, M, BasicNode<KindLeaf>>> {
     pub fn lookup_leaf(self, key: &[u8]) -> Option<Guarded<'a, M, [u8]>>
     where
         Self: Copy,
     {
         if let Ok(i) = self.find(key) {
             let offset = self.slots().index(i).load() as usize;
-            let val_start = self.u16(offset).load() as usize + offset + record_to_key_offset::<BasicNodeLeaf>();
+            let val_start = self.u16(offset).load() as usize + offset + record_to_key_offset::<KindLeaf>();
             let val_len = self.u16(offset + 2).load() as usize;
             Some(self.slice(val_start, val_len))
         } else {
@@ -515,7 +512,7 @@ impl<'a, M: SeqLockMode> W<Guarded<'a, M, BasicNode<BasicNodeLeaf>>> {
     }
 }
 
-impl<'a> W<Guarded<'a, Exclusive, BasicNode<BasicNodeLeaf>>> {
+impl<'a> W<Guarded<'a, Exclusive, BasicNode<KindLeaf>>> {
     #[allow(clippy::result_unit_err)]
     pub fn insert_leaf(&mut self, key: &[u8], val: &[u8]) -> Result<Option<()>, ()> {
         Node::validate(self.s());
@@ -525,7 +522,7 @@ impl<'a> W<Guarded<'a, Exclusive, BasicNode<BasicNodeLeaf>>> {
     }
 }
 
-impl<'a> W<Guarded<'a, Optimistic, BasicNode<BasicNodeInner>>> {
+impl<'a> W<Guarded<'a, Optimistic, BasicNode<KindInner>>> {
     pub fn lookup_inner(&self, key: &[u8], high_on_equal: bool) -> PageId {
         let index = match self.find(key) {
             Err(i) => i,
@@ -543,7 +540,7 @@ impl<'a> W<Guarded<'a, Optimistic, BasicNode<BasicNodeInner>>> {
     }
 }
 
-impl<'a> W<Guarded<'a, Exclusive, BasicNode<BasicNodeInner>>> {
+impl<'a> W<Guarded<'a, Exclusive, BasicNode<KindInner>>> {
     #[allow(clippy::result_unit_err)]
     pub fn insert_inner(&mut self, key: &[u8], pid: PageId) -> Result<(), ()> {
         let x = self.insert(key, &pid.to_3x16());
@@ -601,8 +598,8 @@ impl<'a> W<Guarded<'a, Exclusive, BasicNode<BasicNodeInner>>> {
 
 #[cfg(test)]
 mod tests {
-    use crate::basic_node::{BasicNode, BasicNodeLeaf, NodeKind};
-    use crate::node::Node;
+    use crate::basic_node::{BasicNode, NodeKind};
+    use crate::node::{KindLeaf, Node};
     use crate::page::PageId;
     use crate::test_util::subslices;
     use bytemuck::Zeroable;
@@ -619,7 +616,7 @@ mod tests {
         let mut keys: Vec<Vec<u8>> = (0..50).map(|_| keys(rng)).collect();
         keys.sort();
         keys.dedup();
-        let leaf = &mut BasicNode::<BasicNodeLeaf>::zeroed();
+        let leaf = &mut BasicNode::<KindLeaf>::zeroed();
         let mut leaf = Guarded::<Exclusive, _>::wrap_mut(leaf);
         for (_k, keys) in subslices(&keys, 5).enumerate() {
             let kc = keys.len();
@@ -684,7 +681,7 @@ mod tests {
 
     #[test]
     fn split_merge_leaf() {
-        split_merge::<BasicNodeLeaf>(1, [0; 3], |i| i.to_be_bytes().to_vec());
-        split_merge::<BasicNodeLeaf>(0, [0; 3], |i| i.to_be_bytes().to_vec());
+        split_merge::<KindLeaf>(1, [0; 3], |i| i.to_be_bytes().to_vec());
+        split_merge::<KindLeaf>(0, [0; 3], |i| i.to_be_bytes().to_vec());
     }
 }
