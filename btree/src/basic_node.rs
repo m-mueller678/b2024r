@@ -301,8 +301,8 @@ impl<'a, V: BasicNodeVariant> W<Guarded<'a, Exclusive, BasicNode<V>>> {
         let dst_range = dst_start..(src_range.end + dst_start - src_range.start);
         let dpl = dst.prefix_len().load() as usize;
         let spl = self.prefix_len().load() as usize;
-        let restore_prefix = &ref_key[dpl..spl.min(dpl)];
-        let prefix_grow = if dpl > spl { dpl - spl } else { 0 };
+        let restore_prefix = &ref_key[dpl..spl.max(dpl)];
+        let prefix_grow = dpl - spl.min(dpl);
         for (src_i, dst_i) in src_range.clone().zip(dst_range.clone()) {
             let key = restore_prefix.join(self.s().key(src_i).slice(prefix_grow..));
             dst.heap_write_new(key, self.s().val(src_i), dst_i);
