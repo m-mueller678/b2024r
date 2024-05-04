@@ -8,8 +8,7 @@ use bytemuck::{Pod, Zeroable};
 use indxvec::Search;
 use itertools::Itertools;
 use seqlock::{
-    Exclusive, Guard, Guarded, Never, Optimistic, SeqLockMode, SeqLockModePessimistic, SeqLockWrappable,
-    SeqlockAccessors, Shared, Wrapper,
+    Exclusive, Guard, Guarded, Never, Optimistic, SeqLockMode, SeqLockWrappable, SeqlockAccessors, Shared, Wrapper,
 };
 use std::fmt::{Debug, Formatter};
 use std::marker::PhantomData;
@@ -605,7 +604,6 @@ mod tests {
     use rand::SeedableRng;
     use seqlock::{Exclusive, Guarded};
     use std::collections::HashSet;
-    use std::io::BufRead;
 
     #[test]
     fn leaf() {

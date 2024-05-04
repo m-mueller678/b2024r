@@ -1,4 +1,4 @@
-use crate::basic_node::{BasicInner, BasicLeaf, BasicNode, BasicNodeInner, BasicNodeLeaf};
+use crate::basic_node::{BasicInner, BasicLeaf, BasicNode, BasicNodeInner};
 use crate::key_source::SourceSlice;
 use crate::node::{node_tag, Node};
 use crate::page::{PageId, PageTail, PAGE_TAIL_SIZE};
@@ -127,7 +127,7 @@ impl Tree {
                 drop(parent);
                 drop(node);
                 // TODO could descend from parent
-                return self.try_insert(k, val);
+                self.try_insert(k, val)
             }
         }
     }
