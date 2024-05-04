@@ -109,7 +109,6 @@ unsafe impl<V: BasicNodeVariant> Node for BasicNode<V> {
         parent_insert: impl FnOnce(usize, Guarded<'_, Shared, [u8]>) -> Result<Guard<'static, Exclusive, PageTail>, ()>,
     ) -> Result<(), ()> {
         // TODO tail compression
-        assert!(V::IS_LEAF);
         let left = &mut BasicNode::<V>::zeroed();
         let mut left = Guarded::<Exclusive, _>::wrap_mut(left);
         let count = this.count().load() as usize;
@@ -117,25 +116,27 @@ unsafe impl<V: BasicNodeVariant> Node for BasicNode<V> {
         let mut right = parent_insert(this.prefix_len().load() as usize, this.s().key(low_count))?;
         let right = &mut right.b().0.cast::<BasicNode<V>>();
         let sep_key = this.s().prefix().join(this.s().key(low_count));
-        left.init(
-            this.s().lower_fence(),
-            sep_key,
-            if V::IS_LEAF { Zeroable::zeroed() } else { this.s().lower().get().load() },
-        );
-        let sep_record_offset = this.s().slots().index(low_count).load() as usize;
-        let lower = this.s().slice::<[V::ValueSlice; 3]>(sep_record_offset, 1).index(0).get().load();
-        right.init(sep_key, this.s().upper_fence(), lower);
         this.s().validate();
         if V::IS_LEAF {
+            left.init(this.s().lower_fence(), sep_key, Zeroable::zeroed());
+            right.init(sep_key, this.s().upper_fence(), Zeroable::zeroed());
             left.count_mut().store(low_count as u16);
             this.copy_records(&mut left, 0..low_count, 0);
             right.count_mut().store((count - low_count) as u16);
             this.copy_records(right, low_count..count, 0);
         } else {
+            left.init(sep_key, this.s().upper_fence(), this.s().lower().get().load());
+            let mid_child = this
+                .s()
+                .slice::<[V::ValueSlice; 3]>(this.s().slots().index(low_count).load() as usize, 1)
+                .index(0)
+                .get()
+                .load();
+            right.init(sep_key, this.s().upper_fence(), mid_child);
             left.count_mut().store(low_count as u16);
             this.copy_records(&mut left, 0..low_count, 0);
             right.count_mut().store((count - low_count - 1) as u16);
-            this.copy_records(right, low_count..count, 0);
+            this.copy_records(right, low_count + 1..count, 0);
         }
         left.s().validate();
         right.s().validate();
@@ -555,7 +556,8 @@ impl<'a> W<Guarded<'a, Exclusive, BasicNode<BasicNodeInner>>> {
                 .index_child(i)
                 .lock::<Exclusive>()
                 .b()
-                .node_cast::<BasicInner>()
+                .0
+                .cast::<BasicInner>()
                 .validate_inter_node_fences(lb, hb, ll, hl);
             swap(hb, lb);
             ll = hl;
