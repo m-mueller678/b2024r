@@ -1,4 +1,4 @@
-use crate::basic_node::{BasicNode, BasicNodeData, BasicNodeInner, BasicNodeLeaf};
+use crate::basic_node::{BasicInner, BasicLeaf, BasicNode, BasicNodeData, BasicNodeInner, BasicNodeLeaf};
 use crate::page::{Page, PageTail};
 use crate::W;
 use bytemuck::{Pod, Zeroable};
@@ -36,15 +36,17 @@ pub unsafe fn print_node(p: *const Page) {
 
 impl<M: SeqLockMode> Debug for W<Guarded<'_, M, PageTail>> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        match self.optimistic().cast::<BasicNode<BasicNodeLeaf>>().tag().load() {
-            node_tag::BASIC_LEAF => Node::format(&self.optimistic().cast::<BasicNode<BasicNodeLeaf>>(), f),
-            node_tag::BASIC_INNER => Node::format(&self.optimistic().cast::<BasicNode<BasicNodeInner>>(), f),
+        match self.optimistic().node_cast::<BasicLeaf>().tag().load() {
+            node_tag::BASIC_LEAF => Node::format(&self.optimistic().node_cast::<BasicLeaf>(), f),
+            node_tag::BASIC_INNER => Node::format(&self.optimistic().node_cast::<BasicInner>(), f),
             x => write!(f, "UnknownNode{{tag:0x{x:x}}}"),
         }
     }
 }
 
 pub unsafe trait Node: SeqLockWrappable + Pod {
+    const TAG: u8;
+
     /// fails iff parent_insert fails.
     /// if node is near empty, no split is performed and parent_insert is not called.
     fn split(
@@ -54,6 +56,21 @@ pub unsafe trait Node: SeqLockWrappable + Pod {
     fn format(this: &W<Guarded<Optimistic, Self>>, f: &mut Formatter) -> std::fmt::Result
     where
         Self: Copy;
+}
+
+impl<'a, M: SeqLockMode> W<Guarded<'a, M, PageTail>> {
+    pub fn node_cast<N: Node>(self) -> N::Wrapper<Guarded<'a, M, N>> {
+        if M::EXCLUSIVE {
+            debug_assert_eq!(self.s().0.cast::<BasicLeaf>().tag().load(), N::TAG);
+        }
+        self.0.cast::<N>()
+    }
+}
+
+impl<'a, M: SeqLockMode, N: Node> W<Guarded<'a, M, N>> {
+    pub fn upcast(self) -> W<Guarded<'a, M, PageTail>> {
+        self.0.cast::<PageTail>()
+    }
 }
 
 impl<'a, N: Node, M: SeqLockMode> W<Guarded<'a, M, N>> {

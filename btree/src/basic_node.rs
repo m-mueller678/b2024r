@@ -17,6 +17,9 @@ use std::mem::{align_of, offset_of, size_of, swap};
 use std::ops::Range;
 use std::ptr::addr_of_mut;
 
+pub type BasicLeaf = BasicNode<BasicNodeLeaf>;
+pub type BasicInner = BasicNode<BasicNodeInner>;
+
 #[derive(Copy, Clone, Zeroable, Pod)]
 #[repr(align(8))]
 #[repr(C)]
@@ -49,6 +52,7 @@ pub struct BasicNode<V: BasicNodeVariant>(
 unsafe impl<V: BasicNodeVariant> Pod for BasicNode<V> {}
 
 pub trait BasicNodeVariant: 'static + Copy + Zeroable {
+    const TAG: u8;
     const IS_LEAF: bool;
     const RECORD_TO_KEY_OFFSET: usize = if Self::IS_LEAF { 4 } else { 8 };
     const LOWER_HEAD_SLOTS: usize = if Self::IS_LEAF { 0 } else { size_of::<[Self::ValueSlice; 3]>().div_ceil(4) };
@@ -61,6 +65,7 @@ pub struct BasicNodeLeaf;
 
 impl BasicNodeVariant for BasicNodeLeaf {
     const IS_LEAF: bool = true;
+    const TAG: u8 = 251;
     type ValueSlice = u8;
 }
 
@@ -70,6 +75,7 @@ pub struct BasicNodeInner;
 
 impl BasicNodeVariant for BasicNodeInner {
     type ValueSlice = u16;
+    const TAG: u8 = 250;
     const IS_LEAF: bool = false;
 }
 
@@ -137,6 +143,8 @@ unsafe impl<V: BasicNodeVariant> Node for BasicNode<V> {
         this.store(left.load()); //TODO optimize copy
         Ok(())
     }
+
+    const TAG: u8 = V::TAG;
 }
 
 const HEAD_RESERVATION: usize = 16;
@@ -230,6 +238,7 @@ impl<'a, V: BasicNodeVariant> W<Guarded<'a, Exclusive, BasicNode<V>>> {
             if self.heap_bump().load() as usize + (self.s().heap_freed().load() as usize)
                 < new_heap_start + Self::record_size(key.len(), val.len())
             {
+                self.s().validate();
                 return Err(());
             }
             self.compactify();
@@ -347,6 +356,7 @@ impl<'a, V: BasicNodeVariant> W<Guarded<'a, Exclusive, BasicNode<V>>> {
         debug_assert_eq!(self.heap_bump().load() + self.heap_freed().load(), dst_offset as u16);
         self.heap_freed_mut().store(0);
         self.heap_bump_mut().store(dst_offset as u16);
+        self.s().validate();
     }
 }
 
@@ -549,8 +559,7 @@ impl<'a> W<Guarded<'a, Exclusive, BasicNode<BasicNodeInner>>> {
                 .index_child(i)
                 .lock::<Exclusive>()
                 .b()
-                .0
-                .cast::<BasicNode<BasicNodeInner>>()
+                .node_cast::<BasicInner>()
                 .validate_inter_node_fences(lb, hb, ll, hl);
             swap(hb, lb);
             ll = hl;

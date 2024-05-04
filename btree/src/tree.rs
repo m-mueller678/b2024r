@@ -1,4 +1,4 @@
-use crate::basic_node::{BasicNode, BasicNodeInner, BasicNodeLeaf};
+use crate::basic_node::{BasicInner, BasicLeaf, BasicNode, BasicNodeInner, BasicNodeLeaf};
 use crate::key_source::SourceSlice;
 use crate::node::{node_tag, Node};
 use crate::page::{PageId, PageTail, PAGE_TAIL_SIZE};
@@ -21,7 +21,7 @@ impl Tree {
         let meta = PageId::alloc();
         let root = PageId::alloc();
         meta.lock::<Exclusive>().b().0.cast::<MetadataPage>().root_mut().store(root);
-        root.lock::<Exclusive>().b().0.cast::<BasicNode<BasicNodeLeaf>>().init(&[][..], &[][..], [0u8; 3]);
+        root.lock::<Exclusive>().b().0.cast::<BasicLeaf>().init(&[][..], &[][..], [0u8; 3]);
         Tree { meta }
     }
 
@@ -31,12 +31,7 @@ impl Tree {
         let meta = self.meta.lock::<Exclusive>();
         let mut root = meta.s().cast::<MetadataPage>().root().load().lock::<Exclusive>();
         drop(meta);
-        root.b().0.cast::<BasicNode<BasicNodeInner>>().validate_inter_node_fences(
-            &mut &mut low_buffer,
-            &mut &mut high_buffer,
-            0,
-            0,
-        );
+        root.b().0.cast::<BasicInner>().validate_inter_node_fences(&mut &mut low_buffer, &mut &mut high_buffer, 0, 0);
     }
 
     pub fn remove(&self, k: &[u8]) -> Option<()> {
@@ -55,7 +50,7 @@ impl Tree {
         let mut node = node_pid.lock::<Optimistic>();
         parent.check();
         while node.s().common().tag().load() == node_tag::BASIC_INNER && Some(node_pid) != stop_at {
-            let child = node.cast::<BasicNode<BasicNodeInner>>().lookup_inner(k, true).lock();
+            let child = node.node_cast::<BasicInner>().lookup_inner(k, true).lock();
             parent.release_unchecked();
             parent = node;
             node = child;
@@ -73,8 +68,8 @@ impl Tree {
                 debug_assert!(node.common().tag().load() == node_tag::BASIC_INNER);
                 if Self::split_locked_node(
                     k,
-                    &mut node.b().0.cast::<BasicNode<BasicNodeLeaf>>(),
-                    parent.b().0.cast::<BasicNode<BasicNodeInner>>(),
+                    &mut node.b().node_cast::<BasicInner>(),
+                    parent.b().node_cast::<BasicInner>(),
                 )
                 .is_ok()
                 {
@@ -100,7 +95,7 @@ impl Tree {
     ) {
         if parent.page_id() == self.meta {
             let mut new_root = PageId::alloc().lock::<Exclusive>();
-            new_root.b().0.cast::<BasicNode<BasicNodeInner>>().init(&[][..], &[][..], node.page_id().to_3x16());
+            new_root.b().0.cast::<BasicInner>().init(&[][..], &[][..], node.page_id().to_3x16());
             parent.b().0.cast::<MetadataPage>().root_mut().store(new_root.page_id());
             *parent = new_root
         }
@@ -109,7 +104,7 @@ impl Tree {
     fn try_insert(&self, k: &[u8], val: &[u8]) -> Option<()> {
         let [parent, node] = self.descend(k, None);
         let mut node = node.upgrade();
-        match node.b().0.cast::<BasicNode<BasicNodeLeaf>>().insert_leaf(k, val) {
+        match node.b().node_cast::<BasicLeaf>().insert_leaf(k, val) {
             Ok(x) => {
                 parent.release_unchecked();
                 x
@@ -119,8 +114,8 @@ impl Tree {
                 self.ensure_parent_not_root(&mut node, &mut parent);
                 if Self::split_locked_node(
                     k,
-                    &mut node.b().0.cast::<BasicNode<BasicNodeLeaf>>(),
-                    parent.b().0.cast::<BasicNode<BasicNodeInner>>(),
+                    &mut node.b().node_cast::<BasicLeaf>(),
+                    parent.b().node_cast::<BasicInner>(),
                 )
                 .is_err()
                 {
@@ -130,6 +125,7 @@ impl Tree {
                     return self.split_and_insert(parent_id, k, val);
                 }
                 drop(parent);
+                drop(node);
                 // TODO could descend from parent
                 return self.try_insert(k, val);
             }
@@ -142,7 +138,7 @@ impl Tree {
 
     pub fn try_lookup(&self, k: &[u8]) -> Option<Guard<'static, Optimistic, [u8]>> {
         let [_parent, node] = self.descend(k, None);
-        let key: Guarded<'static, _, _> = node.cast::<BasicNode<BasicNodeLeaf>>().lookup_leaf(k)?;
+        let key: Guarded<'static, _, _> = node.node_cast::<BasicLeaf>().lookup_leaf(k)?;
         Some(node.map(|_| key))
     }
 
@@ -153,9 +149,9 @@ impl Tree {
     ) -> Result<(), ()> {
         N::split(leaf, |prefix_len, truncated| {
             let new_node = PageId::alloc();
-            k[..prefix_len].join(truncated).to_stack_buffer::<{ crate::MAX_KEY_SIZE }, _>(|k| {
-                parent.b().0.cast::<BasicNode<BasicNodeInner>>().insert_inner(k, new_node)
-            })?;
+            k[..prefix_len]
+                .join(truncated)
+                .to_stack_buffer::<{ crate::MAX_KEY_SIZE }, _>(|k| parent.b().insert_inner(k, new_node))?;
             Ok(new_node.lock::<Exclusive>())
         })
     }
