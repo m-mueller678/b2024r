@@ -42,7 +42,10 @@ pub struct Guard<'a, M: SeqLockMode, T: SeqLockWrappable + ?Sized> {
 impl<'a, M: SeqLockMode, T: SeqLockWrappable + ?Sized> Drop for Guard<'a, M, T> {
     fn drop(&mut self) {
         if panicking() {
-            assert!(!M::EXCLUSIVE);
+            if M::EXCLUSIVE {
+                // TODO on debug builds, we should check here if the lock has already been used for writing and if so, panic.
+                M::release(self.lock, self.guard_data);
+            }
         } else {
             M::release(self.lock, self.guard_data);
         }
