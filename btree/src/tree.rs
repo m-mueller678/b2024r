@@ -38,6 +38,14 @@ impl Tree {
         todo!()
     }
 
+    fn try_remove(&self, k: &[u8], removed: &mut bool) {
+        let [parent, node] = self.descend(k, None);
+        let mut node = node.upgrade();
+        *removed |= node.b().node_cast::<BasicLeaf>().remove(k).is_some();
+        parent.release_unchecked();
+        //TODO merge nodes
+    }
+
     pub fn insert(&self, k: &[u8], val: &[u8]) -> Option<()> {
         let x = seqlock::unwind::repeat(|| || self.try_insert(k, val));
         self.validate_fences_exclusive();

@@ -318,9 +318,9 @@ impl<'a, V: NodeKind> W<Guarded<'a, Exclusive, BasicNode<V>>> {
         }
     }
 
-    fn remove(&mut self, key: &[u8]) -> Result<Option<()>, Never> {
+    pub fn remove(&mut self, key: &[u8]) -> Option<()> {
         let Ok(index) = self.s().find(key) else {
-            return Ok(None);
+            return None;
         };
         let offset = self.s().slots().index(index).load() as usize;
         let record_size = self.s().stored_record_size(offset);
@@ -343,7 +343,7 @@ impl<'a, V: NodeKind> W<Guarded<'a, Exclusive, BasicNode<V>>> {
         }
         self.count_mut().store((count - 1) as u16);
         Node::validate(self.s());
-        Ok(Some(()))
+        Some(())
     }
 
     fn record_size(key: usize, val: usize) -> usize {
