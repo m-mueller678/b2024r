@@ -322,6 +322,11 @@ mod tests {
     fn single() {
         batch_ops(1, 10, 2_500, |_, _| [500, 500, 500], |_, _| {});
     }
+
+    #[cfg_attr(not(miri), test)]
+    fn single_large() {
+        batch_ops(1, 50, 2_500_000, |_, _| [20_00, 20_000, 20_000], |_, _| {});
+    }
 }
 
 #[derive(Ord, PartialOrd, Eq, PartialEq)]
