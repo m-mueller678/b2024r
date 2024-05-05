@@ -5,6 +5,8 @@ use crate::page::{PageId, PageTail, PAGE_TAIL_SIZE};
 use crate::{MAX_KEY_SIZE, W};
 use bytemuck::{Pod, Zeroable};
 use seqlock::{Exclusive, Guard, Guarded, Optimistic, SeqlockAccessors};
+use std::cell::Cell;
+use std::panic::RefUnwindSafe;
 
 pub struct Tree {
     meta: PageId,
@@ -34,14 +36,29 @@ impl Tree {
         root.b().0.cast::<BasicInner>().validate_inter_node_fences(&mut &mut low_buffer, &mut &mut high_buffer, 0, 0);
     }
 
-    pub fn remove(&self, _: &[u8]) -> Option<()> {
-        todo!()
+    pub fn remove(&self, k: &[u8]) -> Option<()> {
+        struct RemovedFlag(Cell<bool>);
+        impl RefUnwindSafe for RemovedFlag {}
+        let removed = RemovedFlag(Cell::new(false));
+        seqlock::unwind::repeat(|| {
+            || {
+                let removed = &removed;
+                self.try_remove(k, &removed.0);
+            }
+        });
+        if removed.0.get() {
+            Some(())
+        } else {
+            None
+        }
     }
 
-    fn try_remove(&self, k: &[u8], removed: &mut bool) {
+    fn try_remove(&self, k: &[u8], removed: &Cell<bool>) {
         let [parent, node] = self.descend(k, None);
         let mut node = node.upgrade();
-        *removed |= node.b().node_cast::<BasicLeaf>().remove(k).is_some();
+        if node.b().node_cast::<BasicLeaf>().remove(k).is_some() {
+            removed.set(true);
+        }
         parent.release_unchecked();
         //TODO merge nodes
     }
@@ -299,6 +316,11 @@ mod tests {
     #[cfg_attr(not(miri), test)]
     fn single_insert_lookup() {
         batch_ops(1, 3, 2_500, |_, _| [1_500, 500, 0], |_, _| {});
+    }
+
+    #[cfg_attr(not(miri), test)]
+    fn single() {
+        batch_ops(1, 5, 2_500, |_, _| [500, 500, 500], |_, _| {});
     }
 }
 

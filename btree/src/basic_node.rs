@@ -8,7 +8,7 @@ use bytemuck::{Pod, Zeroable};
 use indxvec::Search;
 use itertools::Itertools;
 use seqlock::{
-    Exclusive, Guard, Guarded, Never, Optimistic, SeqLockMode, SeqLockWrappable, SeqlockAccessors, Shared, Wrapper,
+    Exclusive, Guard, Guarded, Optimistic, SeqLockMode, SeqLockWrappable, SeqlockAccessors, Shared, Wrapper,
 };
 use std::fmt::{Debug, Formatter};
 use std::marker::PhantomData;
