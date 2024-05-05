@@ -4,7 +4,7 @@ use crate::node::{node_tag, KindInner, Node};
 use crate::page::{PageId, PageTail, PAGE_TAIL_SIZE};
 use crate::{MAX_KEY_SIZE, W};
 use bytemuck::{Pod, Zeroable};
-use seqlock::{Exclusive, Guard, Guarded, Optimistic, SeqlockAccessors};
+use seqlock::{Exclusive, Guard, Guarded, Optimistic, SeqlockAccessors, Shared};
 use std::cell::Cell;
 use std::panic::RefUnwindSafe;
 
@@ -184,6 +184,23 @@ impl Tree {
             },
             k,
         )
+    }
+}
+
+impl Drop for Tree {
+    fn drop(&mut self) {
+        fn free_recursive(p: PageId) {
+            let node = p.lock::<Optimistic>();
+            if node.tag().load() == BasicInner::TAG {
+                let node = node.node_cast::<BasicInner>();
+                for i in 0..node.count().load() as usize {
+                    free_recursive(node.index_child(i))
+                }
+            }
+            p.free();
+        }
+        free_recursive(self.meta.lock::<Exclusive>().b().0.cast::<MetadataPage>().root().load());
+        self.meta.free()
     }
 }
 

@@ -130,6 +130,7 @@ pub const PAGE_TAIL_SIZE: usize = PAGE_SIZE - PAGE_HEAD_SIZE;
 #[derive(Zeroable, Pod, Clone, Copy, SeqlockAccessors)]
 #[seq_lock_wrapper(crate::W)]
 #[repr(C, align(8))]
+#[seq_lock_accessor(pub tag: u8 = common.tag)]
 pub struct PageTail {
     pub common: CommonNodeHead,
     #[seq_lock_skip_accessor]

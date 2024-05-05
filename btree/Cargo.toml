@@ -14,3 +14,8 @@ itertools = "0.12.1"
 [dev-dependencies]
 random_word = { version = "0.4.3",features = ["en"] }
 rayon = "1.10.0"
+criterion = "0.5.1"
+
+[[bench]]
+name="my_benchmark"
+harness = false

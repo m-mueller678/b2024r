@@ -38,7 +38,7 @@ const BASIC_NODE_DATA_SIZE: usize = (PAGE_SIZE - PAGE_HEAD_SIZE - size_of::<Comm
 #[seq_lock_wrapper(W)]
 #[seq_lock_accessor(pub tag: u8 = 0.common.tag)]
 #[seq_lock_accessor(pub prefix_len: u16 = 0.common.prefix_len)]
-#[seq_lock_accessor(count: u16 = 0.common.count)]
+#[seq_lock_accessor(pub count: u16 = 0.common.count)]
 #[seq_lock_accessor(lower_fence_len: u16 = 0.common.lower_fence_len)]
 #[seq_lock_accessor(upper_fence_len: u16 = 0.common.upper_fence_len)]
 #[seq_lock_accessor(heap_bump: u16 = 0.heap_bump)]
