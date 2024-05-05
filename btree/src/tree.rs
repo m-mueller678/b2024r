@@ -46,14 +46,14 @@ impl Tree {
 
     fn descend(&self, k: &[u8], stop_at: Option<PageId>) -> [Guard<'static, Optimistic, PageTail>; 2] {
         let mut parent = self.meta.lock::<Optimistic>();
-        let node_pid = parent.s().cast::<MetadataPage>().root().load();
+        let mut node_pid = parent.s().cast::<MetadataPage>().root().load();
         let mut node = node_pid.lock::<Optimistic>();
         parent.check();
         while node.s().common().tag().load() == node_tag::BASIC_INNER && Some(node_pid) != stop_at {
-            let child = node.node_cast::<BasicInner>().lookup_inner(k, true).lock();
             parent.release_unchecked();
+            node_pid = node.node_cast::<BasicInner>().lookup_inner(k, true);
             parent = node;
-            node = child;
+            node = node_pid.lock();
         }
         [parent, node]
     }
@@ -137,7 +137,8 @@ impl Tree {
     }
 
     pub fn try_lookup(&self, k: &[u8]) -> Option<Guard<'static, Optimistic, [u8]>> {
-        let [_parent, node] = self.descend(k, None);
+        let [parent, node] = self.descend(k, None);
+        drop(parent);
         let key: Guarded<'static, _, _> = node.node_cast::<BasicLeaf>().lookup_leaf(k)?;
         Some(node.map(|_| key))
     }
