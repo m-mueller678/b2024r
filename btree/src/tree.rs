@@ -34,7 +34,7 @@ impl Tree {
         root.b().0.cast::<BasicInner>().validate_inter_node_fences(&mut &mut low_buffer, &mut &mut high_buffer, 0, 0);
     }
 
-    pub fn remove(&self, k: &[u8]) -> Option<()> {
+    pub fn remove(&self, _: &[u8]) -> Option<()> {
         todo!()
     }
 

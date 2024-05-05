@@ -117,11 +117,11 @@ impl NodeKind for KindLeaf {
     type SliceType = u8;
     type DebugVal = Vec<u8>;
 
-    fn from_lower(x: Self::Lower) -> [Self::SliceType; 3] {
+    fn from_lower(_: Self::Lower) -> [Self::SliceType; 3] {
         unimplemented!();
     }
 
-    fn to_lower(x: [Self::SliceType; 3]) -> Self::Lower {
+    fn to_lower(_: [Self::SliceType; 3]) -> Self::Lower {
         unimplemented!();
     }
 
