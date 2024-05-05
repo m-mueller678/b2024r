@@ -304,8 +304,8 @@ impl<'a, V: NodeKind> W<Guarded<'a, Exclusive, BasicNode<V>>> {
         let dst_range = dst_start..(src_range.end + dst_start - src_range.start);
         let dpl = dst.prefix_len().load() as usize;
         let spl = self.prefix_len().load() as usize;
-        let restore_prefix = &ref_key[dpl..spl.max(dpl)];
-        let prefix_grow = dpl - spl.min(dpl);
+        let restore_prefix = if dpl < spl { &ref_key[dpl..spl] } else { &[][..] };
+        let prefix_grow = if dpl > spl { dpl - spl } else { 0 };
         for (src_i, dst_i) in src_range.clone().zip(dst_range.clone()) {
             let key = restore_prefix.join(self.s().key(src_i).slice(prefix_grow..));
             dst.heap_write_new(key, self.s().val(src_i), dst_i);
@@ -313,8 +313,8 @@ impl<'a, V: NodeKind> W<Guarded<'a, Exclusive, BasicNode<V>>> {
         if dpl == spl {
             self.s().heads().slice(src_range).copy_to(&mut dst.b().heads().slice(dst_range));
         } else {
-            for (src_i, dst_i) in src_range.zip(dst_range) {
-                let head = key_head(dst.s().key(src_i));
+            for dst_i in dst_range {
+                let head = key_head(dst.s().key(dst_i));
                 dst.b().heads().index(dst_i).store(head);
             }
         }
