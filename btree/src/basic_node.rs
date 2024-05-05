@@ -630,7 +630,7 @@ mod tests {
                             inserted.insert(k);
                         }
                     } else {
-                        let in_leaf = leaf.remove(k).unwrap().is_some();
+                        let in_leaf = leaf.remove(k).is_some();
                         let expected = inserted.remove(k);
                         assert_eq!(in_leaf, expected);
                     }

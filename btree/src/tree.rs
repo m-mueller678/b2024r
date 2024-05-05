@@ -320,7 +320,7 @@ mod tests {
 
     #[cfg_attr(not(miri), test)]
     fn single() {
-        batch_ops(1, 5, 2_500, |_, _| [500, 500, 500], |_, _| {});
+        batch_ops(1, 10, 2_500, |_, _| [500, 500, 500], |_, _| {});
     }
 }
 
