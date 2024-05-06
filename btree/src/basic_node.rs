@@ -142,7 +142,6 @@ unsafe impl<V: NodeKind> Node for BasicNode<V> {
             right.count_mut().store((count - low_count) as u16);
             this.copy_records(right, low_count..count, 0, ref_key);
         } else {
-            eprintln!("split inner at {:?}", BString::new(this.s().key(low_count).load_slice_to_vec()));
             left.init(this.s().lower_fence(), sep_key, this.s().lower().get().load());
             let mid_child = this
                 .s()
@@ -156,7 +155,6 @@ unsafe impl<V: NodeKind> Node for BasicNode<V> {
             right.count_mut().store((count - low_count - 1) as u16);
             this.copy_records(right, low_count + 1..count, 0, ref_key);
         }
-        dbg!(this.s().upcast(), left.s().upcast(), right.s().upcast());
         Node::validate(left.s());
         Node::validate(right.s());
         this.store(left.load()); //TODO optimize copy
@@ -553,7 +551,6 @@ impl<'a> W<Guarded<'a, Exclusive, BasicNode<KindInner>>> {
         mut ll: usize,
         mut hl: usize,
     ) {
-        //dbg!(self.s().upcast());
         assert!(
             self.s().lower_fence().mem_cmp(&lb[..ll]).is_eq(),
             "wrong lf {:?}\n{:?}",
@@ -599,7 +596,6 @@ mod tests {
     use crate::basic_node::{BasicNode, NodeKind};
     use crate::node::{KindInner, KindLeaf, Node};
     use crate::page::PageId;
-    use crate::test_util::subslices;
     use bytemuck::Zeroable;
     use rand::prelude::SliceRandom;
     use rand::rngs::SmallRng;
@@ -610,13 +606,13 @@ mod tests {
     #[test]
     fn leaf() {
         let rng = &mut SmallRng::seed_from_u64(42);
-        let keys = crate::test_util::ascii_bin_generator(10..=50);
+        let keys = dev_utils::ascii_bin_generator(10..=50);
         let mut keys: Vec<Vec<u8>> = (0..50).map(|_| keys(rng)).collect();
         keys.sort();
         keys.dedup();
         let leaf = &mut BasicNode::<KindLeaf>::zeroed();
         let mut leaf = Guarded::<Exclusive, _>::wrap_mut(leaf);
-        for (_k, keys) in subslices(&keys, 5).enumerate() {
+        for (_k, keys) in dev_utils::subslices(&keys, 5).enumerate() {
             let kc = keys.len();
             leaf.init(keys[1].as_slice(), keys[kc - 2].as_slice(), [0; 3]);
             let insert_range = 2..kc - 2;
