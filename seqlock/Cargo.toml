@@ -6,3 +6,8 @@ edition = "2021"
 [dependencies]
 bytemuck = {version = "1.15.0",features = ["min_const_generics"]}
 seqlock_macros = {path = "../seqlock_macros"}
+
+[features]
+default=["impl_asm_read"]
+impl_asm_read=[]
+impl_atomic_bute=[]

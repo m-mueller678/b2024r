@@ -40,8 +40,12 @@ impl From<Never> for () {
 }
 
 #[path = "atomic_byte_impl.rs"]
+#[cfg(feature = "impl_atomic_byte")]
 mod access_impl;
 mod lock;
+#[cfg(feature = "impl_asm_read")]
+#[path = "asm_read.rs"]
+mod access_impl;
 
 #[allow(private_bounds)]
 pub trait SeqLockMode: SeqLockModeImpl + 'static {
@@ -165,9 +169,9 @@ where
 
 #[allow(clippy::missing_safety_doc)]
 unsafe trait SeqLockModeImpl {
-    type Pointer<'a, T: ?Sized>: Copy;
-    unsafe fn from_pointer<'a, T: ?Sized>(x: *mut T) -> Self::Pointer<'a, T>;
-    fn as_ptr<T: ?Sized>(x: &Self::Pointer<'_, T>) -> *mut T;
+    type Pointer<'a, T: ?Sized+'a>;
+    unsafe fn from_pointer<'a, T: 'a+?Sized>(x: *mut T) -> Self::Pointer<'a, T>;
+    fn as_ptr<'a,T: 'a+?Sized>(x: &Self::Pointer<'a, T>) -> *mut T;
     unsafe fn load<T: Pod>(p: &Self::Pointer<'_, T>) -> T;
     unsafe fn load_slice<T: Pod>(p: &Self::Pointer<'_, [T]>, dst: &mut [MaybeUninit<T>]);
     unsafe fn bit_cmp_slice<T: Pod>(p: &Self::Pointer<'_, [T]>, other: &[T]) -> Ordering;
@@ -264,10 +268,12 @@ impl<'a, M: SeqLockMode, T: SeqLockWrappable + Pod> Guarded<'a, M, [T]> {
     }
 
     pub fn load_slice_uninit(&self, dst: &mut [MaybeUninit<T>]) {
+        assert_eq!(self.len(), dst.len());
         unsafe { M::load_slice(&self.p, dst) }
     }
 
     pub fn load_slice<'dst>(&self, dst: &'dst mut [T]) {
+        assert_eq!(self.len(), dst.len());
         unsafe { M::load_slice(&self.p, transmute::<&'dst mut [T], &'dst mut [MaybeUninit<T>]>(dst)) }
     }
 
