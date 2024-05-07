@@ -99,7 +99,9 @@ impl SeqLockMode for Optimistic {
 }
 
 impl SeqLockModeExclusive for Exclusive {}
+
 impl SeqLockModePessimistic for Exclusive {}
+
 impl SeqLockModePessimistic for Shared {}
 
 pub trait SeqLockModePessimistic: SeqLockMode {}
@@ -424,3 +426,132 @@ pub struct Guarded<'a, M: SeqLockMode, T: ?Sized> {
 
 #[derive(Debug)]
 pub struct OptimisticLockError(());
+
+#[cfg(test)]
+mod tests {
+    use crate::{Exclusive, Guarded, Optimistic, SeqLockMode, SeqLockWrappable, Shared, Wrapper};
+    use bytemuck::Pod;
+    use rand::distributions::{Distribution, Standard};
+    use rand::rngs::SmallRng;
+    use rand::{Rng, SeedableRng};
+    use std::fmt::Debug;
+    use std::mem::size_of;
+
+    fn fill_gen<T>(dst: &mut [T], rng: &mut impl Rng)
+    where
+        Standard: Distribution<T>,
+    {
+        for d in dst {
+            *d = rng.gen();
+        }
+    }
+
+    fn accessor_exclusive<T: Pod + Debug + Eq + SeqLockWrappable>()
+    where
+        Standard: Distribution<T>,
+    {
+        let rng = &mut SmallRng::seed_from_u64(42);
+        let mut array = [T::zeroed(); 9];
+        for src in 0..=array.len() {
+            for dst in 0..=array.len() {
+                if src == dst {
+                    continue;
+                }
+                for len in 0..=array.len() - src.max(dst) {
+                    fill_gen(&mut array, rng);
+                    let mut reference = array;
+                    reference.copy_within(src..src + len, dst);
+                    if src < dst {
+                        Guarded::<Exclusive, [T]>::wrap_mut(&mut array[..])
+                            .get_mut()
+                            .move_within_to::<true>(src..src + len, dst);
+                    } else {
+                        Guarded::<Exclusive, [T]>::wrap_mut(&mut array[..])
+                            .get_mut()
+                            .move_within_to::<false>(src..src + len, dst);
+                    }
+                    assert_eq!(array, reference);
+                }
+            }
+        }
+    }
+
+    fn accessor_load<M: SeqLockMode, T: Pod + Debug + Eq + SeqLockWrappable>()
+    where
+        Standard: Distribution<T>,
+    {
+        let rng = &mut SmallRng::seed_from_u64(42);
+        for len in 0..=16 {
+            let mut src = [T::zeroed(); 16];
+            let mut dst = src;
+            let mut dst2 = src;
+            let mut dst3 = src;
+            fill_gen(&mut src, rng);
+            let mut src2 = src;
+            {
+                {
+                    let src2 = unsafe { Guarded::<M, [T]>::wrap_mut(&mut src2[..len]) };
+                    let mut dst2 = unsafe { Guarded::<Exclusive, [T]>::wrap_mut(&mut dst2[..len]) };
+                    src2.get().load_slice(&mut dst[..len]);
+                    src2.get().copy_to(&mut dst2);
+                    if len > 0 {
+                        assert_eq!(src[0], src2.index(0).get().load());
+                    }
+                }
+                let mut dst3 = unsafe { Guarded::<Exclusive, [T]>::wrap_mut(&mut dst3[..len]) };
+                dst3.store_slice(&src2[..len]);
+                if len > 0 {
+                    let mut dst4 = T::zeroed();
+                    Guarded::<Exclusive, T>::wrap_mut(&mut dst4).get_mut().store(src2[0]);
+                    assert_eq!(dst4, src2[0])
+                }
+            }
+            for dst in &[dst, dst2, dst3] {
+                assert_eq!(&src[..len], &dst[..len]);
+                assert!(dst[len..].iter().all(|x| *x == T::zeroed()));
+            }
+            assert_eq!(src2, src);
+        }
+    }
+
+    fn accessor_cmp<M: SeqLockMode, T: Pod + Debug + PartialEq + SeqLockWrappable>()
+    where
+        Standard: Distribution<T>,
+    {
+        if size_of::<T>() == 0 {
+            return;
+        }
+        let rng = &mut SmallRng::seed_from_u64(42);
+        for len in 0..=1000 {
+            let mut array = [T::zeroed(); 6];
+            fill_gen(&mut array, rng);
+            let (a, b) = array.split_at_mut(3);
+            let a = &mut a[..rng.gen_range(0..=3)];
+            let b = &mut b[..rng.gen_range(0..=3)];
+            let c1 = unsafe { Guarded::<M, [T]>::wrap_unchecked(a).get().mem_cmp(b) };
+            assert_eq!(c1, Ord::cmp(bytemuck::cast_slice::<T, u8>(a), bytemuck::cast_slice::<T, u8>(b)));
+        }
+    }
+
+    #[test]
+    fn test_accessors() {
+        macro_rules! type_iter {
+            ($N:ident;$($M:ty),*;$tt:tt) => {
+                $(
+                    {
+                        type $N=$M;
+                        $tt
+                    }
+                )*
+            };
+        }
+        type_iter!(T;(),u8,i8,i16,u32,u64,i64,usize,isize,[i16;20],[u8;16],[();3];{
+            accessor_exclusive::<T>();
+            type_iter!(M;Exclusive,Shared,Optimistic;{
+                    accessor_cmp::<M,T>();
+                    accessor_load::<M,T>()
+                }
+            );}
+        );
+    }
+}
