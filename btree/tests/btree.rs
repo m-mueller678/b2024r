@@ -1,5 +1,4 @@
 use btree::Tree;
-use criterion::{Criterion, Throughput};
 use dev_utils::mixed_test_keys;
 use rand::distributions::{Distribution, Uniform, WeightedIndex};
 use rand::rngs::SmallRng;

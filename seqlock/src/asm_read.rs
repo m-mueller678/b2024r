@@ -1,16 +1,15 @@
 #![allow(unused_variables)]
 
-use crate::{Exclusive, Guarded, Optimistic, SeqLockMode, SeqLockModeExclusiveImpl, SeqLockModeImpl, Shared};
+use crate::{Exclusive, Optimistic, SeqLockMode, SeqLockModeExclusiveImpl, SeqLockModeImpl, Shared};
 use bytemuck::Pod;
-use std::arch::asm;
 use std::borrow::Borrow;
 use std::cmp::Ordering;
-use std::mem::{align_of, size_of, size_of_val, transmute, MaybeUninit};
-use std::ops::{Deref, Range};
-use std::ptr::{slice_from_raw_parts, slice_from_raw_parts_mut};
+use std::mem::{align_of, size_of, transmute, MaybeUninit};
+use std::ops::Range;
+use std::ptr::slice_from_raw_parts_mut;
 use std::slice::from_raw_parts;
-use std::sync::atomic::Ordering::{Acquire, Relaxed};
-use std::sync::atomic::{compiler_fence, AtomicU64, AtomicU8};
+use std::sync::atomic::Ordering::Relaxed;
+use std::sync::atomic::{AtomicU64, AtomicU8};
 
 pub fn optimistic_release(lock: &AtomicU64, expected: u64) {
     if lock.load(Relaxed) != expected {

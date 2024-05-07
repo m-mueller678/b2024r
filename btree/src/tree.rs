@@ -4,7 +4,7 @@ use crate::node::{node_tag, KindInner, Node};
 use crate::page::{PageId, PageTail, PAGE_TAIL_SIZE};
 use crate::{MAX_KEY_SIZE, W};
 use bytemuck::{Pod, Zeroable};
-use seqlock::{Exclusive, Guard, Guarded, Optimistic, SeqlockAccessors, Shared};
+use seqlock::{Exclusive, Guard, Guarded, Optimistic, SeqlockAccessors};
 use std::cell::Cell;
 use std::panic::RefUnwindSafe;
 
