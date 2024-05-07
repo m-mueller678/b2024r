@@ -186,7 +186,7 @@ unsafe fn asm_memcpy<const REVERSE: bool, T>(src: *const u8, dst: *mut u8, count
                     $clear_df,
                 in("si") src.add($offset),
                 in("di") dst.add($offset),
-                in("cx") count * (size_of::<T>()),
+                in("cx") count * (size_of::<T>()/word_size),
                 options(nostack,preserves_flags),
             );
         };
