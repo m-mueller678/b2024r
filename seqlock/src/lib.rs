@@ -522,14 +522,18 @@ mod tests {
             return;
         }
         let rng = &mut SmallRng::seed_from_u64(42);
-        for len in 0..=1000 {
-            let mut array = [T::zeroed(); 6];
-            fill_gen(&mut array, rng);
-            let (a, b) = array.split_at_mut(3);
-            let a = &mut a[..rng.gen_range(0..=3)];
-            let b = &mut b[..rng.gen_range(0..=3)];
-            let c1 = unsafe { Guarded::<M, [T]>::wrap_unchecked(a).get().mem_cmp(b) };
-            assert_eq!(c1, Ord::cmp(bytemuck::cast_slice::<T, u8>(a), bytemuck::cast_slice::<T, u8>(b)));
+        for i in 0..1000 {
+            for a_len in 0..=3 {
+                for b_len in 0..=3 {
+                    let mut array = [T::zeroed(); 6];
+                    fill_gen(&mut array, rng);
+                    let (a, b) = array.split_at_mut(3);
+                    let a = &mut a[..a_len];
+                    let b = &mut b[..b_len];
+                    let c1 = unsafe { Guarded::<M, [T]>::wrap_unchecked(a).get().mem_cmp(b) };
+                    assert_eq!(c1, Ord::cmp(bytemuck::cast_slice::<T, u8>(a), bytemuck::cast_slice::<T, u8>(b)));
+                }
+            }
         }
     }
 
@@ -545,7 +549,7 @@ mod tests {
                 )*
             };
         }
-        type_iter!(T;(),u8,i8,i16,u32,u64,i64,usize,isize,[i16;20],[u8;16],[();3];{
+        type_iter!(T;(),u8,i8,u16,i32,u64,usize,isize,[u16;2],[i16;20],[u8;16],[();3];{
             accessor_exclusive::<T>();
             type_iter!(M;Exclusive,Shared,Optimistic;{
                     accessor_cmp::<M,T>();

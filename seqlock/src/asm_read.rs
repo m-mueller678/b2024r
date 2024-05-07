@@ -133,7 +133,7 @@ unsafe impl SeqLockModeImpl for Optimistic {
     }
 
     unsafe fn bit_cmp_slice<T: Pod>(p: &Self::Pointer<'_, [T]>, other: &[T]) -> Ordering {
-        let cmp_len = p.len().min(other.len());
+        let cmp_len = p.len().min(other.len()) * size_of::<T>();
         let result: i8;
         unsafe {
             core::arch::asm!(
