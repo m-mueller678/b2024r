@@ -35,12 +35,12 @@ impl CommonImpl for Optimistic {}
 impl CommonImpl for Shared {}
 
 unsafe impl<M: CommonImpl> SeqLockModeImpl for M {
-    type Pointer<'a, T: ?Sized> = *mut T;
-    unsafe fn from_pointer<'a, T: ?Sized>(x: *mut T) -> Self::Pointer<'a, T> {
+    type Pointer<'a, T: ?Sized + 'a> = *mut T;
+    unsafe fn from_pointer<'a, T: ?Sized + 'a>(x: *mut T) -> Self::Pointer<'a, T> {
         x
     }
 
-    fn as_ptr<T: ?Sized>(x: &Self::Pointer<'_, T>) -> *mut T {
+    fn as_ptr<'a, T: ?Sized + 'a>(x: &Self::Pointer<'a, T>) -> *mut T {
         *x
     }
 
@@ -77,15 +77,15 @@ unsafe impl<M: CommonImpl> SeqLockModeImpl for M {
 }
 
 unsafe impl SeqLockModeExclusiveImpl for Exclusive {
-    unsafe fn store<T>(p: &mut Self::Pointer<'_, T>, x: T) {
+    unsafe fn store<T: Pod>(p: &mut Self::Pointer<'_, T>, x: T) {
         atomic_memcpy::<false>(&x as *const T as *const u8, *p as *mut u8, size_of::<T>())
     }
 
-    unsafe fn store_slice<T>(p: &mut Self::Pointer<'_, [T]>, x: &[T]) {
+    unsafe fn store_slice<'a, T: Pod>(p: &mut Self::Pointer<'a, [T]>, x: &[T]) {
         atomic_memcpy::<false>(x.as_ptr() as *const u8, *p as *mut T as *mut u8, size_of_val(x));
     }
 
-    unsafe fn move_within_slice_to<T, const MOVE_UP: bool>(
+    unsafe fn move_within_slice_to<T: Pod, const MOVE_UP: bool>(
         p: &mut Self::Pointer<'_, [T]>,
         src_range: Range<usize>,
         dst: usize,
