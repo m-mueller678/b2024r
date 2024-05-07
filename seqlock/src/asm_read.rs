@@ -165,9 +165,6 @@ unsafe impl SeqLockModeImpl for Optimistic {
 }
 
 unsafe fn asm_memcpy<const REVERSE: bool, T>(src: *const u8, dst: *mut u8, count: usize) {
-    if size_of::<T>() == 0 || count == 0 {
-        return;
-    }
     let align = align_of::<T>();
     let word_size = if align % 8 == 0 {
         8
@@ -184,8 +181,8 @@ unsafe fn asm_memcpy<const REVERSE: bool, T>(src: *const u8, dst: *mut u8, count
                     $set_df,
                 std::concat!("rep ",$inst),
                     $clear_df,
-                in("si") src.add($offset),
-                in("di") dst.add($offset),
+                in("si") (src as isize) + $offset,
+                in("di") (dst as isize) + $offset,
                 in("cx") count * (size_of::<T>()/word_size),
                 options(nostack,preserves_flags),
             );
@@ -193,7 +190,7 @@ unsafe fn asm_memcpy<const REVERSE: bool, T>(src: *const u8, dst: *mut u8, count
         ($size:expr,$inst:literal)=>{
             if $size == word_size{
                 if REVERSE{
-                    memcpy_case!($size,$inst,"std","cld",count*size_of::<T>()-word_size);
+                    memcpy_case!($size,$inst,"std","cld",count as isize *size_of::<T>() as isize-word_size as isize);
                 }else{
                     memcpy_case!($size,$inst,"","",0);
                 }
