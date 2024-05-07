@@ -40,9 +40,9 @@ impl From<Never> for () {
 }
 
 #[path = "atomic_byte_impl.rs"]
-#[cfg(feature = "impl_atomic_byte")]
+#[cfg(any(feature = "impl_atomic_byte", miri))]
 mod access_impl;
-#[cfg(feature = "impl_asm_read")]
+#[cfg(all(feature = "impl_asm_read", not(miri)))]
 #[path = "asm_read.rs"]
 mod access_impl;
 mod lock;
