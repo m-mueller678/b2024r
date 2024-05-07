@@ -18,9 +18,6 @@ criterion = "0.5.1"
 dev_utils = {path = "../dev_utils"}
 rip_shuffle = "0.2.0"
 
-[profile.bench]
-debug-assertions = true
-
 [[bench]]
 name="my_benchmark"
 harness = false

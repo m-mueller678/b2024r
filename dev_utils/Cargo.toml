@@ -6,4 +6,4 @@ edition = "2021"
 [dependencies]
 rand = {version = "0.8.5",features = ["small_rng"]}
 rayon = "1.10.0"
-random_word = "0.4.3"
+random_word = { version = "0.4.3" ,features = ["en"]}

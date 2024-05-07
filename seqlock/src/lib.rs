@@ -42,10 +42,10 @@ impl From<Never> for () {
 #[path = "atomic_byte_impl.rs"]
 #[cfg(feature = "impl_atomic_byte")]
 mod access_impl;
-mod lock;
 #[cfg(feature = "impl_asm_read")]
 #[path = "asm_read.rs"]
 mod access_impl;
+mod lock;
 
 #[allow(private_bounds)]
 pub trait SeqLockMode: SeqLockModeImpl + 'static {
@@ -169,9 +169,9 @@ where
 
 #[allow(clippy::missing_safety_doc)]
 unsafe trait SeqLockModeImpl {
-    type Pointer<'a, T: ?Sized+'a>;
-    unsafe fn from_pointer<'a, T: 'a+?Sized>(x: *mut T) -> Self::Pointer<'a, T>;
-    fn as_ptr<'a,T: 'a+?Sized>(x: &Self::Pointer<'a, T>) -> *mut T;
+    type Pointer<'a, T: ?Sized + 'a>;
+    unsafe fn from_pointer<'a, T: 'a + ?Sized>(x: *mut T) -> Self::Pointer<'a, T>;
+    fn as_ptr<'a, T: 'a + ?Sized>(x: &Self::Pointer<'a, T>) -> *mut T;
     unsafe fn load<T: Pod>(p: &Self::Pointer<'_, T>) -> T;
     unsafe fn load_slice<T: Pod>(p: &Self::Pointer<'_, [T]>, dst: &mut [MaybeUninit<T>]);
     unsafe fn bit_cmp_slice<T: Pod>(p: &Self::Pointer<'_, [T]>, other: &[T]) -> Ordering;
@@ -408,9 +408,9 @@ impl<'a, M: SeqLockMode, T: SeqLockWrappable + Pod, const N: usize> crate::Guard
 
 #[allow(clippy::missing_safety_doc)]
 unsafe trait SeqLockModeExclusiveImpl: SeqLockModeImpl {
-    unsafe fn store<T>(p: &mut Self::Pointer<'_, T>, x: T);
-    unsafe fn store_slice<T>(p: &mut Self::Pointer<'_, [T]>, x: &[T]);
-    unsafe fn move_within_slice_to<T, const MOVE_UP: bool>(
+    unsafe fn store<T: Pod>(p: &mut Self::Pointer<'_, T>, x: T);
+    unsafe fn store_slice<T: Pod>(p: &mut Self::Pointer<'_, [T]>, x: &[T]);
+    unsafe fn move_within_slice_to<T: Pod, const MOVE_UP: bool>(
         p: &mut Self::Pointer<'_, [T]>,
         src_range: Range<usize>,
         dst: usize,
