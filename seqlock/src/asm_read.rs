@@ -7,9 +7,8 @@ use std::cmp::Ordering;
 use std::mem::{align_of, size_of, transmute, MaybeUninit};
 use std::ops::Range;
 use std::ptr::slice_from_raw_parts_mut;
-use std::slice::from_raw_parts;
+use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering::Relaxed;
-use std::sync::atomic::{AtomicU64, AtomicU8};
 
 pub fn optimistic_release(lock: &AtomicU64, expected: u64) {
     if lock.load(Relaxed) != expected {
@@ -21,20 +20,6 @@ pub trait CommonImpl {
     type Pointer<'a, T: ?Sized + 'a>: Borrow<T> + Sized + 'a;
     unsafe fn from_pointer<'a, T: ?Sized>(x: *mut T) -> Self::Pointer<'a, T>;
     fn as_pointer<T: ?Sized>(x: &Self::Pointer<'_, T>) -> *mut T;
-}
-
-unsafe fn atomic_memcpy<const REVERSE: bool>(src: *const u8, dst: *mut u8, len: usize) {
-    let src = from_raw_parts(src as *const AtomicU8, len);
-    let dst = from_raw_parts(dst as *const AtomicU8, len);
-    if REVERSE {
-        for i in (0..len).rev() {
-            dst[i].store(src[i].load(Relaxed), Relaxed)
-        }
-    } else {
-        for i in 0..len {
-            dst[i].store(src[i].load(Relaxed), Relaxed)
-        }
-    }
 }
 
 unsafe impl<C: CommonImpl> SeqLockModeImpl for C {
