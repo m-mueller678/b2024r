@@ -29,6 +29,20 @@ unsafe fn atomic_memcpy<const REVERSE: bool>(src: *const u8, dst: *mut u8, len: 
     }
 }
 
+unsafe fn half_atomic_memcpy<const REVERSE: bool>(src: *const u8, dst: *mut u8, len: usize) {
+    let src = from_raw_parts(src, len);
+    let dst = from_raw_parts(dst as *const AtomicU8, len);
+    if REVERSE {
+        for i in (0..len).rev() {
+            dst[i].store(src[i], Relaxed)
+        }
+    } else {
+        for i in 0..len {
+            dst[i].store(src[i], Relaxed)
+        }
+    }
+}
+
 trait CommonImpl {}
 impl CommonImpl for Exclusive {}
 impl CommonImpl for Optimistic {}
@@ -78,11 +92,11 @@ unsafe impl<M: CommonImpl> SeqLockModeImpl for M {
 
 unsafe impl SeqLockModeExclusiveImpl for Exclusive {
     unsafe fn store<T: Pod>(p: &mut Self::Pointer<'_, T>, x: T) {
-        atomic_memcpy::<false>(&x as *const T as *const u8, *p as *mut u8, size_of::<T>())
+        half_atomic_memcpy::<false>(&x as *const T as *const u8, *p as *mut u8, size_of::<T>())
     }
 
     unsafe fn store_slice<'a, T: Pod>(p: &mut Self::Pointer<'a, [T]>, x: &[T]) {
-        atomic_memcpy::<false>(x.as_ptr() as *const u8, *p as *mut T as *mut u8, size_of_val(x));
+        half_atomic_memcpy::<false>(x.as_ptr() as *const u8, *p as *mut T as *mut u8, size_of_val(x));
     }
 
     unsafe fn move_within_slice_to<T: Pod, const MOVE_UP: bool>(

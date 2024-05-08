@@ -451,7 +451,7 @@ mod tests {
         Standard: Distribution<T>,
     {
         let rng = &mut SmallRng::seed_from_u64(42);
-        let mut array = [T::zeroed(); 9];
+        let mut array = [T::zeroed(); if cfg!(miri) { 5 } else { 9 }];
         for src in 0..=array.len() {
             for dst in 0..=array.len() {
                 if src == dst {
@@ -522,7 +522,7 @@ mod tests {
             return;
         }
         let rng = &mut SmallRng::seed_from_u64(42);
-        for i in 0..1000 {
+        for i in 0..if cfg!(miri) { 10 } else { 1000 } {
             for a_len in 0..=3 {
                 for b_len in 0..=3 {
                     let mut array = [T::zeroed(); 6];
@@ -552,8 +552,8 @@ mod tests {
         type_iter!(T;(),u8,i8,u16,i32,u64,usize,isize,[u16;2],[i16;20],[u8;16],[();3];{
             accessor_exclusive::<T>();
             type_iter!(M;Exclusive,Shared,Optimistic;{
-                    accessor_cmp::<M,T>();
-                    accessor_load::<M,T>()
+                accessor_cmp::<M,T>();
+                accessor_load::<M,T>();
                 }
             );}
         );
