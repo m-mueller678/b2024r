@@ -1,8 +1,11 @@
+use perf_event::events::Event;
+use perf_event::{Builder, Counter};
 use rand::distributions::{Distribution, Uniform};
 use rand::rngs::SmallRng;
 use rand::{Rng, SeedableRng};
 use random_word::Lang;
 use rayon::prelude::*;
+use serde_json::{Map, Value};
 use std::collections::HashSet;
 use std::hash::{DefaultHasher, Hash, Hasher};
 use std::ops::RangeInclusive;
@@ -117,4 +120,52 @@ pub fn subslices<T>(x: &[T], min_len: usize) -> impl Iterator<Item = &[T]> {
     (0..x.len() - min_len)
         .flat_map(move |start| (start + min_len..=x.len()).map(move |end| start..end))
         .map(|range| &x[range])
+}
+
+pub use perf_event;
+
+pub struct PerfBlock {
+    counters: Vec<(String, Counter)>,
+}
+
+impl PerfBlock {
+    pub fn from_events<'a>(iter: impl IntoIterator<Item = (&'a str, Event)>) -> Self {
+        let mut ret = PerfBlock {
+            counters: iter
+                .into_iter()
+                .map(|(name, evt)| (name.to_string(), Builder::new().kind(evt).build().unwrap()))
+                .collect(),
+        };
+        ret.enable();
+        ret
+    }
+
+    pub fn enable(&mut self) {
+        for x in &mut self.counters {
+            x.1.enable().unwrap();
+        }
+    }
+
+    pub fn reset(&mut self) {
+        for x in &mut self.counters {
+            x.1.reset().unwrap();
+        }
+    }
+
+    pub fn disable(&mut self) {
+        for x in &mut self.counters {
+            x.1.disable().unwrap();
+        }
+    }
+
+    pub fn read_to_json(&mut self, scale: f64) -> Map<String, Value> {
+        self.disable();
+        let counts = self.counters.iter_mut().map(|(n, e)| {
+            let x = e.read_count_and_time().unwrap();
+            let count = x.count as f64 * x.time_enabled as f64 / x.time_running as f64 / scale;
+            dbg!(count);
+            (n.as_str(), count)
+        });
+        std::iter::once(("scale", scale)).chain(counts).map(|(n, x)| (n.to_string(), Value::from(x))).collect()
+    }
 }

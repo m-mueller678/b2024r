@@ -7,3 +7,5 @@ edition = "2021"
 rand = {version = "0.8.5",features = ["small_rng"]}
 rayon = "1.10.0"
 random_word = { version = "0.4.3" ,features = ["en"]}
+perf-event = {version = "0.4.8"}
+serde_json = {version = "1.0.117"}

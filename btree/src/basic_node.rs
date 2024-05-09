@@ -52,7 +52,7 @@ unsafe impl<V: NodeKind> Pod for BasicNode<V> {}
 
 unsafe impl<V: NodeKind> Node for BasicNode<V> {
     fn validate(this: W<Guarded<'_, Shared, Self>>) {
-        if !cfg!(debug_assertions) {
+        if !cfg!(feature = "validate_node") {
             return;
         }
         let record_size_sum: usize = this.s().slots().iter().map(|x| this.stored_record_size(x.load() as usize)).sum();
@@ -551,6 +551,9 @@ impl<'a> W<Guarded<'a, Exclusive, BasicNode<KindInner>>> {
         mut ll: usize,
         mut hl: usize,
     ) {
+        if !cfg!(feature = "validate_tree") {
+            return;
+        }
         assert!(
             self.s().lower_fence().mem_cmp(&lb[..ll]).is_eq(),
             "wrong lf {:?}\n{:?}",
