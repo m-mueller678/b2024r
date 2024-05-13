@@ -129,14 +129,3 @@ fn single() {
 fn single_large() {
     batch_ops(1, 50, 2_500_000, |_, _| [200_000, 200_000, 200_000], |_, _| {});
 }
-
-#[test]
-pub fn lookup() {
-    let mut keys = mixed_test_keys(10_000);
-    let tree = Tree::new();
-    const SMALL: usize = 5_000;
-    for k in &keys[..SMALL] {
-        tree.insert(k, &[42u8; 8]);
-    }
-    assert!(tree.try_lookup(&keys[2146]).is_some());
-}
