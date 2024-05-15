@@ -9,6 +9,8 @@ use serde_json::{Map, Value};
 use std::collections::HashSet;
 use std::hash::{DefaultHasher, Hash, Hasher};
 use std::ops::RangeInclusive;
+use std::sync::Once;
+use std::time::{Duration, Instant};
 
 pub fn mixed_test_keys(count: usize) -> Vec<Vec<u8>> {
     const KEY_KINDS: usize = 5;
@@ -123,18 +125,34 @@ pub fn subslices<T>(x: &[T], min_len: usize) -> impl Iterator<Item = &[T]> {
 }
 
 pub use perf_event;
+use pfm::{PerfEvent, Perfmon};
 
-pub struct PerfBlock {
-    counters: Vec<(String, Counter)>,
+pub struct PerfCounters {
+    counters: Vec<(String, PerfEvent)>,
+    time: Result<Duration, Instant>,
 }
 
-impl PerfBlock {
-    pub fn from_events<'a>(iter: impl IntoIterator<Item = (&'a str, Event)>) -> Self {
-        let mut ret = PerfBlock {
-            counters: iter
+impl PerfCounters {
+    pub fn new() -> Self {
+        Self::with_counters(["instructions", "cycles", "branch-misses"])
+    }
+    pub fn with_counters<'a>(counters: impl IntoIterator<Item = &'a str>) -> Self {
+        static INIT_PFM: Once = Once::new();
+        INIT_PFM.call_once(|| {
+            // initializing pfm multiple times is apparently safe, but does nothing.
+            // See `man pfm_initialize`
+            Perfmon::default().initialize().unwrap();
+        });
+        let mut ret = PerfCounters {
+            counters: counters
                 .into_iter()
-                .map(|(name, evt)| (name.to_string(), Builder::new().kind(evt).build().unwrap()))
+                .map(|name| {
+                    let mut event = PerfEvent::new(name, false).unwrap();
+                    event.open(0, -1).unwrap();
+                    (name.to_string(), event)
+                })
                 .collect(),
+            time: Ok(Duration::ZERO),
         };
         ret.enable();
         ret
@@ -144,28 +162,37 @@ impl PerfBlock {
         for x in &mut self.counters {
             x.1.enable().unwrap();
         }
+        if let Ok(duration) = self.time {
+            self.time = Err(Instant::now() - duration)
+        }
     }
-
+    pub fn disable(&mut self) {
+        for x in &mut self.counters {
+            x.1.disable().unwrap();
+        }
+        if let Err(start) = self.time {
+            self.time = Ok(Instant::now() - start)
+        }
+    }
     pub fn reset(&mut self) {
         for x in &mut self.counters {
             x.1.reset().unwrap();
         }
     }
 
-    pub fn disable(&mut self) {
-        for x in &mut self.counters {
-            x.1.disable().unwrap();
-        }
-    }
-
     pub fn read_to_json(&mut self, scale: f64) -> Map<String, Value> {
         self.disable();
-        let counts = self.counters.iter_mut().map(|(n, e)| {
-            let x = e.read_count_and_time().unwrap();
-            let count = x.count as f64 * x.time_enabled as f64 / x.time_running as f64 / scale;
-            dbg!(count);
-            (n.as_str(), count)
+        let mut multiplexed = false;
+        let perf_counters = self.counters.iter().map(|(n, c)| {
+            let v = c.read().unwrap();
+            multiplexed |= v.time_enabled != v.time_running;
+            (n.as_str(), v.value as f64 * v.time_enabled as f64 / v.time_running as f64)
         });
-        std::iter::once(("scale", scale)).chain(counts).map(|(n, x)| (n.to_string(), Value::from(x))).collect()
+        let time = std::iter::once(("time", self.time.unwrap().as_secs_f64()));
+        let mut out: Map<_, _> =
+            perf_counters.chain(time).map(|(n, x)| (n.to_string(), Value::from(x / scale))).collect();
+        out.insert("scale".to_string(), Value::from(scale));
+        out.insert("multiplexed".to_string(), Value::from(multiplexed));
+        out
     }
 }
