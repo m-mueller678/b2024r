@@ -175,9 +175,11 @@ impl PerfCounters {
         }
     }
     pub fn reset(&mut self) {
+        self.disable();
         for x in &mut self.counters {
             x.1.reset().unwrap();
         }
+        self.time = Ok(Duration::ZERO)
     }
 
     pub fn read_to_json(&mut self, scale: f64) -> Map<String, Value> {
