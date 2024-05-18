@@ -64,7 +64,7 @@ impl Tree {
     }
 
     pub fn insert(&self, k: &[u8], val: &[u8]) -> Option<()> {
-        let x = seqlock::unwind::repeat(|| || self.try_insert(k, val));
+        let x = seqlock::unwind::repeat(|| self.try_insert(k, val));
         self.validate_fences_exclusive();
         x
     }
@@ -158,7 +158,11 @@ impl Tree {
     }
 
     pub fn lookup_to_vec(&self, k: &[u8]) -> Option<Vec<u8>> {
-        seqlock::unwind::repeat(|| || self.try_lookup(k).map(|v| v.load_slice_to_vec()))
+        seqlock::unwind::repeat(|| self.try_lookup(k).map(|v| v.load_slice_to_vec()))
+    }
+
+    pub fn lookup_inspect<R>(&self, k: &[u8], mut f: impl FnMut(Option<Guard<'static, Optimistic, [u8]>>) -> R) -> R {
+        seqlock::unwind::repeat(move || f(self.try_lookup(k)))
     }
 
     pub fn try_lookup(&self, k: &[u8]) -> Option<Guard<'static, Optimistic, [u8]>> {

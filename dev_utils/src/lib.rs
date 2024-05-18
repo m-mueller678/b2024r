@@ -1,3 +1,4 @@
+use minstant::Instant;
 use perf_event::events::Event;
 use perf_event::{Builder, Counter};
 use rand::distributions::{Distribution, Uniform};
@@ -9,8 +10,11 @@ use serde_json::{Map, Value};
 use std::collections::HashSet;
 use std::hash::{DefaultHasher, Hash, Hasher};
 use std::ops::RangeInclusive;
-use std::sync::Once;
-use std::time::{Duration, Instant};
+use std::sync::atomic::AtomicBool;
+use std::sync::{Barrier, Once};
+use std::thread::JoinHandle;
+use std::time::Duration;
+pub use {serde_json, zipf};
 
 pub fn mixed_test_keys(count: usize) -> Vec<Vec<u8>> {
     const KEY_KINDS: usize = 5;
@@ -154,7 +158,6 @@ impl PerfCounters {
                 .collect(),
             time: Ok(Duration::ZERO),
         };
-        ret.enable();
         ret
     }
 
@@ -162,20 +165,18 @@ impl PerfCounters {
         for x in &mut self.counters {
             x.1.enable().unwrap();
         }
-        if let Ok(duration) = self.time {
-            self.time = Err(Instant::now() - duration)
-        }
+        let Ok(duration) = self.time else { panic!("perf already enabled") };
+        self.time = Err(Instant::now() - duration);
     }
     pub fn disable(&mut self) {
         for x in &mut self.counters {
             x.1.disable().unwrap();
         }
-        if let Err(start) = self.time {
-            self.time = Ok(Instant::now() - start)
-        }
+        let Err(start) = self.time else { panic!("perf already disabled") };
+        self.time = Ok(Instant::now() - start);
     }
     pub fn reset(&mut self) {
-        self.disable();
+        assert!(self.time.is_ok(), "perf reset while enabled");
         for x in &mut self.counters {
             x.1.reset().unwrap();
         }
@@ -183,7 +184,7 @@ impl PerfCounters {
     }
 
     pub fn read_to_json(&mut self, scale: f64) -> Map<String, Value> {
-        self.disable();
+        assert!(self.time.is_ok(), "perf read while enabled");
         let mut multiplexed = false;
         let perf_counters = self.counters.iter().map(|(n, c)| {
             let v = c.read().unwrap();
