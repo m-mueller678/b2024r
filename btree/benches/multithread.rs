@@ -7,13 +7,12 @@ use dev_utils::{mixed_test_keys, PerfCounters};
 use rand::prelude::Distribution;
 use rand::rngs::SmallRng;
 use rand::SeedableRng;
-use rayon::prelude::IntoParallelIterator;
 use rip_shuffle::RipShuffleParallel;
 use std::fmt::Display;
 use std::ops::Range;
 use std::str::FromStr;
 use std::sync::atomic::Ordering::Relaxed;
-use std::sync::atomic::{AtomicBool, AtomicU8, AtomicUsize};
+use std::sync::atomic::{AtomicBool, AtomicUsize};
 use std::sync::Barrier;
 use std::time::{Duration, Instant};
 
@@ -43,7 +42,7 @@ where
 {
     if let Ok(val) = std::env::var(name) {
         match T::from_str(&val) {
-            Ok(x) => return x,
+            Ok(x) => x,
             Err(e) => panic!("failed to parse {name}: {e}"),
         }
     } else {
@@ -63,7 +62,7 @@ fn get_args() -> Args {
         zipf: get_arg("ZIPF", 1.0),
         threads: get_arg("THREADS", 1),
         counters: if let Ok(c) = std::env::var("PERF") {
-            Some(c.split(",").map(|x| x.to_string()).collect())
+            Some(c.split(',').map(|x| x.to_string()).collect())
         } else {
             None
         },
@@ -118,7 +117,7 @@ fn main() {
     } else {
         PerfCounters::new()
     };
-    let mut tree = &Tree::new();
+    let tree = &Tree::new();
     let mut keys = args.keys();
     let pre_insert_count = (keys.len() as f64 * args.pre_insert_ratio) as usize;
     keys.par_shuffle(&mut SmallRng::seed_from_u64(0x42));
@@ -146,7 +145,7 @@ fn main() {
         let mut rng = SmallRng::seed_from_u64(987 + tid as u64);
         move |keep_working| {
             let rng = &mut rng;
-            while (keep_working.load(Relaxed)) {
+            while keep_working.load(Relaxed) {
                 let index = zipf.sample(rng);
                 let mut len = None;
                 tree.lookup_inspect(&keys[index], |val| {

@@ -1,6 +1,4 @@
 use minstant::Instant;
-use perf_event::events::Event;
-use perf_event::{Builder, Counter};
 use rand::distributions::{Distribution, Uniform};
 use rand::rngs::SmallRng;
 use rand::{Rng, SeedableRng};
@@ -10,9 +8,7 @@ use serde_json::{Map, Value};
 use std::collections::HashSet;
 use std::hash::{DefaultHasher, Hash, Hasher};
 use std::ops::RangeInclusive;
-use std::sync::atomic::AtomicBool;
-use std::sync::{Barrier, Once};
-use std::thread::JoinHandle;
+use std::sync::Once;
 use std::time::Duration;
 pub use {serde_json, zipf};
 
@@ -134,6 +130,12 @@ use pfm::{PerfEvent, Perfmon};
 pub struct PerfCounters {
     counters: Vec<(String, PerfEvent)>,
     time: Result<Duration, Instant>,
+}
+
+impl Default for PerfCounters {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl PerfCounters {

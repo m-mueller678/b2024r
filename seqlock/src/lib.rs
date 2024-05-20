@@ -490,15 +490,15 @@ mod tests {
             let mut src2 = src;
             {
                 {
-                    let src2 = unsafe { Guarded::<M, [T]>::wrap_mut(&mut src2[..len]) };
-                    let mut dst2 = unsafe { Guarded::<Exclusive, [T]>::wrap_mut(&mut dst2[..len]) };
+                    let src2 = Guarded::<M, [T]>::wrap_mut(&mut src2[..len]);
+                    let mut dst2 = Guarded::<Exclusive, [T]>::wrap_mut(&mut dst2[..len]);
                     src2.get().load_slice(&mut dst[..len]);
                     src2.get().copy_to(&mut dst2);
                     if len > 0 {
                         assert_eq!(src[0], src2.index(0).get().load());
                     }
                 }
-                let mut dst3 = unsafe { Guarded::<Exclusive, [T]>::wrap_mut(&mut dst3[..len]) };
+                let mut dst3 = Guarded::<Exclusive, [T]>::wrap_mut(&mut dst3[..len]);
                 dst3.store_slice(&src2[..len]);
                 if len > 0 {
                     let mut dst4 = T::zeroed();
@@ -522,7 +522,7 @@ mod tests {
             return;
         }
         let rng = &mut SmallRng::seed_from_u64(42);
-        for i in 0..if cfg!(miri) { 10 } else { 1000 } {
+        for _i in 0..if cfg!(miri) { 10 } else { 1000 } {
             for a_len in 0..=3 {
                 for b_len in 0..=3 {
                     let mut array = [T::zeroed(); 6];

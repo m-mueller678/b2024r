@@ -55,6 +55,7 @@ struct MyStruct {
     b: i64,
 }
 
+#[allow(dead_code)]
 #[derive(SeqlockAccessors)]
 #[seq_lock_wrapper(MyWrapper)]
 struct MyStructGeneric<T: Deref + SeqLockWrappable, U>

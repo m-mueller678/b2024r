@@ -1,10 +1,8 @@
 use btree::Tree;
 use dev_utils::mixed_test_keys;
-use dev_utils::perf_event::events::{Event, Hardware};
 use rand::distributions::{Distribution, Uniform, WeightedIndex};
 use rand::rngs::SmallRng;
 use rand::SeedableRng;
-use rip_shuffle::RipShuffleParallel;
 use std::sync::atomic::AtomicU32;
 use std::sync::atomic::Ordering::Relaxed;
 use std::sync::Barrier;

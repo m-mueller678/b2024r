@@ -109,7 +109,7 @@ unsafe impl SeqLockModeImpl for Optimistic {
             load_case!(8, reg, ":r", u64);
         }
         let mut dst = [MaybeUninit::<T>::uninit()];
-        Self::load_slice(&mut slice_from_raw_parts_mut(*p, 1), &mut dst);
+        Self::load_slice(&slice_from_raw_parts_mut(*p, 1), &mut dst);
         dst[0].assume_init()
     }
 

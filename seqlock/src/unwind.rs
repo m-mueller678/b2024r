@@ -17,13 +17,12 @@ pub fn repeat<R>(mut f: impl FnMut() -> R) -> R {
 pub fn catch<R>(f: impl FnOnce() -> R) -> Result<R, OptimisticError> {
     struct IgnoreUnwindSafe<X>(X);
     impl<X> UnwindSafe for IgnoreUnwindSafe<X> {}
-
     let f2 = IgnoreUnwindSafe(f);
-
-    match catch_unwind(move || {
+    let result = catch_unwind(move || {
         let f2 = f2;
         f2.0()
-    }) {
+    });
+    match result {
         Ok(r) => Ok(r),
         Err(e) => match e.downcast::<OptimisticError>() {
             Ok(x) => Err(*x),
