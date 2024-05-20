@@ -1,6 +1,6 @@
 use btree::Tree;
+use dev_utils::mixed_test_keys;
 use dev_utils::perf_event::events::{Event, Hardware};
-use dev_utils::{mixed_test_keys, PerfBlock};
 use rand::distributions::{Distribution, Uniform, WeightedIndex};
 use rand::rngs::SmallRng;
 use rand::SeedableRng;
@@ -56,13 +56,15 @@ fn batch_ops(
                             let is_removed = (state >> (29 + 2) & 1) != 0;
                             match op {
                                 0 => {
-                                    if let Some(v) = tree.lookup_to_vec(&keys[index]) {
-                                        assert!(
-                                            v == old_batch.to_ne_bytes() || v == batch.to_ne_bytes() && is_inserted
-                                        );
-                                    } else {
-                                        assert!(old_batch == 0 || is_removed);
-                                    }
+                                    let is_ok = tree.lookup_inspect(&keys[index], |v| {
+                                        if let Some(v) = v {
+                                            v.mem_cmp(&old_batch.to_ne_bytes()).is_eq()
+                                                || v.mem_cmp(&batch.to_ne_bytes()).is_eq() && is_inserted
+                                        } else {
+                                            old_batch == 0 || is_removed
+                                        }
+                                    });
+                                    assert!(is_ok);
                                 }
                                 1 => {
                                     if tree.insert(&keys[index], &batch.to_ne_bytes()).is_none() {
