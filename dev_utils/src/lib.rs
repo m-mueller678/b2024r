@@ -2,7 +2,6 @@ use minstant::Instant;
 use rand::distributions::{Distribution, Uniform};
 use rand::rngs::SmallRng;
 use rand::{Rng, SeedableRng};
-use random_word::Lang;
 use rayon::prelude::*;
 use serde_json::{Map, Value};
 use std::collections::HashSet;
@@ -92,9 +91,9 @@ fn hash(h: impl Hash) -> u64 {
 
 pub fn path_generator<R: Rng>(min_len_range: RangeInclusive<usize>) -> impl Fn(&mut R) -> Vec<u8> {
     let words = if cfg!(miri) {
-        &["ab", "anti", "antibody", "antics", "the", "there", "then"]
+        vec!["ab", "anti", "antibody", "antics", "the", "there", "then"]
     } else {
-        random_word::all(Lang::En)
+        include_str!("word1000.txt").split('\n').collect()
     };
     let word_dist = Uniform::new(0, words.len());
     let len_dist = Uniform::new(min_len_range.start(), min_len_range.end());

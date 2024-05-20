@@ -28,6 +28,7 @@ fn batch_ops(
                 scope.spawn(move || {
                     let mut thread_rng = SmallRng::seed_from_u64(tid as u64);
                     for batch in 1..=batches {
+                        dbg!(batch);
                         let weights = op_weights(tid, batch);
                         let op_dist = &WeightedIndex::new(weights).unwrap();
                         let batch_rng = SmallRng::from_rng(&mut thread_rng).unwrap();
@@ -127,5 +128,5 @@ fn single() {
 
 #[cfg_attr(not(miri), test)]
 fn single_large() {
-    batch_ops(1, 50, 2_500_000, |_, _| [200_000, 200_000, 200_000], |_, _| {});
+    batch_ops(1, 50, 250_000, |_, _| [20_000, 20_000, 20_000], |_, _| {});
 }

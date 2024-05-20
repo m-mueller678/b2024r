@@ -2,3 +2,9 @@
 resolver = "2"
 
 members = [ "seqlock", "seqlock_macros","btree", "dev_utils"]
+
+[profile.test]
+
+[profile.test-optimized]
+inherits = "test"
+opt-level = 3
