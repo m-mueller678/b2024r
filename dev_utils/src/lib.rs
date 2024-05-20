@@ -147,7 +147,7 @@ impl PerfCounters {
             // See `man pfm_initialize`
             Perfmon::default().initialize().unwrap();
         });
-        let mut ret = PerfCounters {
+        PerfCounters {
             counters: counters
                 .into_iter()
                 .map(|name| {
@@ -157,8 +157,7 @@ impl PerfCounters {
                 })
                 .collect(),
             time: Ok(Duration::ZERO),
-        };
-        ret
+        }
     }
 
     pub fn enable(&mut self) {

@@ -37,27 +37,22 @@ impl Tree {
     }
 
     pub fn remove(&self, k: &[u8]) -> Option<()> {
-        struct RemovedFlag(Cell<bool>);
-        impl RefUnwindSafe for RemovedFlag {}
-        let removed = RemovedFlag(Cell::new(false));
+        let mut removed = false;
         seqlock::unwind::repeat(|| {
-            || {
-                let removed = &removed;
-                self.try_remove(k, &removed.0);
-            }
+            self.try_remove(k, &mut removed);
         });
-        if removed.0.get() {
+        if removed {
             Some(())
         } else {
             None
         }
     }
 
-    fn try_remove(&self, k: &[u8], removed: &Cell<bool>) {
+    fn try_remove(&self, k: &[u8], removed: &mut bool) {
         let [parent, node] = self.descend(k, None);
         let mut node = node.upgrade();
         if node.b().node_cast::<BasicLeaf>().remove(k).is_some() {
-            removed.set(true);
+            *removed = true;
         }
         parent.release_unchecked();
         //TODO merge nodes
