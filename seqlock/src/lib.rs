@@ -50,7 +50,7 @@ mod lock;
 #[allow(private_bounds)]
 pub trait SeqLockMode: SeqLockModeImpl + 'static {
     type SharedDowngrade: SeqLockMode;
-    type GuardData: Copy;
+    type GuardData: Copy + Debug;
     type ReleaseData;
     const PESSIMISTIC: bool;
     const EXCLUSIVE: bool;

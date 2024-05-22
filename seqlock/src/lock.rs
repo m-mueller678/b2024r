@@ -1,5 +1,6 @@
 use crate::{Exclusive, Guarded, Optimistic, SeqLockMode, SeqLockModeImpl, SeqLockWrappable, Wrapper};
 use std::cell::UnsafeCell;
+use std::fmt::{Debug, Formatter};
 use std::mem::{forget, ManuallyDrop};
 use std::ops::{Deref, DerefMut};
 use std::sync::atomic::AtomicU64;
@@ -7,6 +8,7 @@ use std::sync::atomic::Ordering::{Acquire, Relaxed};
 use std::thread::panicking;
 
 unsafe impl<T: Send> Send for SeqLock<T> {}
+
 unsafe impl<T: Send + Sync> Sync for SeqLock<T> {}
 
 pub struct LockState {
@@ -37,6 +39,17 @@ pub struct Guard<'a, M: SeqLockMode, T: SeqLockWrappable + ?Sized> {
     lock: &'a LockState,
     guard_data: M::GuardData,
     access: ManuallyDrop<T::Wrapper<Guarded<'a, M, T>>>,
+}
+
+impl<'a, M: SeqLockMode, T: SeqLockWrappable + ?Sized> Debug for Guard<'a, M, T> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Guard")
+            .field("lock_addr", &(self.lock as *const _))
+            .field("lock_val", &self.lock.version.load(Relaxed))
+            .field("data", &self.guard_data)
+            .field("ptr", &M::as_ptr(&(*self.access).get().p))
+            .finish()
+    }
 }
 
 impl<'a, M: SeqLockMode, T: SeqLockWrappable + ?Sized> Drop for Guard<'a, M, T> {
