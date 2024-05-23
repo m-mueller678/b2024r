@@ -59,9 +59,13 @@ fn batch_ops(
                                     let is_ok = tree.lookup_inspect(&keys[index], |v| {
                                         if let Some(v) = v {
                                             if _op_index == 1162 {
+                                                dbg!(old_batch,batch,is_inserted);
                                                 dbg!(&v);
                                                 let vec = v.load_slice_to_vec();
                                                 println!("found: {:?}", vec);
+                                                dbg!(v.mem_cmp(&old_batch.to_ne_bytes()).is_eq());
+                                                dbg!(v.mem_cmp(&batch.to_ne_bytes()).is_eq());
+                                                dbg!(v.mem_cmp(&batch.to_ne_bytes()).is_eq() && is_inserted);
                                             }
                                             v.mem_cmp(&old_batch.to_ne_bytes()).is_eq()
                                                 || v.mem_cmp(&batch.to_ne_bytes()).is_eq() && is_inserted
@@ -69,6 +73,7 @@ fn batch_ops(
                                             old_batch == 0 || is_removed
                                         }
                                     });
+                                    dbg!(is_ok);
                                     assert!(is_ok);
                                 }
                                 1 => {
