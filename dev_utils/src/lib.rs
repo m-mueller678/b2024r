@@ -152,7 +152,7 @@ impl PerfCounters {
             counters: counters
                 .into_iter()
                 .map(|name| {
-                    let mut event = PerfEvent::new(name, false).unwrap();
+                    let mut event = PerfEvent::new(name, true).unwrap();
                     event.open(0, -1).unwrap();
                     (name.to_string(), event)
                 })

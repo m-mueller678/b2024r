@@ -117,6 +117,8 @@ fn main() {
     } else {
         PerfCounters::new()
     };
+    // threads must be spawned after setting up counters
+    rayon::ThreadPoolBuilder::default().build_global().unwrap();
     let tree = &Tree::new();
     let mut keys = args.keys();
     let pre_insert_count = (keys.len() as f64 * args.pre_insert_ratio) as usize;
@@ -157,4 +159,5 @@ fn main() {
             local_ops
         }
     });
+    dbg!(lookup);
 }
