@@ -149,7 +149,6 @@ unsafe impl SeqLockModeImpl for Optimistic {
     }
 }
 
-#[inline(never)] //TODO single_large has UB without this
 unsafe fn asm_memcpy<const REVERSE: bool, T>(src: *const u8, dst: *mut u8, count: usize) {
     let align = align_of::<T>();
     let word_size = if align % 8 == 0 {

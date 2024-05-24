@@ -28,7 +28,6 @@ fn batch_ops(
                 scope.spawn(move || {
                     let mut thread_rng = SmallRng::seed_from_u64(tid as u64);
                     for batch in 1..=batches {
-                        dbg!(batch);
                         let weights = op_weights(tid, batch);
                         let op_dist = &WeightedIndex::new(weights).unwrap();
                         let batch_rng = SmallRng::from_rng(&mut thread_rng).unwrap();
@@ -53,27 +52,16 @@ fn batch_ops(
                             let old_batch: u32 = state & u32::MAX >> 2;
                             let is_inserted = (state >> (29 + 1) & 1) != 0;
                             let is_removed = (state >> (29 + 2) & 1) != 0;
-                            println!("{_op_index}: {op}@{index}");
                             match op {
                                 0 => {
                                     let is_ok = tree.lookup_inspect(&keys[index], |v| {
                                         if let Some(v) = v {
-                                            if _op_index == 1162 {
-                                                dbg!(old_batch, batch, is_inserted);
-                                                dbg!(&v);
-                                                let vec = v.load_slice_to_vec();
-                                                println!("found: {:?}", vec);
-                                                dbg!(v.mem_cmp(&old_batch.to_ne_bytes()).is_eq());
-                                                dbg!(v.mem_cmp(&batch.to_ne_bytes()).is_eq());
-                                                dbg!(v.mem_cmp(&batch.to_ne_bytes()).is_eq() && is_inserted);
-                                            }
                                             v.mem_cmp(&old_batch.to_ne_bytes()).is_eq()
                                                 || v.mem_cmp(&batch.to_ne_bytes()).is_eq() && is_inserted
                                         } else {
                                             old_batch == 0 || is_removed
                                         }
                                     });
-                                    dbg!(is_ok);
                                     assert!(is_ok);
                                 }
                                 1 => {
