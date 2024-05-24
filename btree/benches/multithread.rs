@@ -148,7 +148,7 @@ fn main() {
         move |keep_working| {
             let rng = &mut rng;
             while keep_working.load(Relaxed) {
-                let index = zipf.sample(rng);
+                let index = zipf.sample(rng) - 1;
                 let mut len = None;
                 tree.lookup_inspect(&keys[index], |val| {
                     len = val.map(|x| x.len());
