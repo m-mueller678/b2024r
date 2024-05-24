@@ -129,9 +129,9 @@ unsafe impl SeqLockModeImpl for Optimistic {
             "xor {result}, 1",
             "shl {neg}, 1",
             "sub {result}, {neg}",
-            in("si") *p as *const T,
-            in("di") other.as_ptr(),
-            in("cx") cmp_len,
+            inout("si") *p as *const T => _,
+            inout("di") other.as_ptr() => _,
+            inout("cx") cmp_len => _,
             neg = lateout(reg_byte) _,
             result = lateout(reg_byte) result,
             options(readonly,nostack)
@@ -149,6 +149,7 @@ unsafe impl SeqLockModeImpl for Optimistic {
     }
 }
 
+#[inline(never)] //TODO single_large has UB without this
 unsafe fn asm_memcpy<const REVERSE: bool, T>(src: *const u8, dst: *mut u8, count: usize) {
     let align = align_of::<T>();
     let word_size = if align % 8 == 0 {
@@ -166,9 +167,9 @@ unsafe fn asm_memcpy<const REVERSE: bool, T>(src: *const u8, dst: *mut u8, count
                     $set_df,
                 std::concat!("rep ",$inst),
                     $clear_df,
-                in("si") (src as isize) + $offset,
-                in("di") (dst as isize) + $offset,
-                in("cx") count * (size_of::<T>()/word_size),
+                inout("si") (src as isize) + $offset => _,
+                inout("di") (dst as isize) + $offset => _,
+                inout("cx") count * (size_of::<T>()/word_size) => _,
                 options(nostack,preserves_flags),
             );
         };
