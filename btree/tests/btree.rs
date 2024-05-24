@@ -59,7 +59,7 @@ fn batch_ops(
                                     let is_ok = tree.lookup_inspect(&keys[index], |v| {
                                         if let Some(v) = v {
                                             if _op_index == 1162 {
-                                                dbg!(old_batch,batch,is_inserted);
+                                                dbg!(old_batch, batch, is_inserted);
                                                 dbg!(&v);
                                                 let vec = v.load_slice_to_vec();
                                                 println!("found: {:?}", vec);

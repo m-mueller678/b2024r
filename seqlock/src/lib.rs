@@ -287,10 +287,8 @@ impl<'a, M: SeqLockMode, T: SeqLockWrappable + Pod> Guarded<'a, M, [T]> {
     }
 
     pub fn load_slice_to_vec(&self) -> Vec<T> {
-        let dst = vec![T::zeroed(); self.len()];
-        dbg!(M::as_ptr(&self.p),dst.as_ptr());
-        //self.load_slice(&mut dst);
-        dbg!(dst.as_ptr(),dst.capacity(),dst.len());
+        let mut dst = vec![T::zeroed(); self.len()];
+        self.load_slice(&mut dst);
         dst
     }
 

@@ -21,17 +21,12 @@ fn test_memcmp() {
 fn test_memcpy() {
     let samples = vec!["", "a", "aa", "ab", "aaa", "b", "ba", "bb", "bba"];
     unsafe {
-        for a in &samples {
-            let mut a = a.as_bytes().to_vec();
+        for src in &samples {
+            let mut a = src.as_bytes().to_vec();
             let mut dst = vec![0u8; a.len()];
-            Guarded::<Optimistic, [u8]>::wrap_unchecked(&mut *a as *mut [u8]).load_slice(&mut dst);
-            assert_eq!(&dst, &a);
+            Guarded::<Optimistic, [u8]>::wrap_mut(&mut *a).load_slice(&mut dst);
+            assert_eq!(&dst, &src.as_bytes());
         }
-        Guarded::<Optimistic, [u8]>::wrap_unchecked(slice_from_raw_parts_mut(
-            core::ptr::NonNull::dangling().as_ptr(),
-            0,
-        ))
-        .load_slice(&mut []);
     }
 }
 
@@ -73,10 +68,19 @@ where
 fn struct_access() {
     unsafe {
         let x = &mut MyStruct { a: 1, b: 2 };
-        let mut x = Guarded::<Exclusive, MyStruct>::wrap_unchecked(x);
+        let mut x = Guarded::<Exclusive, MyStruct>::wrap_mut(x);
         assert_eq!(x.a_mut().load(), 1);
         assert_eq!(x.b_mut().load(), 2);
         assert_eq!(x.s().a().load(), 1);
         assert_eq!(x.optimistic().a_mut().load(), 1);
     }
+}
+
+#[test]
+fn load_to_vec() {
+    let src = [1, 2, 3, 4u8];
+    let x = &mut src.clone();
+    let mut x = Guarded::<Exclusive, [u8; 4]>::wrap_mut(x);
+    let x = x.optimistic().as_slice();
+    assert_eq!(x.load_slice_to_vec(), src);
 }
