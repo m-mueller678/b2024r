@@ -1,10 +1,11 @@
 use crate::basic_node::{BasicInner, BasicLeaf, BasicNode};
 use crate::key_source::SourceSlice;
-use crate::node::{node_tag, KindInner, Node};
+use crate::node::{node_tag, CommonNodeHead, KindInner, Node};
 use crate::page::{PageId, PageTail, PAGE_TAIL_SIZE};
 use crate::{MAX_KEY_SIZE, W};
 use bytemuck::{Pod, Zeroable};
 use seqlock::{Exclusive, Guard, Guarded, Optimistic, SeqlockAccessors};
+use std::mem::size_of;
 
 pub struct Tree {
     meta: PageId,
@@ -20,7 +21,12 @@ impl Tree {
     pub fn new() -> Self {
         let meta = PageId::alloc();
         let root = PageId::alloc();
-        meta.lock::<Exclusive>().b().0.cast::<MetadataPage>().root_mut().store(root);
+        {
+            let mut meta = meta.lock::<Exclusive>();
+            let mut meta = meta.b().0.cast::<MetadataPage>();
+            meta.b().root_mut().store(root);
+            meta.node_head_mut().tag_mut().store(node_tag::METADATA_MARKER);
+        }
         root.lock::<Exclusive>().b().0.cast::<BasicLeaf>().init(&[][..], &[][..], [0u8; 3]);
         Tree { meta }
     }
@@ -205,9 +211,11 @@ impl Drop for Tree {
 #[repr(C)]
 #[seq_lock_wrapper(crate::W)]
 struct MetadataPage {
-    root: PageId,
+    // for debugging
+    node_head: CommonNodeHead,
     #[seq_lock_skip_accessor]
-    _pad: [u64; PAGE_TAIL_SIZE / 8 - 1],
+    _pad: [u8; PAGE_TAIL_SIZE - 8 - size_of::<CommonNodeHead>()],
+    root: PageId,
 }
 
 #[derive(Ord, PartialOrd, Eq, PartialEq)]

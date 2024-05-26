@@ -1,9 +1,9 @@
-use crate::node::{CommonNodeHead, PAGE_HEAD_SIZE, PAGE_SIZE};
+use crate::node::{CommonNodeHead, NODE_TAIL_SIZE, PAGE_HEAD_SIZE, PAGE_SIZE};
 use crate::W;
 use bytemuck::{Pod, Zeroable};
 use seqlock::{Guard, Guarded, SeqLock, SeqLockMode, SeqlockAccessors};
 use std::fmt::{Debug, Formatter};
-use std::mem::{forget, size_of};
+use std::mem::{align_of, forget, size_of};
 use std::ops::Deref;
 use std::sync::atomic::Ordering::Relaxed;
 use std::sync::atomic::{AtomicBool, AtomicU64};
@@ -173,15 +173,16 @@ pub const PAGE_TAIL_SIZE: usize = PAGE_SIZE - PAGE_HEAD_SIZE;
 pub struct PageTail {
     pub common: CommonNodeHead,
     #[seq_lock_skip_accessor]
-    _pad: [u8; PAGE_TAIL_SIZE - size_of::<CommonNodeHead>()],
+    _pad: [u8; NODE_TAIL_SIZE],
 }
 
-#[repr(align(4096))]
+#[repr(align(1024), C)]
 pub struct Page {
     lock: SeqLock<PageTail>,
 }
 
 const _: () = {
-    //TODO this fails
-    //assert!(size_of::<Page>() == size_of::<SeqLock<PageTail>>());
+    assert!(PAGE_SIZE == size_of::<SeqLock<PageTail>>());
+    assert!(PAGE_SIZE == align_of::<Page>());
+    assert!(PAGE_SIZE == size_of::<Page>());
 };

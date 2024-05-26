@@ -1,5 +1,5 @@
 use crate::basic_node::{BasicInner, BasicLeaf, BasicNodeData};
-use crate::page::{Page, PageId, PageTail};
+use crate::page::{Page, PageId, PageTail, PAGE_TAIL_SIZE};
 use crate::W;
 use bytemuck::{Pod, Zeroable};
 use seqlock::{
@@ -9,12 +9,14 @@ use std::fmt::{Debug, Formatter};
 use std::mem::size_of;
 
 pub mod node_tag {
+    pub const METADATA_MARKER: u8 = 43;
     pub const BASIC_INNER: u8 = 250;
     pub const BASIC_LEAF: u8 = 251;
 }
 
-pub const PAGE_SIZE: usize = 1 << 10;
+pub const PAGE_SIZE: usize = 1024;
 pub const PAGE_HEAD_SIZE: usize = 8;
+pub const NODE_TAIL_SIZE: usize = PAGE_TAIL_SIZE - size_of::<CommonNodeHead>();
 
 #[derive(Pod, Copy, Clone, Zeroable, SeqlockAccessors)]
 #[repr(C)]
