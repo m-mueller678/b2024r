@@ -2,11 +2,12 @@ use crate::node::{CommonNodeHead, PAGE_HEAD_SIZE, PAGE_SIZE};
 use crate::W;
 use bytemuck::{Pod, Zeroable};
 use seqlock::{Guard, Guarded, SeqLock, SeqLockMode, SeqlockAccessors};
-use std::collections::BTreeMap;
 use std::fmt::{Debug, Formatter};
 use std::mem::{forget, size_of};
 use std::ops::Deref;
-use std::sync::Mutex;
+use std::sync::atomic::Ordering::Relaxed;
+use std::sync::atomic::{AtomicBool, AtomicU64};
+use std::sync::{Mutex, OnceLock};
 
 #[derive(Copy, Clone, Zeroable, Pod, SeqlockAccessors, Eq, PartialEq)]
 #[seq_lock_wrapper(crate::W)]
@@ -45,7 +46,7 @@ impl Deref for UncommittedPageId {
 
 impl PageId {
     pub fn alloc() -> Self {
-        ALLOCATOR.alloc()
+        PageId(ALLOCATOR.alloc())
     }
 
     pub fn alloc_uncommitted() -> UncommittedPageId {
@@ -53,20 +54,15 @@ impl PageId {
     }
 
     pub fn free(self) {
-        ALLOCATOR.free(self);
+        ALLOCATOR.free(self.0);
     }
 
     pub fn to_page(self) -> &'static Page {
-        // TODO make this efficient
-        ALL_PAGES.lock().unwrap()[&self.0]
+        ALLOCATOR.to_page(self.0)
     }
 
     pub fn from_page(p: &'static Page) -> Self {
-        PageId((p as *const Page).expose_provenance() as u64)
-    }
-
-    pub fn from_u64(x: u64) -> Self {
-        PageId(x)
+        PageId(ALLOCATOR.to_pid(p))
     }
 
     fn from_address_in_page<T>(p: *mut T) -> Self {
@@ -99,29 +95,72 @@ impl<M: SeqLockMode> W<Guarded<'_, M, PageTail>> {
 }
 
 trait PageAllocator {
-    fn alloc(&self) -> PageId;
-    fn free(&self, p: PageId);
+    fn alloc(&self) -> u64;
+    fn free(&self, p: u64);
+    fn to_page(&self, pid: u64) -> &Page;
+    fn to_pid(&self, page: &Page) -> u64;
 }
 
-static ALL_PAGES: Mutex<BTreeMap<u64, &'static Page>> = Mutex::new(BTreeMap::new());
-static ALLOCATOR: DefaultPageAllocator = DefaultPageAllocator { freed: Mutex::new(Vec::new()) };
+static ALLOCATOR: DefaultPageAllocator = DefaultPageAllocator {
+    any_freed: AtomicBool::new(false),
+    freed: Mutex::new(Vec::new()),
+
+    next_index: AtomicU64::new(0),
+    pages: OnceLock::new(),
+};
 struct DefaultPageAllocator {
-    freed: Mutex<Vec<PageId>>,
+    any_freed: AtomicBool,
+    freed: Mutex<Vec<u64>>,
+    next_index: AtomicU64,
+    pages: OnceLock<Box<[Page]>>,
 }
+
+const PAGE_COUNT: usize = 1 << (30 - 12);
 
 impl PageAllocator for DefaultPageAllocator {
-    fn alloc(&self) -> PageId {
-        if let Some(pid) = self.freed.lock().unwrap().pop() {
-            return pid;
+    fn alloc(&self) -> u64 {
+        if self.any_freed.load(Relaxed) {
+            let mut freed = self.freed.lock().unwrap();
+            if let Some(r) = freed.pop() {
+                if freed.is_empty() {
+                    self.any_freed.store(false, Relaxed);
+                }
+                return r;
+            }
         }
-        let page = Box::leak(Box::new(Page { lock: SeqLock::new(PageTail::zeroed()) }));
-        let page_id = PageId::from_page(page);
-        ALL_PAGES.lock().unwrap().insert(page_id.0, page);
-        page_id
+        let pages = self.pages.get_or_init(|| {
+            (0..PAGE_COUNT)
+                .map(|_| Page { lock: SeqLock::new(PageTail::zeroed()) })
+                .collect::<Vec<Page>>()
+                .into_boxed_slice()
+        });
+        let next = self.next_index.fetch_add(1, Relaxed);
+        if next >= pages.len() as u64 {
+            panic!("out of pages")
+        }
+        (&pages[next as usize] as *const Page).addr() as u64
     }
 
-    fn free(&self, p: PageId) {
-        self.freed.lock().unwrap().push(p)
+    fn free(&self, p: u64) {
+        let mut freed = self.freed.lock().unwrap();
+        freed.push(p);
+        self.any_freed.store(true, Relaxed);
+    }
+
+    fn to_page(&self, pid: u64) -> &Page {
+        let pid = pid as usize;
+        let pages = self.pages.get().unwrap();
+        let base = pages.as_ptr().addr();
+        let end = base + size_of::<Page>() * pages.len();
+        assert!(pid >= base);
+        assert!(pid < end);
+        assert!(pid % size_of::<Page>() == 0);
+        let index = (pid - base) / size_of::<Page>();
+        &pages[index]
+    }
+
+    fn to_pid(&self, p: &Page) -> u64 {
+        (p as *const Page).addr() as u64
     }
 }
 
@@ -141,3 +180,8 @@ pub struct PageTail {
 pub struct Page {
     lock: SeqLock<PageTail>,
 }
+
+const _: () = {
+    //TODO this fails
+    //assert!(size_of::<Page>() == size_of::<SeqLock<PageTail>>());
+};

@@ -685,7 +685,7 @@ mod tests {
 
     #[test]
     fn split_merge_inner() {
-        let fake_pid = |i| PageId::from_u64((i + 1) << 12).to_3x16().to_vec();
+        let fake_pid = |i| PageId::from_addr((i + 1) << 12).to_3x16().to_vec();
         split_merge::<KindInner>(1, [0; 3], fake_pid);
         split_merge::<KindInner>(0, [0; 3], fake_pid);
     }
