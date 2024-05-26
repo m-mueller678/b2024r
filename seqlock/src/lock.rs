@@ -28,6 +28,8 @@ impl<T: SeqLockWrappable> SeqLock<T> {
     pub fn lock<M: SeqLockMode>(&self) -> Guard<M, T> {
         let guard_data = M::acquire(&self.lock);
         Guard {
+            #[cfg(debug_assertions)]
+            written: false,
             lock: &self.lock,
             guard_data,
             access: ManuallyDrop::new(unsafe { Guarded::wrap_unchecked(self.data.get()) }),
@@ -36,6 +38,8 @@ impl<T: SeqLockWrappable> SeqLock<T> {
 }
 
 pub struct Guard<'a, M: SeqLockMode, T: SeqLockWrappable + ?Sized> {
+    #[cfg(debug_assertions)]
+    written: bool,
     lock: &'a LockState,
     guard_data: M::GuardData,
     access: ManuallyDrop<T::Wrapper<Guarded<'a, M, T>>>,
@@ -56,7 +60,9 @@ impl<'a, M: SeqLockMode, T: SeqLockWrappable + ?Sized> Drop for Guard<'a, M, T> 
     fn drop(&mut self) {
         if panicking() {
             if M::EXCLUSIVE {
-                // TODO on debug builds, we should check here if the lock has already been used for writing and if so, panic.
+                if self.written {
+                    panic!("unwinding out of written exclusive lock")
+                }
                 M::release(self.lock, self.guard_data);
             }
         } else {
@@ -77,6 +83,8 @@ impl<'a, T: SeqLockWrappable> Guard<'a, Optimistic, T> {
     pub fn upgrade(self) -> Guard<'a, Exclusive, T> {
         if self.lock.version.compare_exchange(self.guard_data, self.guard_data + 1, Acquire, Relaxed).is_ok() {
             let x = Guard {
+                #[cfg(debug_assertions)]
+                written: false,
                 lock: self.lock,
                 guard_data: (),
                 access: ManuallyDrop::new(unsafe {
@@ -95,6 +103,8 @@ impl<'a, T: SeqLockWrappable> Guard<'a, Optimistic, T> {
 impl<'a, T: SeqLockWrappable> Clone for Guard<'a, Optimistic, T> {
     fn clone(&self) -> Self {
         Guard {
+            #[cfg(debug_assertions)]
+            written: false,
             lock: self.lock,
             guard_data: self.guard_data,
             access: ManuallyDrop::new(unsafe { Guarded::wrap_unchecked(Optimistic::as_ptr(&(*self.access).get().p)) }),
@@ -108,7 +118,13 @@ impl<'a, T: SeqLockWrappable> Guard<'a, Exclusive, T> {
         let lock = self.lock;
         let ptr = Exclusive::as_ptr(&(*self.access).get().p);
         forget(self);
-        Guard { lock, guard_data, access: ManuallyDrop::new(unsafe { Guarded::wrap_unchecked(ptr) }) }
+        Guard {
+            #[cfg(debug_assertions)]
+            written: false,
+            lock,
+            guard_data,
+            access: ManuallyDrop::new(unsafe { Guarded::wrap_unchecked(ptr) }),
+        }
     }
 }
 
@@ -118,10 +134,22 @@ impl<'a, M: SeqLockMode, T: SeqLockWrappable> Guard<'a, M, T> {
         f: impl FnOnce(T::Wrapper<Guarded<'a, M, T>>) -> U::Wrapper<Guarded<'a, M, U>>,
     ) -> Guard<'a, M, U> {
         unsafe {
-            let Guard { lock, guard_data, ref mut access } = self;
+            let Guard {
+                #[cfg(debug_assertions)]
+                written,
+                lock,
+                guard_data,
+                ref mut access,
+            } = self;
             let access_taken = ManuallyDrop::take(access);
             forget(self);
-            Guard { lock, guard_data, access: ManuallyDrop::new(f(access_taken)) }
+            Guard {
+                #[cfg(debug_assertions)]
+                written,
+                lock,
+                guard_data,
+                access: ManuallyDrop::new(f(access_taken)),
+            }
         }
     }
 }
@@ -136,6 +164,10 @@ impl<'a, M: SeqLockMode, T: SeqLockWrappable + ?Sized> Deref for Guard<'a, M, T>
 
 impl<'a, M: SeqLockMode, T: SeqLockWrappable> DerefMut for Guard<'a, M, T> {
     fn deref_mut(&mut self) -> &mut Self::Target {
+        #[cfg(debug_assertions)]
+        {
+            self.written = true;
+        }
         &mut self.access
     }
 }
