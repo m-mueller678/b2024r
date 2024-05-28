@@ -45,6 +45,10 @@ impl Deref for UncommittedPageId {
 }
 
 impl PageId {
+    /// For debugging purposes
+    pub fn from_address(addr: usize) -> Self {
+        PageId(ALLOCATOR.to_pid(addr))
+    }
     pub fn alloc() -> Self {
         PageId(ALLOCATOR.alloc())
     }
@@ -62,7 +66,7 @@ impl PageId {
     }
 
     pub fn from_page(p: &'static Page) -> Self {
-        PageId(ALLOCATOR.to_pid(p))
+        PageId(ALLOCATOR.to_pid((p as *const Page).addr()))
     }
 
     fn from_address_in_page<T>(p: *mut T) -> Self {
@@ -98,7 +102,7 @@ trait PageAllocator {
     fn alloc(&self) -> u64;
     fn free(&self, p: u64);
     fn to_page(&self, pid: u64) -> &Page;
-    fn to_pid(&self, page: &Page) -> u64;
+    fn to_pid(&self, page_address: usize) -> u64;
 }
 
 static ALLOCATOR: DefaultPageAllocator = DefaultPageAllocator {
@@ -159,8 +163,8 @@ impl PageAllocator for DefaultPageAllocator {
         &pages[index]
     }
 
-    fn to_pid(&self, p: &Page) -> u64 {
-        (p as *const Page).addr() as u64
+    fn to_pid(&self, page_address: usize) -> u64 {
+        page_address as u64
     }
 }
 
