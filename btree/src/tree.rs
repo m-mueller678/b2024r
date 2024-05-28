@@ -134,6 +134,7 @@ impl Tree {
                 x
             }
             Err(()) => {
+                node.reset_written();
                 let mut parent = parent.upgrade();
                 self.ensure_parent_not_root(&mut node, &mut parent);
                 if Self::split_locked_node(

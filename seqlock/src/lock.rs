@@ -45,6 +45,15 @@ pub struct Guard<'a, M: SeqLockMode, T: SeqLockWrappable + ?Sized> {
     access: ManuallyDrop<T::Wrapper<Guarded<'a, M, T>>>,
 }
 
+impl<'a, T: SeqLockWrappable + ?Sized> Guard<'a, Exclusive, T> {
+    pub fn reset_written(&mut self) {
+        #[cfg(debug_assertions)]
+        {
+            self.written = false;
+        }
+    }
+}
+
 impl<'a, M: SeqLockMode, T: SeqLockWrappable + ?Sized> Debug for Guard<'a, M, T> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Guard")
