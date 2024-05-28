@@ -66,13 +66,13 @@ impl PageId {
     }
 
     fn from_address_in_page<T>(p: *mut T) -> Self {
-        PageId((p.addr() as u64) & (u64::MAX << 12))
+        PageId((p.addr() / PAGE_SIZE * PAGE_SIZE) as u64)
     }
 
     pub fn to_3x16(self) -> [u16; 3] {
         #[cfg(not(all(target_endian = "little", target_pointer_width = "64")))]
         compile_error!("only little endian 64-bit is supported");
-        let shifted = self.0 >> 12;
+        let shifted = self.0 / PAGE_SIZE as u64;
         debug_assert!(shifted < (1 << 48));
         let a = bytemuck::cast::<[u8; 8], [u16; 4]>(shifted.to_ne_bytes());
         [a[0], a[1], a[2]]
@@ -80,7 +80,7 @@ impl PageId {
 
     pub fn from_3x16(x: [u16; 3]) -> Self {
         let a = bytemuck::cast::<[u16; 4], [u8; 8]>([x[0], x[1], x[2], 0]);
-        Self(u64::from_ne_bytes(a) << 12)
+        Self(u64::from_ne_bytes(a) * PAGE_SIZE as u64)
     }
 
     pub fn lock<M: SeqLockMode>(self) -> Guard<'static, M, PageTail> {
@@ -115,7 +115,7 @@ struct DefaultPageAllocator {
     pages: OnceLock<Box<[Page]>>,
 }
 
-const PAGE_COUNT: usize = 1 << (30 - 12);
+const PAGE_COUNT: usize = 1 << (30 - PAGE_SIZE.trailing_zeros());
 
 impl PageAllocator for DefaultPageAllocator {
     fn alloc(&self) -> u64 {
