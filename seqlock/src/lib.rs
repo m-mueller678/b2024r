@@ -584,13 +584,6 @@ impl<T: Pod + SeqLockWrappable + Ord> PartialOrd for Guarded<'_, Shared, [T]> {
 
 impl<T: Pod + SeqLockWrappable + Ord> Ord for Guarded<'_, Shared, [T]> {
     fn cmp(&self, other: &Self) -> Ordering {
-        let cmp_len = self.len().min(other.len());
-        for i in 0..cmp_len {
-            let c = self.index(i).get().load().cmp(&other.index(i).get().load());
-            if !c.is_eq() {
-                return c;
-            }
-        }
-        self.len().cmp(&other.len())
+        Iterator::cmp(self.iter().map(|x| x.get().load()), other.iter().map(|x| x.get().load()))
     }
 }
