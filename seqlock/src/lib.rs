@@ -559,3 +559,38 @@ mod tests {
         );
     }
 }
+
+impl<T: Pod + SeqLockWrappable + Eq> Eq for Guarded<'_, Shared, [T]> {}
+
+impl<T: Pod + SeqLockWrappable + PartialEq> PartialEq for Guarded<'_, Shared, [T]> {
+    fn eq(&self, other: &Self) -> bool {
+        if self.len() != other.len() {
+            return false;
+        };
+        for i in 0..self.len() {
+            if self.index(i).get().load() != other.index(i).get().load() {
+                return false;
+            }
+        }
+        true
+    }
+}
+
+impl<T: Pod + SeqLockWrappable + Ord> PartialOrd for Guarded<'_, Shared, [T]> {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl<T: Pod + SeqLockWrappable + Ord> Ord for Guarded<'_, Shared, [T]> {
+    fn cmp(&self, other: &Self) -> Ordering {
+        let cmp_len = self.len().min(other.len());
+        for i in 0..cmp_len {
+            let c = self.index(i).get().load().cmp(&other.index(i).get().load());
+            if !c.is_eq() {
+                return c;
+            }
+        }
+        self.len().cmp(&other.len())
+    }
+}
