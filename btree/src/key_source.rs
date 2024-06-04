@@ -1,5 +1,6 @@
 use bytemuck::{Pod, Zeroable};
 use seqlock::{Exclusive, Guarded, SeqLockMode, SeqLockWrappable};
+use std::cmp::Ordering;
 use std::collections::Bound;
 use std::marker::PhantomData;
 use std::ops::RangeBounds;
@@ -56,6 +57,13 @@ pub trait SourceSlice<T: Pod + SeqLockWrappable = u8>: Copy {
     fn len(self) -> usize;
 
     fn iter(self) -> impl Iterator<Item = T>;
+
+    fn cmp<R: SourceSlice<T>>(self, rhs: R) -> Ordering
+    where
+        T: Ord,
+    {
+        Iterator::cmp(self.iter(), rhs.iter())
+    }
 }
 
 impl<M: SeqLockMode, T: Pod + SeqLockWrappable> SourceSlice<T> for Guarded<'_, M, [T]>
