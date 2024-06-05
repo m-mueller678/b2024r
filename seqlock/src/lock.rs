@@ -60,6 +60,7 @@ impl<'a, M: SeqLockMode, T: SeqLockWrappable + ?Sized> Drop for Guard<'a, M, T> 
     fn drop(&mut self) {
         if panicking() {
             if M::EXCLUSIVE {
+                #[cfg(debug_assertions)]
                 if self.written {
                     panic!("unwinding out of written exclusive lock")
                 }
