@@ -14,7 +14,7 @@ fn batch_ops(
     op_weights: (impl Fn(usize, u32) -> [u32; 3] + Sync),
     mut after_batch: (impl FnMut(u32, &Tree) + Send),
 ) {
-    let keys = &mixed_test_keys(key_count);
+    let keys = &mixed_test_keys(key_count, true, 1234);
     let key_dist = &Uniform::new(0, keys.len());
     let key_states: &Vec<_> = &(0..keys.len()).map(|_| [AtomicU32::new(0), AtomicU32::new(0)]).collect();
     let barrier = &Barrier::new(threads);

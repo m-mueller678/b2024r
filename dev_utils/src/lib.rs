@@ -11,85 +11,109 @@ use std::sync::Once;
 use std::time::Duration;
 pub use {serde_json, zipf};
 
-pub fn mixed_test_keys(count: usize) -> Vec<Vec<u8>> {
-    const KEY_KINDS: usize = 5;
-    assert!(count >= KEY_KINDS);
-    let chunk_size = (1 << 10).min(count / KEY_KINDS);
-    let mut keys = vec![Vec::new(); count];
-    keys.par_chunks_mut(chunk_size).enumerate().for_each(|(i, mut chunk)| {
-        if i == 0 && chunk_size > 300 {
-            for i in 0..256 {
-                if i + 1 < chunk.len() {
-                    chunk[i + 1] = vec![i as u8];
-                }
-            }
-            chunk = &mut chunk[257..]
-        }
-
-        let rng = &mut SmallRng::seed_from_u64(i as u64);
-        let mut seq_pos: u64 = rng.gen();
-        let mut generator: Box<dyn FnMut(&mut SmallRng) -> Vec<u8>> = match i % KEY_KINDS {
-            0 => Box::new(alpha_generator(5..=20)),
-            1 => Box::new(ascii_bin_generator(20..=30)),
-            2 => Box::new(path_generator(30..=120)),
-            3 => Box::new(|_| {
-                seq_pos = seq_pos.wrapping_add(1);
-                seq_pos.to_be_bytes().to_vec()
-            }),
-            4 => Box::new(|rng| rng.gen::<u64>().to_ne_bytes().to_vec()),
-            _ => unreachable!(),
-        };
-        for dst in chunk {
-            *dst = generator(rng);
-        }
+pub fn generate_keys(
+    count: usize,
+    sorted: bool,
+    seed: u64,
+    generator: &(impl Sync + Fn(&mut SmallRng, usize) -> Vec<u8>),
+) -> Vec<Box<[u8]>> {
+    let generator = |i| generator(&mut SmallRng::seed_from_u64(hash(&(seed, i))), i).into_boxed_slice();
+    let mut keys = vec![Vec::new().into_boxed_slice(); count];
+    keys.par_iter_mut().enumerate().for_each(|(i, dst)| {
+        *dst = generator(i);
     });
     keys.par_sort();
     keys.dedup();
-    let main_rng = &mut SmallRng::seed_from_u64(keys.len() as u64);
     let mut new_keys = HashSet::new();
-    while keys.len() < count {
-        let c = (main_rng.gen::<u64>() | u64::MAX << 48).to_be_bytes();
-        if keys.binary_search(&c.to_vec()).is_err() && new_keys.insert(c) {
-            keys.push(c.to_vec());
+    for i in count.. {
+        if keys.len() + new_keys.len() >= count {
+            break;
+        }
+        let c = generator(i);
+        if keys.binary_search(&c).is_err() {
+            new_keys.insert(c.clone());
         }
     }
-    keys.par_sort();
+    keys.extend(new_keys.into_iter());
+    assert_eq!(keys.len(), count);
+    if sorted {
+        keys.par_sort();
+    } else {
+        keys.par_shuffle(&mut SmallRng::seed_from_u64(seed));
+    }
     keys
 }
 
-pub fn alpha_generator<R: Rng>(len_range: RangeInclusive<usize>) -> impl Fn(&mut R) -> Vec<u8> {
+pub fn mixed_test_keys(count: usize, sorted: bool, seed: u64) -> Vec<Box<[u8]>> {
+    generate_keys(
+        count,
+        sorted,
+        hash(&(seed, 1)),
+        &mixed_generator(vec![
+            Box::new(alpha_generator(5..=20)),
+            Box::new(ascii_bin_generator(20..=30)),
+            Box::new(path_generator(30..=120)),
+            Box::new(seq_u64_generator((count / 5 / 4000).max(1), &mut SmallRng::seed_from_u64(hash(&(seed, 2))))),
+            Box::new(random_fixed_size_generator(8)),
+        ]),
+    )
+}
+
+pub fn mixed_generator<R: Rng>(
+    gens: Vec<Box<dyn Sync + Fn(&mut R, usize) -> Vec<u8>>>,
+) -> impl Sync + Fn(&mut R, usize) -> Vec<u8> {
+    move |rng, index| gens[index % gens.len()](rng, index / gens.len())
+}
+
+pub fn seq_u64_generator<R: Rng>(ranges: usize, rng: &mut R) -> impl Fn(&mut R, usize) -> Vec<u8> {
+    let starts: Vec<u64> = (0..ranges).map(|_| rng.gen()).collect();
+    move |_, index| {
+        let x = starts[index % starts.len()] + (index / starts.len()) as u64;
+        x.to_be_bytes().to_vec()
+    }
+}
+
+pub fn alpha_generator<R: Rng>(len_range: RangeInclusive<usize>) -> impl Fn(&mut R, usize) -> Vec<u8> {
     let dist = Uniform::<usize>::new(*len_range.start(), *len_range.end());
     let alpha_dist = Uniform::<u8>::new(b'A', b'Z');
-    move |rng| {
+    move |rng, _i| {
         let len = dist.sample(rng);
         (0..len).map(|_| alpha_dist.sample(rng)).collect()
     }
 }
 
-pub fn ascii_bin_generator<R: Rng>(len_range: RangeInclusive<usize>) -> impl Fn(&mut R) -> Vec<u8> {
+pub fn ascii_bin_generator<R: Rng>(len_range: RangeInclusive<usize>) -> impl Fn(&mut R, usize) -> Vec<u8> {
     let dist = Uniform::<usize>::new(*len_range.start(), *len_range.end());
-    move |rng| {
+    move |rng, _i| {
         let len = dist.sample(rng);
         (0..len).map(|_| if rng.gen() { b'0' } else { b'1' }).collect()
     }
 }
 
-pub fn random_key_generator<R: Rng>(len_range: RangeInclusive<usize>) -> impl Fn(&mut R) -> Vec<u8> {
+pub fn random_uniform_size_generator<R: Rng>(len_range: RangeInclusive<usize>) -> impl Fn(&mut R, usize) -> Vec<u8> {
     let dist = Uniform::<usize>::new(*len_range.start(), *len_range.end());
-    move |rng| {
+    move |rng, _i| {
         let mut k = vec![0u8; dist.sample(rng)];
         rng.fill(k.as_mut_slice());
         k
     }
 }
 
-fn hash(h: impl Hash) -> u64 {
+pub fn random_fixed_size_generator<R: Rng>(len: usize) -> impl Fn(&mut R, usize) -> Vec<u8> {
+    move |rng, _i| {
+        let mut k = vec![0u8; len];
+        rng.fill(k.as_mut_slice());
+        k
+    }
+}
+
+fn hash(h: &impl Hash) -> u64 {
     let mut hasher = DefaultHasher::new();
     h.hash(&mut hasher);
     hasher.finish()
 }
 
-pub fn path_generator<R: Rng>(min_len_range: RangeInclusive<usize>) -> impl Fn(&mut R) -> Vec<u8> {
+pub fn path_generator<R: Rng>(min_len_range: RangeInclusive<usize>) -> impl Fn(&mut R, usize) -> Vec<u8> {
     let words = if cfg!(miri) {
         vec!["ab", "anti", "antibody", "antics", "the", "there", "then"]
     } else {
@@ -98,7 +122,7 @@ pub fn path_generator<R: Rng>(min_len_range: RangeInclusive<usize>) -> impl Fn(&
     let word_dist = Uniform::new(0, words.len());
     let len_dist = Uniform::new(min_len_range.start(), min_len_range.end());
     let cardinality_dist = Uniform::new(1, 6);
-    move |rng| {
+    move |rng, _i| {
         let target_len = len_dist.sample(rng);
         let mut key = Vec::new();
         let mut group_seed = 0;
@@ -110,7 +134,7 @@ pub fn path_generator<R: Rng>(min_len_range: RangeInclusive<usize>) -> impl Fn(&
             let card = cardinality_dist.sample(group_rng);
             let next_word_id = rng.gen_range(0..card);
             let next_word = words[word_dist.sample(group_rng)];
-            group_seed = hash((group_seed, next_word_id));
+            group_seed = hash(&(group_seed, next_word_id));
             key.extend_from_slice(next_word.as_bytes());
         }
         key
@@ -125,6 +149,7 @@ pub fn subslices<T>(x: &[T], min_len: usize) -> impl Iterator<Item = &[T]> {
 
 pub use perf_event;
 use pfm::{PerfEvent, Perfmon};
+use rip_shuffle::RipShuffleParallel;
 
 pub struct PerfCounters {
     counters: Vec<(String, PerfEvent)>,

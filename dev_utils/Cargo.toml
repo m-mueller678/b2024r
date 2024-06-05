@@ -11,3 +11,4 @@ serde_json = {version = "1.0.117"}
 pfm = "0.1.2"
 minstant = "0.1.7"
 zipf="7.0.1"
+rip_shuffle = "0.2.0"
