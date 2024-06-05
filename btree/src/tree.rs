@@ -134,6 +134,7 @@ impl Tree {
                 x
             }
             Err(()) => {
+                node.reset_written();
                 let mut parent = parent.upgrade();
                 self.ensure_parent_not_root(&mut node, &mut parent);
                 if Self::split_locked_node(
@@ -202,7 +203,9 @@ impl Drop for Tree {
             }
             p.free();
         }
-        free_recursive(self.meta.lock::<Exclusive>().b().0.cast::<MetadataPage>().root().load());
+        let mut meta_lock = self.meta.lock::<Exclusive>();
+        free_recursive(meta_lock.b().0.cast::<MetadataPage>().root().load());
+        meta_lock.release();
         self.meta.free()
     }
 }

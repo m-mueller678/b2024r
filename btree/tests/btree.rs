@@ -129,3 +129,8 @@ fn single() {
 fn single_large() {
     batch_ops(1, 50, 250_000, |_, _| [20_000, 20_000, 20_000], |_, _| {});
 }
+
+#[cfg_attr(not(miri), test)]
+fn multi() {
+    batch_ops(4, 10, 2_500, |_, _| [500, 500, 500], |_, _| {});
+}

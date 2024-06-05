@@ -45,6 +45,15 @@ pub struct Guard<'a, M: SeqLockMode, T: SeqLockWrappable + ?Sized> {
     access: ManuallyDrop<T::Wrapper<Guarded<'a, M, T>>>,
 }
 
+impl<'a, T: SeqLockWrappable + ?Sized> Guard<'a, Exclusive, T> {
+    pub fn reset_written(&mut self) {
+        #[cfg(debug_assertions)]
+        {
+            self.written = false;
+        }
+    }
+}
+
 impl<'a, M: SeqLockMode, T: SeqLockWrappable + ?Sized> Debug for Guard<'a, M, T> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Guard")
@@ -57,6 +66,7 @@ impl<'a, M: SeqLockMode, T: SeqLockWrappable + ?Sized> Debug for Guard<'a, M, T>
 }
 
 impl<'a, M: SeqLockMode, T: SeqLockWrappable + ?Sized> Drop for Guard<'a, M, T> {
+    /// dropping an exclusive lock that has been used for writing during unwinding will abort the process on debug builds
     fn drop(&mut self) {
         if panicking() {
             if M::EXCLUSIVE {
@@ -130,6 +140,12 @@ impl<'a, T: SeqLockWrappable> Guard<'a, Exclusive, T> {
 }
 
 impl<'a, M: SeqLockMode, T: SeqLockWrappable> Guard<'a, M, T> {
+    /// unlike drop, calling this on an exclusive lock during unwinding is ok.
+    pub fn release(self) {
+        M::release(self.lock, self.guard_data);
+        forget(self)
+    }
+
     pub fn map<U: SeqLockWrappable + ?Sized + 'static>(
         mut self,
         f: impl FnOnce(T::Wrapper<Guarded<'a, M, T>>) -> U::Wrapper<Guarded<'a, M, U>>,
