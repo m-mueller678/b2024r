@@ -2,6 +2,7 @@
 #![feature(exposed_provenance)]
 #![feature(strict_provenance)]
 #![feature(is_sorted)]
+#![feature(inline_const_pat)]
 
 extern crate core;
 

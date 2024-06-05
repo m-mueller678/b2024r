@@ -1,11 +1,33 @@
+#![feature(inline_const_pat)]
+
 use btree::Tree;
-use dev_utils::mixed_test_keys;
+use dev_utils::{generate_keys, mixed_test_keys, seq_u64_generator_0};
 use rand::distributions::{Distribution, Uniform, WeightedIndex};
 use rand::rngs::SmallRng;
 use rand::SeedableRng;
-use std::sync::atomic::AtomicU32;
 use std::sync::atomic::Ordering::Relaxed;
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU8};
 use std::sync::Barrier;
+
+#[derive(Default)]
+struct KeyState {
+    old_write_batch: AtomicU32,
+    old_write_thread: AtomicU32,
+    old_present: AtomicBool,
+    inserted: AtomicU8,
+    removed: AtomicU8,
+    max_write_thread: AtomicU32,
+    max_write_is_insert: AtomicBool,
+}
+
+fn inc_state_12(x: &AtomicU8) {
+    x.fetch_update(Relaxed, Relaxed, |x| match x {
+        0 => Some(1),
+        1 => Some(2),
+        _ => None,
+    })
+    .ok();
+}
 
 fn batch_ops(
     threads: usize,
@@ -14,10 +36,17 @@ fn batch_ops(
     op_weights: (impl Fn(usize, u32) -> [u32; 3] + Sync),
     mut after_batch: (impl FnMut(u32, &Tree) + Send),
 ) {
+    #[repr(u32)]
+    enum Op {
+        Lookup,
+        Insert,
+        Remove,
+    }
     let keys = &mixed_test_keys(key_count, true, 1234);
     let key_dist = &Uniform::new(0, keys.len());
-    let key_states: &Vec<_> = &(0..keys.len()).map(|_| [AtomicU32::new(0), AtomicU32::new(0)]).collect();
+    let key_states: &Vec<KeyState> = &(0..keys.len()).map(|_| Default::default()).collect();
     let barrier = &Barrier::new(threads);
+    // value is batch as ne bytes
     let tree = &Tree::new();
     let op_weights = &op_weights;
     let mut after_batch = Some(&mut after_batch);
@@ -32,63 +61,124 @@ fn batch_ops(
                         let op_dist = &WeightedIndex::new(weights).unwrap();
                         let batch_rng = SmallRng::from_rng(&mut thread_rng).unwrap();
                         let ops = |mut brng: SmallRng| {
-                            (0..weights.iter().sum::<u32>())
-                                .map(move |_| (op_dist.sample(&mut brng), key_dist.sample(&mut brng)))
+                            (0..weights.iter().sum::<u32>()).map(move |_| {
+                                (
+                                    match op_dist.sample(&mut brng) {
+                                        const { Op::Lookup as usize } => Op::Lookup,
+                                        const { Op::Insert as usize } => Op::Insert,
+                                        const { Op::Remove as usize } => Op::Remove,
+                                        _ => unreachable!(),
+                                    },
+                                    key_dist.sample(&mut brng),
+                                )
+                            })
                         };
-                        for (op, index) in ops(batch_rng.clone()) {
-                            if op != 0 {
-                                key_states[index][0].fetch_max(tid as u32, Relaxed);
-                            }
-                        }
-                        barrier.wait();
-                        for (op, index) in ops(batch_rng.clone()) {
-                            if op != 0 && key_states[index][0].load(Relaxed) == tid as u32 {
-                                key_states[index][1].fetch_or(1 << (29 + op), Relaxed);
-                            }
-                        }
-                        barrier.wait();
-                        for (_op_index, (op, index)) in ops(batch_rng.clone()).enumerate() {
-                            let state = key_states[index][1].load(Relaxed);
-                            let old_batch: u32 = state & u32::MAX >> 2;
-                            let is_inserted = (state >> (29 + 1) & 1) != 0;
-                            let is_removed = (state >> (29 + 2) & 1) != 0;
-                            match op {
-                                0 => {
-                                    let is_ok = tree.lookup_inspect(&keys[index], |v| {
-                                        if let Some(v) = v {
-                                            v.mem_cmp(&old_batch.to_ne_bytes()).is_eq()
-                                                || v.mem_cmp(&batch.to_ne_bytes()).is_eq() && is_inserted
-                                        } else {
-                                            old_batch == 0 || is_removed
-                                        }
+                        for phase in 0..4 {
+                            const PHASE_ANNOUNCE: usize = 0;
+                            const PHASE_RUN: usize = 1;
+                            const PHASE_REWRITE: usize = 2;
+                            const PHASE_CLEAN: usize = 3;
+                            for (op, index) in ops(batch_rng.clone()) {
+                                let ks = &key_states[index];
+                                if phase == PHASE_ANNOUNCE {
+                                    inc_state_12(match op {
+                                        Op::Insert => &ks.inserted,
+                                        Op::Remove => &ks.removed,
+                                        Op::Lookup => continue,
                                     });
-                                    assert!(is_ok);
-                                }
-                                1 => {
-                                    if tree.insert(&keys[index], &batch.to_ne_bytes()).is_none() {
-                                        assert!(old_batch == 0 || is_removed)
+                                    key_states[index].max_write_thread.fetch_max(tid as u32, Relaxed);
+                                } else if phase == PHASE_CLEAN {
+                                    match op {
+                                        Op::Lookup => continue,
+                                        Op::Insert => (),
+                                        Op::Remove => (),
+                                    }
+                                    if ks
+                                        .max_write_thread
+                                        .fetch_update(
+                                            Relaxed,
+                                            Relaxed,
+                                            |x| if x == tid as u32 { Some(0) } else { None },
+                                        )
+                                        .is_err()
+                                    {
+                                        continue;
+                                    }
+                                    ks.old_write_batch.store(batch, Relaxed);
+                                    ks.old_write_thread.store(tid as u32, Relaxed);
+                                    ks.old_present.store(ks.max_write_is_insert.load(Relaxed), Relaxed);
+                                    ks.removed.store(0, Relaxed);
+                                    ks.inserted.store(0, Relaxed);
+                                } else {
+                                    let write = |w: &AtomicU8| {
+                                        phase == PHASE_RUN
+                                            || (phase == PHASE_REWRITE
+                                                && w.load(Relaxed) == 2
+                                                && tid as u32 == ks.max_write_thread.load(Relaxed))
+                                    };
+                                    match op {
+                                        Op::Lookup => {
+                                            if phase == PHASE_RUN {
+                                                let mut batch_matches = false;
+                                                let mut new_batch_matches = false;
+                                                let mut was_present = false;
+                                                let is_ok = tree.lookup_inspect(&keys[index], |v| {
+                                                    if let Some(v) = v {
+                                                        was_present = true;
+                                                        batch_matches = v
+                                                            .mem_cmp(&ks.old_write_batch.load(Relaxed).to_ne_bytes())
+                                                            .is_eq();
+                                                        new_batch_matches = v.mem_cmp(&batch.to_ne_bytes()).is_eq();
+                                                        batch_matches && ks.old_present.load(Relaxed)
+                                                            || new_batch_matches && ks.inserted.load(Relaxed) != 0
+                                                    } else {
+                                                        was_present = false;
+                                                        !ks.old_present.load(Relaxed) || ks.removed.load(Relaxed) != 0
+                                                    }
+                                                });
+                                                assert!(is_ok);
+                                            }
+                                        }
+                                        Op::Insert => {
+                                            if write(&ks.inserted) {
+                                                if phase == PHASE_REWRITE {
+                                                    ks.max_write_is_insert.store(true, Relaxed);
+                                                }
+                                                if tree.insert(&keys[index], &batch.to_ne_bytes()).is_some() {
+                                                    assert!(
+                                                        ks.old_present.load(Relaxed) || ks.inserted.load(Relaxed) == 2
+                                                    )
+                                                } else {
+                                                    assert!(
+                                                        !ks.old_present.load(Relaxed) || ks.removed.load(Relaxed) != 0
+                                                    )
+                                                }
+                                            }
+                                        }
+                                        Op::Remove => {
+                                            if write(&ks.removed) {
+                                                if phase == PHASE_REWRITE {
+                                                    ks.max_write_is_insert.store(false, Relaxed);
+                                                }
+                                                if tree.remove(&keys[index]).is_some() {
+                                                    assert!(
+                                                        ks.old_present.load(Relaxed) || ks.inserted.load(Relaxed) != 0
+                                                    )
+                                                } else {
+                                                    assert!(
+                                                        !ks.old_present.load(Relaxed) || ks.removed.load(Relaxed) == 2
+                                                    )
+                                                }
+                                            }
+                                        }
                                     }
                                 }
-                                2 => {
-                                    if tree.remove(&keys[index]).is_some() {
-                                        assert!(old_batch != 0 || is_inserted)
-                                    }
-                                }
-                                _ => unreachable!(),
                             }
+                            barrier.wait();
                         }
-                        barrier.wait();
-                        for (op, index) in ops(batch_rng.clone()) {
-                            if op != 0 && key_states[index][0].load(Relaxed) == tid as u32 {
-                                key_states[index][0].store(0, Relaxed);
-                                key_states[index][1].store(if op == 1 { batch } else { 0 }, Relaxed);
-                            }
+                        if let Some(ab) = &mut after_batch {
+                            ab(batch, tree);
                         }
-                        barrier.wait();
-                        if let Some(f) = &mut after_batch {
-                            f(batch, tree);
-                        }
-                        barrier.wait();
                     }
                 })
             })
@@ -132,5 +222,5 @@ fn single_large() {
 
 #[cfg_attr(not(miri), test)]
 fn multi() {
-    batch_ops(4, 10, 2_500, |_, _| [500, 500, 500], |_, _| {});
+    batch_ops(4, 10, 250, |_, _| [500, 500, 500], |_, _| {});
 }

@@ -73,6 +73,10 @@ pub fn seq_u64_generator<R: Rng>(ranges: usize, rng: &mut R) -> impl Fn(&mut R, 
     }
 }
 
+pub fn seq_u64_generator_0<R: Rng>() -> impl Fn(&mut R, usize) -> Vec<u8> {
+    move |_, index| (index as u64).to_be_bytes().to_vec()
+}
+
 pub fn alpha_generator<R: Rng>(len_range: RangeInclusive<usize>) -> impl Fn(&mut R, usize) -> Vec<u8> {
     let dist = Uniform::<usize>::new(*len_range.start(), *len_range.end());
     let alpha_dist = Uniform::<u8>::new(b'A', b'Z');
