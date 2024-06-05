@@ -1,7 +1,7 @@
 #![feature(inline_const_pat)]
 
 use btree::Tree;
-use dev_utils::{generate_keys, mixed_test_keys, seq_u64_generator_0};
+use dev_utils::mixed_test_keys;
 use rand::distributions::{Distribution, Uniform, WeightedIndex};
 use rand::rngs::SmallRng;
 use rand::SeedableRng;
@@ -37,6 +37,7 @@ fn batch_ops(
     mut after_batch: (impl FnMut(u32, &Tree) + Send),
 ) {
     #[repr(u32)]
+    #[derive(Debug)]
     enum Op {
         Lookup,
         Insert,
@@ -78,7 +79,7 @@ fn batch_ops(
                             const PHASE_RUN: usize = 1;
                             const PHASE_REWRITE: usize = 2;
                             const PHASE_CLEAN: usize = 3;
-                            for (op, index) in ops(batch_rng.clone()) {
+                            for (_op_index, (op, index)) in ops(batch_rng.clone()).enumerate() {
                                 let ks = &key_states[index];
                                 if phase == PHASE_ANNOUNCE {
                                     inc_state_12(match op {
@@ -107,13 +108,14 @@ fn batch_ops(
                                     ks.old_write_batch.store(batch, Relaxed);
                                     ks.old_write_thread.store(tid as u32, Relaxed);
                                     ks.old_present.store(ks.max_write_is_insert.load(Relaxed), Relaxed);
+                                    // assert_eq!(tree.lookup_inspect(&keys[index],|x|x.map(|_|())).is_some(),ks.max_write_is_insert.load(Relaxed));
                                     ks.removed.store(0, Relaxed);
                                     ks.inserted.store(0, Relaxed);
                                 } else {
-                                    let write = |w: &AtomicU8| {
+                                    let write = || {
                                         phase == PHASE_RUN
                                             || (phase == PHASE_REWRITE
-                                                && w.load(Relaxed) == 2
+                                                && ks.inserted.load(Relaxed) + ks.removed.load(Relaxed) > 1
                                                 && tid as u32 == ks.max_write_thread.load(Relaxed))
                                     };
                                     match op {
@@ -140,8 +142,9 @@ fn batch_ops(
                                             }
                                         }
                                         Op::Insert => {
-                                            if write(&ks.inserted) {
-                                                if phase == PHASE_REWRITE {
+                                            if write() {
+                                                if phase == PHASE_RUN && ks.max_write_thread.load(Relaxed) == tid as u32
+                                                {
                                                     ks.max_write_is_insert.store(true, Relaxed);
                                                 }
                                                 if tree.insert(&keys[index], &batch.to_ne_bytes()).is_some() {
@@ -156,8 +159,9 @@ fn batch_ops(
                                             }
                                         }
                                         Op::Remove => {
-                                            if write(&ks.removed) {
-                                                if phase == PHASE_REWRITE {
+                                            if write() {
+                                                if phase == PHASE_RUN && ks.max_write_thread.load(Relaxed) == tid as u32
+                                                {
                                                     ks.max_write_is_insert.store(false, Relaxed);
                                                 }
                                                 if tree.remove(&keys[index]).is_some() {
