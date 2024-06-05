@@ -50,6 +50,32 @@ pub struct BasicNode<V: NodeKind>(
 
 unsafe impl<V: NodeKind> Pod for BasicNode<V> {}
 
+fn copy_records<V: NodeKind>(
+    src: W<Guarded<Shared, BasicNode<V>>>,
+    dst: &mut W<Guarded<Exclusive, BasicNode<V>>>,
+    src_range: Range<usize>,
+    dst_start: usize,
+    ref_key: &[u8],
+) {
+    let dst_range = dst_start..(src_range.end + dst_start - src_range.start);
+    let dpl = dst.prefix_len().load() as usize;
+    let spl = src.prefix_len().load() as usize;
+    let restore_prefix = if dpl < spl { &ref_key[dpl..spl] } else { &[][..] };
+    let prefix_grow = if dpl > spl { dpl - spl } else { 0 };
+    for (src_i, dst_i) in src_range.clone().zip(dst_range.clone()) {
+        let key = restore_prefix.join(src.key(src_i).slice(prefix_grow..));
+        dst.heap_write_new(key, src.val(src_i), dst_i);
+    }
+    if dpl == spl {
+        src.heads().slice(src_range).copy_to(&mut dst.b().heads().slice(dst_range));
+    } else {
+        for dst_i in dst_range {
+            let head = key_head(dst.s().key(dst_i));
+            dst.b().heads().index(dst_i).store(head);
+        }
+    }
+}
+
 unsafe impl<V: NodeKind> Node for BasicNode<V> {
     fn validate(this: W<Guarded<'_, Shared, Self>>) {
         if !cfg!(feature = "validate_node") {
@@ -104,13 +130,13 @@ unsafe impl<V: NodeKind> Node for BasicNode<V> {
         if V::IS_LEAF {
             tmp.init(this.s().lower_fence(), right.s().upper_fence(), Zeroable::zeroed());
             tmp.count_mut().store((left_count + right_count) as u16);
-            this.copy_records(&mut tmp, 0..left_count, 0, ref_key);
-            right.copy_records(&mut tmp, 0..right_count, left_count, ref_key);
+            copy_records(this.s(), &mut tmp, 0..left_count, 0, ref_key);
+            copy_records(right.s(), &mut tmp, 0..right_count, left_count, ref_key);
         } else {
             tmp.init(this.s().lower_fence(), right.s().upper_fence(), this.s().lower().get().load());
             tmp.count_mut().store((left_count + right_count + 1) as u16);
-            this.copy_records(&mut tmp, 0..left_count, 0, ref_key);
-            right.copy_records(&mut tmp, 0..right_count, left_count + 1, ref_key);
+            copy_records(this.s(), &mut tmp, 0..left_count, 0, ref_key);
+            copy_records(right.s(), &mut tmp, 0..right_count, left_count + 1, ref_key);
             tmp.heap_write_new(
                 this.s().upper_fence().slice(tmp.prefix_len().load() as usize..),
                 right.s().lower().as_slice(),
@@ -118,6 +144,30 @@ unsafe impl<V: NodeKind> Node for BasicNode<V> {
             );
         }
         this.store(tmp.load()); //TODO optimize copy
+    }
+
+    /// returns the number of keys in the low node and the separator
+    fn find_separator<'a>(this: &'a W<Guarded<'a, Shared, Self>>, ref_key: &'a [u8]) -> (usize, impl SourceSlice + 'a) {
+        let prefix_len = this.prefix_len().load() as usize;
+        let count = this.count().load() as usize;
+        if V::IS_LEAF {
+            let range_start = count / 2 - count / 8;
+            let range_end = count / 2 + count / 8;
+            let common_prefix = common_prefix(this.key(range_start - 1), this.key(range_end));
+            let best_split = (range_start..=range_end)
+                .filter(|&lc| {
+                    this.key(lc - 1).len() == common_prefix
+                        || this.key(lc - 1).index(common_prefix).load() != this.key(lc).index(common_prefix).load()
+                })
+                .min_by_key(|&lc| (lc as isize - count as isize / 2).abs())
+                .unwrap();
+            let sep = this.key(best_split).slice(..common_prefix + 1);
+            (best_split, ref_key[..prefix_len].join(sep))
+        } else {
+            let low_count = count / 2;
+            let sep = ref_key[..prefix_len].join(this.s().key(low_count));
+            (low_count, sep)
+        }
     }
 
     fn split(
@@ -129,35 +179,36 @@ unsafe impl<V: NodeKind> Node for BasicNode<V> {
         let left = &mut BasicNode::<V>::zeroed();
         let mut left = Guarded::<Exclusive, _>::wrap_mut(left);
         let count = this.count().load() as usize;
-        let low_count = count / 2;
+        let this_mut = this;
+        let this = this_mut.s();
+        let (low_count, sep_key) = Self::find_separator(&this, ref_key);
         let mut right = parent_insert(this.prefix_len().load() as usize, this.s().key(low_count))?;
         let right = &mut right.b().0.cast::<BasicNode<V>>();
-        let sep_key = this.s().prefix().join(this.s().key(low_count));
         Node::validate(this.s());
-        if V::IS_LEAF {
+        let (lr, rr) = if V::IS_LEAF {
             left.init(this.s().lower_fence(), sep_key, Zeroable::zeroed());
             right.init(sep_key, this.s().upper_fence(), Zeroable::zeroed());
-            left.count_mut().store(low_count as u16);
-            this.copy_records(&mut left, 0..low_count, 0, ref_key);
-            right.count_mut().store((count - low_count) as u16);
-            this.copy_records(right, low_count..count, 0, ref_key);
+            (0..low_count, low_count..count)
         } else {
-            left.init(this.s().lower_fence(), sep_key, this.s().lower().get().load());
+            left.init(this.lower_fence(), sep_key, this.s().lower().get().load());
             let mid_child = this
                 .s()
                 .slice::<[V::SliceType; 3]>(this.s().slots().index(low_count).load() as usize + 2, 1)
                 .index(0)
                 .get()
                 .load();
-            right.init(sep_key, this.s().upper_fence(), mid_child);
-            left.count_mut().store(low_count as u16);
-            this.copy_records(&mut left, 0..low_count, 0, ref_key);
-            right.count_mut().store((count - low_count - 1) as u16);
-            this.copy_records(right, low_count + 1..count, 0, ref_key);
-        }
+            right.init(sep_key, this.upper_fence(), mid_child);
+            (0..low_count, low_count + 1..count)
+        };
+        debug_assert!(this.key(lr.end - 1).cmp(sep_key.slice(this.prefix_len().load() as usize..)).is_lt());
+        debug_assert!(sep_key.slice(this.prefix_len().load() as usize..).cmp(this.key(rr.start)).is_le());
+        left.count_mut().store(lr.len() as u16);
+        copy_records(this.s(), &mut left, lr, 0, ref_key);
+        right.count_mut().store(rr.len() as u16);
+        copy_records(this.s(), right, rr, 0, ref_key);
         Node::validate(left.s());
         Node::validate(right.s());
-        this.store(left.load()); //TODO optimize copy
+        this_mut.store(left.load()); //TODO optimize copy
         Ok(())
     }
 
@@ -287,32 +338,6 @@ impl<'a, V: NodeKind> W<Guarded<'a, Exclusive, BasicNode<V>>> {
                 return Err(());
             }
             self.compactify();
-        }
-    }
-
-    fn copy_records(
-        &self,
-        dst: &mut W<Guarded<Exclusive, BasicNode<V>>>,
-        src_range: Range<usize>,
-        dst_start: usize,
-        ref_key: &[u8],
-    ) {
-        let dst_range = dst_start..(src_range.end + dst_start - src_range.start);
-        let dpl = dst.prefix_len().load() as usize;
-        let spl = self.prefix_len().load() as usize;
-        let restore_prefix = if dpl < spl { &ref_key[dpl..spl] } else { &[][..] };
-        let prefix_grow = if dpl > spl { dpl - spl } else { 0 };
-        for (src_i, dst_i) in src_range.clone().zip(dst_range.clone()) {
-            let key = restore_prefix.join(self.s().key(src_i).slice(prefix_grow..));
-            dst.heap_write_new(key, self.s().val(src_i), dst_i);
-        }
-        if dpl == spl {
-            self.s().heads().slice(src_range).copy_to(&mut dst.b().heads().slice(dst_range));
-        } else {
-            for dst_i in dst_range {
-                let head = key_head(dst.s().key(dst_i));
-                dst.b().heads().index(dst_i).store(head);
-            }
         }
     }
 

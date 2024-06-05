@@ -25,6 +25,10 @@ pub trait SourceSlice<T: Pod + SeqLockWrappable = u8>: Copy {
         self.write_to(&mut Guarded::wrap_mut(&mut buffer[..self.len()]));
         f(&mut buffer[..self.len()])
     }
+
+    fn to_vec(self) -> Vec<T> {
+        self.iter().collect()
+    }
     fn write_suffix_to_offset(self, dst: Guarded<Exclusive, [T]>, offset: usize) {
         self.slice(offset..).write_to(&mut dst.slice(offset..));
     }

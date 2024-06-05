@@ -1,4 +1,5 @@
 use crate::basic_node::{BasicInner, BasicLeaf, BasicNodeData};
+use crate::key_source::SourceSlice;
 use crate::page::{Page, PageId, PageTail, PAGE_TAIL_SIZE};
 use crate::W;
 use bytemuck::{Pod, Zeroable};
@@ -66,6 +67,8 @@ pub unsafe trait Node: SeqLockWrappable + Pod {
         parent_insert: impl FnOnce(usize, Guarded<'_, Shared, [u8]>) -> Result<Guard<'static, Exclusive, PageTail>, ()>,
         ref_key: &[u8],
     ) -> Result<(), ()>;
+
+    fn find_separator<'a>(this: &'a W<Guarded<'a, Shared, Self>>, ref_key: &'a [u8]) -> (usize, impl SourceSlice + 'a);
 
     fn to_debug_kv(this: W<Guarded<Shared, Self>>) -> (Vec<Vec<u8>>, Vec<Self::DebugVal>);
 
