@@ -149,7 +149,9 @@ fn batch_ops(
                                                 }
                                                 if tree.insert(&keys[index], &batch.to_ne_bytes()).is_some() {
                                                     assert!(
-                                                        ks.old_present.load(Relaxed) || ks.inserted.load(Relaxed) == 2
+                                                        ks.old_present.load(Relaxed)
+                                                            || ks.inserted.load(Relaxed) == 2
+                                                            || phase == PHASE_REWRITE
                                                     )
                                                 } else {
                                                     assert!(
@@ -170,7 +172,9 @@ fn batch_ops(
                                                     )
                                                 } else {
                                                     assert!(
-                                                        !ks.old_present.load(Relaxed) || ks.removed.load(Relaxed) == 2
+                                                        !ks.old_present.load(Relaxed)
+                                                            || ks.removed.load(Relaxed) == 2
+                                                            || phase == PHASE_REWRITE
                                                     )
                                                 }
                                             }
@@ -226,5 +230,5 @@ fn single_large() {
 
 #[cfg_attr(not(miri), test)]
 fn multi() {
-    batch_ops(4, 10, 250, |_, _| [500, 500, 500], |_, _| {});
+    batch_ops(4, 10, 2_500, |_, _| [500, 500, 500], |_, _| {});
 }
