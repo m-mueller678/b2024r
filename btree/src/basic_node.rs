@@ -2,16 +2,14 @@ use crate::key_source::{common_prefix, key_head, SourceSlice};
 use crate::node::{
     node_tag, CommonNodeHead, KindInner, KindLeaf, Node, NodeKind, ParentInserter, PAGE_HEAD_SIZE, PAGE_SIZE,
 };
-use crate::page::{PageId, PageTail};
+use crate::page::PageId;
 use crate::tree::Supreme;
 use crate::{MAX_KEY_SIZE, W};
 use bstr::{BStr, BString};
 use bytemuck::{Pod, Zeroable};
 use indxvec::Search;
 use itertools::Itertools;
-use seqlock::{
-    Exclusive, Guard, Guarded, Optimistic, SeqLockMode, SeqLockWrappable, SeqlockAccessors, Shared, Wrapper,
-};
+use seqlock::{Exclusive, Guarded, Optimistic, SeqLockMode, SeqLockWrappable, SeqlockAccessors, Shared, Wrapper};
 use std::fmt::{Debug, Formatter};
 use std::marker::PhantomData;
 use std::mem::{align_of, offset_of, size_of, swap};

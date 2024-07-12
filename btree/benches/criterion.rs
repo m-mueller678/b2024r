@@ -12,9 +12,8 @@ criterion_main!(benches);
 pub fn lookup(c: &mut Criterion) {
     const SMALL: usize = 10_000;
 
-    let mut keys = mixed_test_keys(SMALL);
+    let mut keys = mixed_test_keys(SMALL, false, 42);
     let rng = &mut SmallRng::seed_from_u64(0x12345678);
-    keys.par_shuffle(rng);
 
     let tree = Tree::new();
     for k in &keys[..SMALL] {

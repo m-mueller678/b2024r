@@ -4,7 +4,6 @@ use crate::node::{node_tag, CommonNodeHead, KindInner, Node, ParentInserter};
 use crate::page::{PageId, PageTail, PAGE_TAIL_SIZE};
 use crate::{MAX_KEY_SIZE, W};
 use bytemuck::{Pod, Zeroable};
-use itertools::Itertools;
 use seqlock::{Exclusive, Guard, Guarded, Optimistic, SeqlockAccessors};
 use std::mem::size_of;
 
@@ -240,7 +239,7 @@ impl ParentInserter for W<Guarded<'_, Exclusive, BasicNode<KindInner>>> {
     fn insert_upper_sibling(mut self, separator: impl SourceSlice) -> Result<Guard<'static, Exclusive, PageTail>, ()> {
         let new_node = PageId::alloc();
         separator.to_stack_buffer::<MAX_KEY_SIZE, _>(|sep| {
-            if let Ok(x) = self.insert_inner(sep, new_node) {
+            if let Ok(()) = self.insert_inner(sep, new_node) {
                 Ok(new_node.lock::<Exclusive>())
             } else {
                 new_node.free();

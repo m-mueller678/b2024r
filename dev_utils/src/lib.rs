@@ -34,7 +34,7 @@ pub fn generate_keys(
             new_keys.insert(c.clone());
         }
     }
-    keys.extend(new_keys.into_iter());
+    keys.extend(new_keys);
     assert_eq!(keys.len(), count);
     if sorted {
         keys.par_sort();

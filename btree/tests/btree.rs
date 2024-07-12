@@ -79,6 +79,7 @@ fn batch_ops(
                             const PHASE_RUN: usize = 1;
                             const PHASE_REWRITE: usize = 2;
                             const PHASE_CLEAN: usize = 3;
+                            #[allow(clippy::unused_enumerate_index)]
                             for (_op_index, (op, index)) in ops(batch_rng.clone()).enumerate() {
                                 let ks = &key_states[index];
                                 if phase == PHASE_ANNOUNCE {

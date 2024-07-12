@@ -32,7 +32,7 @@ struct Args {
 impl Args {
     fn keys(&self) -> Vec<Vec<u8>> {
         assert_eq!(self.key_set_name, "test-mix");
-        mixed_test_keys(self.key_count)
+        mixed_test_keys(self.key_count, false, 42)
     }
 }
 
