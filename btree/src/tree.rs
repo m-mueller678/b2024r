@@ -75,9 +75,10 @@ impl Tree {
         parent.check();
         while node.s().common().tag().load() == node_tag::BASIC_INNER && Some(node_pid) != stop_at {
             parent.release_unchecked();
-            node_pid = node.node_cast::<BasicInner>().lookup_inner(k, true);
             parent = node;
+            node_pid = parent.node_cast::<BasicInner>().lookup_inner(k, true);
             node = node_pid.lock();
+            parent.check();
         }
         [parent, node]
     }
