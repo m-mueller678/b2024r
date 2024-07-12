@@ -189,6 +189,22 @@ impl Tree {
             k,
         )
     }
+
+    fn lock_path(&self, key: &[u8]) -> Vec<Guard<'static, Exclusive, PageTail>> {
+        let mut path = Vec::new();
+        let mut node = {
+            let parent = self.meta.lock::<Exclusive>();
+            let node_pid = parent.s().cast::<MetadataPage>().root().load();
+            path.push(parent);
+            node_pid.lock::<Exclusive>()
+        };
+        while node.s().common().tag().load() == node_tag::BASIC_INNER {
+            let node_pid = node.s().node_cast::<BasicInner>().optimistic().lookup_inner(key, true);
+            path.push(node);
+            node = node_pid.lock();
+        }
+        path
+    }
 }
 
 impl Drop for Tree {
