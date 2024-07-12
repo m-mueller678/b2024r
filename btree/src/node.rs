@@ -42,6 +42,7 @@ impl<M: SeqLockMode> Debug for W<Guarded<'_, M, PageTail>> {
         match self.optimistic().node_cast::<BasicLeaf>().tag().load() {
             node_tag::BASIC_LEAF => Node::format(&self.optimistic().node_cast::<BasicLeaf>(), f),
             node_tag::BASIC_INNER => Node::format(&self.optimistic().node_cast::<BasicInner>(), f),
+            node_tag::METADATA_MARKER => write!(f, "MetadataPage"),
             x => write!(f, "UnknownNode{{tag:0x{x:x}}}"),
         }
     }
@@ -64,7 +65,7 @@ pub unsafe trait Node: SeqLockWrappable + Pod {
     /// if node is near empty, no split is performed and parent_insert is not called.
     fn split(
         this: &mut W<Guarded<Exclusive, Self>>,
-        parent_insert: impl FnOnce(usize, Guarded<'_, Shared, [u8]>) -> Result<Guard<'static, Exclusive, PageTail>, ()>,
+        parent_insert: impl ParentInserter,
         ref_key: &[u8],
     ) -> Result<(), ()>;
 
@@ -85,6 +86,10 @@ pub struct KindInner;
 #[derive(Clone, Copy, Zeroable, Pod)]
 #[repr(C)]
 pub struct KindLeaf;
+
+pub trait ParentInserter {
+    fn insert_upper_sibling(self, separator: impl SourceSlice) -> Result<Guard<'static, Exclusive, PageTail>, ()>;
+}
 
 pub trait NodeKind: Pod {
     const IS_LEAF: bool;

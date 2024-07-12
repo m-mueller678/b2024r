@@ -1,9 +1,10 @@
 use crate::basic_node::{BasicInner, BasicLeaf, BasicNode};
 use crate::key_source::SourceSlice;
-use crate::node::{node_tag, CommonNodeHead, KindInner, Node};
+use crate::node::{node_tag, CommonNodeHead, KindInner, Node, ParentInserter};
 use crate::page::{PageId, PageTail, PAGE_TAIL_SIZE};
 use crate::{MAX_KEY_SIZE, W};
 use bytemuck::{Pod, Zeroable};
+use itertools::Itertools;
 use seqlock::{Exclusive, Guard, Guarded, Optimistic, SeqlockAccessors};
 use std::mem::size_of;
 
@@ -176,19 +177,9 @@ impl Tree {
     fn split_locked_node<N: Node>(
         k: &[u8],
         leaf: &mut W<Guarded<Exclusive, N>>,
-        mut parent: W<Guarded<Exclusive, BasicNode<KindInner>>>,
+        parent: W<Guarded<Exclusive, BasicNode<KindInner>>>,
     ) -> Result<(), ()> {
-        N::split(
-            leaf,
-            |prefix_len, truncated| {
-                let new_node = PageId::alloc();
-                k[..prefix_len]
-                    .join(truncated)
-                    .to_stack_buffer::<{ crate::MAX_KEY_SIZE }, _>(|k| parent.b().insert_inner(k, new_node))?;
-                Ok(new_node.lock::<Exclusive>())
-            },
-            k,
-        )
+        N::split(leaf, parent, k)
     }
 
     fn lock_path(&self, key: &[u8]) -> Vec<Guard<'static, Exclusive, PageTail>> {
@@ -204,6 +195,7 @@ impl Tree {
             path.push(node);
             node = node_pid.lock();
         }
+        path.push(node);
         path
     }
 }
@@ -242,4 +234,18 @@ struct MetadataPage {
 pub enum Supreme<T> {
     X(T),
     Sup,
+}
+
+impl ParentInserter for W<Guarded<'_, Exclusive, BasicNode<KindInner>>> {
+    fn insert_upper_sibling(mut self, separator: impl SourceSlice) -> Result<Guard<'static, Exclusive, PageTail>, ()> {
+        let new_node = PageId::alloc();
+        separator.to_stack_buffer::<MAX_KEY_SIZE, _>(|sep| {
+            if let Ok(x) = self.insert_inner(sep, new_node) {
+                Ok(new_node.lock::<Exclusive>())
+            } else {
+                new_node.free();
+                Err(())
+            }
+        })
+    }
 }

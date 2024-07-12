@@ -1,5 +1,7 @@
 use crate::key_source::{common_prefix, key_head, SourceSlice};
-use crate::node::{node_tag, CommonNodeHead, KindInner, KindLeaf, Node, NodeKind, PAGE_HEAD_SIZE, PAGE_SIZE};
+use crate::node::{
+    node_tag, CommonNodeHead, KindInner, KindLeaf, Node, NodeKind, ParentInserter, PAGE_HEAD_SIZE, PAGE_SIZE,
+};
 use crate::page::{PageId, PageTail};
 use crate::tree::Supreme;
 use crate::{MAX_KEY_SIZE, W};
@@ -172,7 +174,7 @@ unsafe impl<V: NodeKind> Node for BasicNode<V> {
 
     fn split(
         this: &mut W<Guarded<Exclusive, Self>>,
-        parent_insert: impl FnOnce(usize, Guarded<'_, Shared, [u8]>) -> Result<Guard<'static, Exclusive, PageTail>, ()>,
+        parent_insert: impl ParentInserter,
         ref_key: &[u8],
     ) -> Result<(), ()> {
         // TODO tail compression
@@ -182,7 +184,7 @@ unsafe impl<V: NodeKind> Node for BasicNode<V> {
         let this_mut = this;
         let this = this_mut.s();
         let (low_count, sep_key) = Self::find_separator(&this, ref_key);
-        let mut right = parent_insert(this.prefix_len().load() as usize, this.s().key(low_count))?;
+        let mut right = parent_insert.insert_upper_sibling(sep_key)?;
         let right = &mut right.b().0.cast::<BasicNode<V>>();
         Node::validate(this.s());
         let (lr, rr) = if V::IS_LEAF {
