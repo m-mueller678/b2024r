@@ -622,13 +622,14 @@ impl<'a> W<Guarded<'a, Exclusive, BasicNode<KindInner>>> {
 #[cfg(test)]
 mod tests {
     use crate::basic_node::{BasicNode, NodeKind};
-    use crate::node::{KindInner, KindLeaf, Node};
-    use crate::page::PageId;
+    use crate::key_source::SourceSlice;
+    use crate::node::{KindInner, KindLeaf, Node, ParentInserter};
+    use crate::page::{PageId, PageTail};
     use bytemuck::Zeroable;
     use rand::prelude::SliceRandom;
     use rand::rngs::SmallRng;
     use rand::SeedableRng;
-    use seqlock::{Exclusive, Guarded};
+    use seqlock::{Exclusive, Guard, Guarded};
     use std::collections::HashSet;
 
     #[test]
@@ -669,9 +670,22 @@ mod tests {
     }
 
     fn split_merge<V: NodeKind>(ufb: u8, lower: [V::SliceType; 3], mut val: impl FnMut(u64) -> Vec<V::SliceType>) {
+        struct FakeParent(Option<Vec<u8>>, PageId);
+
+        #[allow(non_local_definitions)]
+        impl ParentInserter for &mut FakeParent {
+            fn insert_upper_sibling(
+                self,
+                separator: impl SourceSlice,
+            ) -> Result<Guard<'static, Exclusive, PageTail>, ()> {
+                assert!(self.0.is_none());
+                self.0 = Some(separator.to_vec());
+                Ok(self.1.lock())
+            }
+        }
+
         let p1 = PageId::alloc();
-        let p2 = PageId::alloc();
-        let mut split_key = None;
+        let mut fake_parent = FakeParent(None, PageId::alloc());
         let mut n1 = p1.lock::<Exclusive>();
         let mut n1 = n1.b().0.cast::<BasicNode<V>>();
         n1.init(&[0][..], &[ufb, 1][..], lower);
@@ -681,24 +695,19 @@ mod tests {
             }
         }
         let s1 = n1.s().to_debug();
-        Node::split(
-            &mut n1,
-            |prefix, k| {
-                split_key = Some((prefix, k.load_slice_to_vec()));
-                Ok(p2.lock())
-            },
-            &[0],
-        )
-        .unwrap();
-        let mut n2 = p2.lock::<Exclusive>();
+        Node::split(&mut n1, &mut fake_parent, &[0]).unwrap();
+        let mut n2 = fake_parent.1.lock::<Exclusive>();
         let mut n2 = n2.b().0.cast::<BasicNode<V>>();
         Node::validate(n1.s());
         Node::validate(n2.s());
+        let sep_key = fake_parent.0.as_ref().unwrap();
+        assert_eq!(&n1.s().upper_fence().load_slice_to_vec(), sep_key);
+        assert_eq!(&n2.s().lower_fence().load_slice_to_vec(), sep_key);
         Node::merge(&mut n1, &mut n2, &[0]);
         Node::validate(n1.s());
         assert_eq!(s1, n1.s().to_debug());
         p1.free();
-        p2.free();
+        fake_parent.1.free();
     }
 
     #[test]
