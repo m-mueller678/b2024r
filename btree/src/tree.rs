@@ -181,7 +181,7 @@ impl Tree {
         N::split(leaf, parent, k)
     }
 
-    fn lock_path(&self, key: &[u8]) -> Vec<Guard<'static, Exclusive, PageTail>> {
+    pub fn lock_path(&self, key: &[u8]) -> Vec<Guard<'static, Exclusive, PageTail>> {
         let mut path = Vec::new();
         let mut node = {
             let parent = self.meta.lock::<Exclusive>();

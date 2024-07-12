@@ -59,6 +59,7 @@ pub fn mixed_test_keys(count: usize, sorted: bool, seed: u64) -> Vec<Box<[u8]>> 
     )
 }
 
+#[allow(clippy::type_complexity)]
 pub fn mixed_generator<R: Rng>(
     gens: Vec<Box<dyn Sync + Fn(&mut R, usize) -> Vec<u8>>>,
 ) -> impl Sync + Fn(&mut R, usize) -> Vec<u8> {
