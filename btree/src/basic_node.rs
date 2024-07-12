@@ -635,7 +635,7 @@ mod tests {
     fn leaf() {
         let rng = &mut SmallRng::seed_from_u64(42);
         let keys = dev_utils::ascii_bin_generator(10..=50);
-        let mut keys: Vec<Vec<u8>> = (0..50).map(|_| keys(rng)).collect();
+        let mut keys: Vec<Vec<u8>> = (0..50).map(|i| keys(rng, i)).collect();
         keys.sort();
         keys.dedup();
         let leaf = &mut BasicNode::<KindLeaf>::zeroed();
@@ -710,7 +710,7 @@ mod tests {
 
     #[test]
     fn split_merge_inner() {
-        let fake_pid = |i| PageId::from_address((i + 1) << 12).to_3x16().to_vec();
+        let fake_pid = |i| PageId::from_address((i as usize + 1) << 12).to_3x16().to_vec();
         split_merge::<KindInner>(1, [0; 3], fake_pid);
         split_merge::<KindInner>(0, [0; 3], fake_pid);
     }
