@@ -1,5 +1,4 @@
 #![feature(never_type)]
-#![feature(hint_assert_unchecked)]
 #![feature(pointer_is_aligned_to)]
 #![feature(layout_for_ptr)]
 
@@ -39,12 +38,8 @@ impl From<Never> for () {
     }
 }
 
-#[path = "atomic_byte_impl.rs"]
-#[cfg(any(feature = "impl_atomic_byte", miri))]
 mod access_impl;
-#[cfg(all(feature = "impl_asm_read", not(miri)))]
-#[path = "asm_read.rs"]
-mod access_impl;
+
 mod lock;
 
 #[allow(private_bounds)]
