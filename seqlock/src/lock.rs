@@ -95,6 +95,11 @@ impl<BM: BufferManager, T: SeqLockWrappable> Guard<BM, Exclusive, T> {
         forget(self);
         Guard { bm, guard_data, access: ManuallyDrop::new(unsafe { Guarded::wrap_unchecked(ptr) }) }
     }
+
+    pub fn free(self) {
+        self.bm.free(self.page_address());
+        forget(self);
+    }
 }
 
 impl<BM: BufferManager, M: SeqLockMode, T: SeqLockWrappable> Guard<BM, M, T> {
@@ -136,8 +141,8 @@ impl<BM: BufferManager, T: SeqLockWrappable> DerefMut for Guard<BM, Exclusive, T
     }
 }
 
-pub unsafe trait BufferManager: Copy {
-    type Page;
+pub unsafe trait BufferManager: Copy + Sized {
+    type Page: Sized + SeqLockWrappable;
 
     /// Returned page is exclusively locked
     fn alloc(&self) -> (u64, &'static UnsafeCell<Self::Page>);
@@ -153,4 +158,28 @@ pub unsafe trait BufferManager: Copy {
     /// Accepts any address within a page and returns a value that can be passed as `page_address` to the other methods to refer to the containing page.
     /// This needs not be the address of the page.
     fn from_contained_address(self, address: usize) -> usize;
+}
+
+pub trait BmExt: BufferManager {
+    fn lock_optimistic(self, page_id: u64) -> Guard<Self, Optimistic, Self::Page> {
+        let (page, guard_data) = self.acquire_optimistic(page_id);
+        Guard { bm: self, guard_data, access: ManuallyDrop::new(unsafe { Guarded::wrap_unchecked(page.get()) }) }
+    }
+
+    fn lock_exclusive(self, page_id: u64) -> Guard<Self, Exclusive, Self::Page> {
+        let page = self.acquire_exclusive(page_id);
+        Guard { bm: self, guard_data: false, access: ManuallyDrop::new(unsafe { Guarded::wrap_unchecked(page.get()) }) }
+    }
+
+    fn lock_new(self) -> (u64, Guard<Self, Exclusive, Self::Page>) {
+        let (id, page) = self.alloc();
+        (
+            id,
+            Guard {
+                bm: self,
+                guard_data: false,
+                access: ManuallyDrop::new(unsafe { Guarded::wrap_unchecked(page.get()) }),
+            },
+        )
+    }
 }
