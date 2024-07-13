@@ -95,7 +95,7 @@ unsafe impl SeqLockModeExclusiveImpl for Exclusive {
         half_atomic_memcpy::<false>(&x as *const T as *const u8, *p as *mut u8, size_of::<T>())
     }
 
-    unsafe fn store_slice<'a, T: Pod>(p: &mut Self::Pointer<'a, [T]>, x: &[T]) {
+    unsafe fn store_slice<T: Pod>(p: &mut Self::Pointer<'_, [T]>, x: &[T]) {
         half_atomic_memcpy::<false>(x.as_ptr() as *const u8, *p as *mut T as *mut u8, size_of_val(x));
     }
 

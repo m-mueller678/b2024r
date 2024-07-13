@@ -7,7 +7,7 @@ use std::cmp::Ordering;
 use std::ffi::c_void;
 use std::mem::{size_of, MaybeUninit};
 use std::sync::atomic::Ordering::{Acquire, Relaxed};
-use std::sync::atomic::{AtomicU64, compiler_fence};
+use std::sync::atomic::{compiler_fence, AtomicU64};
 
 pub fn optimistic_release(lock: &AtomicU64, expected: u64) {
     compiler_fence(Acquire);

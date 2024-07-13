@@ -1,11 +1,9 @@
 #![allow(unused_variables)]
 
-use crate::{Exclusive, Optimistic, SeqLockMode, SeqLockModeExclusiveImpl, SeqLockModeImpl, Shared};
+use crate::{Exclusive, Optimistic, SeqLockMode, SeqLockModeImpl};
 use bytemuck::Pod;
-use std::borrow::Borrow;
 use std::cmp::Ordering;
 use std::mem::{align_of, size_of, transmute, MaybeUninit};
-use std::ops::Range;
 use std::ptr::slice_from_raw_parts_mut;
 use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering::Relaxed;
