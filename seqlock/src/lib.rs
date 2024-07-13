@@ -422,6 +422,34 @@ pub struct Guarded<'a, M: SeqLockMode, T: ?Sized> {
 #[derive(Debug)]
 pub struct OptimisticLockError(());
 
+impl<T: Pod + SeqLockWrappable + Eq> Eq for Guarded<'_, Shared, [T]> {}
+
+impl<T: Pod + SeqLockWrappable + PartialEq> PartialEq for Guarded<'_, Shared, [T]> {
+    fn eq(&self, other: &Self) -> bool {
+        if self.len() != other.len() {
+            return false;
+        };
+        for i in 0..self.len() {
+            if self.index(i).get().load() != other.index(i).get().load() {
+                return false;
+            }
+        }
+        true
+    }
+}
+
+impl<T: Pod + SeqLockWrappable + Ord> PartialOrd for Guarded<'_, Shared, [T]> {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl<T: Pod + SeqLockWrappable + Ord> Ord for Guarded<'_, Shared, [T]> {
+    fn cmp(&self, other: &Self) -> Ordering {
+        Iterator::cmp(self.iter().map(|x| x.get().load()), other.iter().map(|x| x.get().load()))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use crate::{Exclusive, Guarded, Optimistic, SeqLockMode, SeqLockWrappable, Shared, Wrapper};
@@ -552,33 +580,5 @@ mod tests {
                 }
             );}
         );
-    }
-}
-
-impl<T: Pod + SeqLockWrappable + Eq> Eq for Guarded<'_, Shared, [T]> {}
-
-impl<T: Pod + SeqLockWrappable + PartialEq> PartialEq for Guarded<'_, Shared, [T]> {
-    fn eq(&self, other: &Self) -> bool {
-        if self.len() != other.len() {
-            return false;
-        };
-        for i in 0..self.len() {
-            if self.index(i).get().load() != other.index(i).get().load() {
-                return false;
-            }
-        }
-        true
-    }
-}
-
-impl<T: Pod + SeqLockWrappable + Ord> PartialOrd for Guarded<'_, Shared, [T]> {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        Some(self.cmp(other))
-    }
-}
-
-impl<T: Pod + SeqLockWrappable + Ord> Ord for Guarded<'_, Shared, [T]> {
-    fn cmp(&self, other: &Self) -> Ordering {
-        Iterator::cmp(self.iter().map(|x| x.get().load()), other.iter().map(|x| x.get().load()))
     }
 }

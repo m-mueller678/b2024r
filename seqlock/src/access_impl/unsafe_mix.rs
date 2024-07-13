@@ -4,7 +4,6 @@ use crate::{Exclusive, Optimistic, SeqLockMode, SeqLockModeImpl};
 use bytemuck::Pod;
 use radium::marker::Atomic;
 use radium::{Atom, Radium};
-use std::borrow::Borrow;
 use std::cmp::Ordering;
 use std::ffi::c_void;
 use std::mem::{align_of, size_of, MaybeUninit};

@@ -633,6 +633,7 @@ mod tests {
     use std::collections::HashSet;
 
     #[test]
+    #[allow(clippy::unused_enumerate_index)]
     fn leaf() {
         let rng = &mut SmallRng::seed_from_u64(42);
         let keys = dev_utils::ascii_bin_generator(10..=50);
