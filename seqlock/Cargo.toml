@@ -13,7 +13,8 @@ libc = "0.2.155"
 rand = {version = "0.8.5",features = ["small_rng"]}
 
 [features]
-default=["impl_ub"]
+default=["impl_extreme_ub"]
 impl_asm_read=[]
 impl_atomic_byte=[]
 impl_ub=[]
+impl_extreme_ub=[]

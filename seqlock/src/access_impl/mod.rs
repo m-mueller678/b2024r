@@ -15,5 +15,10 @@ mod unsafe_mix;
 #[cfg(all(feature = "impl_ub", not(miri)))]
 pub use unsafe_mix::optimistic_release;
 
-#[cfg(all(any(feature = "impl_ub", feature = "impl_asm_read"), not(miri)))]
+#[cfg(all(any(feature = "impl_ub", feature = "impl_asm_read", feature = "impl_extreme_ub"), not(miri)))]
 mod ref_impl;
+
+#[cfg(all(feature = "impl_extreme_ub", not(miri)))]
+mod extreme_ub;
+#[cfg(all(feature = "impl_extreme_ub", not(miri)))]
+pub use extreme_ub::optimistic_release;
