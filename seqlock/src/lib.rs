@@ -1,10 +1,12 @@
 #![feature(never_type)]
 #![feature(pointer_is_aligned_to)]
 #![feature(layout_for_ptr)]
+#![feature(strict_provenance)]
 
 extern crate core;
 
 use bytemuck::Pod;
+use std::cell::UnsafeCell;
 use std::cmp::Ordering;
 use std::fmt::Debug;
 use std::marker::PhantomData;
@@ -12,14 +14,14 @@ use std::mem::{align_of, align_of_val_raw, size_of, transmute, MaybeUninit};
 use std::ops::{Bound, Range, RangeBounds};
 use std::ptr::slice_from_raw_parts_mut;
 use std::sync::atomic::Ordering::{Acquire, Relaxed, Release};
-use std::thread::yield_now;
+use std::thread::{panicking, yield_now};
 
 pub mod unwind;
 mod wrappable;
 
-use crate::lock::LockState;
+use crate::lock::{BufferManager, LockState};
 pub use access_impl::optimistic_release;
-pub use lock::{Guard, SeqLock};
+pub use lock::Guard;
 pub use seqlock_macros::SeqlockAccessors;
 pub use wrappable::{SeqLockWrappable, Wrapper};
 
@@ -50,8 +52,8 @@ pub trait SeqLockMode: SeqLockModeImpl + 'static {
     const PESSIMISTIC: bool;
     const EXCLUSIVE: bool;
 
-    fn acquire(s: &LockState) -> Self::GuardData;
-    fn release(s: &LockState, d: Self::GuardData) -> Self::ReleaseData;
+    fn acquire<BM: BufferManager>(bm: BM, page_id: u64) -> (&'static UnsafeCell<BM::Page>, Self::GuardData);
+    fn release(bm: impl BufferManager, page_address: usize, guard_data: Self::GuardData) -> Self::ReleaseData;
 
     fn release_error() -> !;
 }
@@ -77,19 +79,12 @@ impl SeqLockMode for Optimistic {
         unwind::start()
     }
 
-    fn acquire(lock: &LockState) -> Self::GuardData {
-        loop {
-            let x = lock.version.load(Acquire);
-            if x % 2 == 0 {
-                return x;
-            } else {
-                yield_now();
-            }
-        }
+    fn acquire<BM: BufferManager>(bm: BM, page_id: u64) -> (&'static UnsafeCell<BM::Page>, Self::GuardData) {
+        bm.acquire_optimistic(page_id)
     }
 
-    fn release(lock: &LockState, guard: Self::GuardData) -> Self::ReleaseData {
-        optimistic_release(&lock.version, guard)
+    fn release(bm: impl BufferManager, page_address: usize, guard_data: Self::GuardData) -> Self::ReleaseData {
+        bm.release_optimistic(page_address, guard_data)
     }
 }
 
@@ -105,6 +100,11 @@ impl SeqLockMode for Exclusive {
     const PESSIMISTIC: bool = true;
     const EXCLUSIVE: bool = true;
     type SharedDowngrade = Shared;
+
+    // track if guard has been written to
+    #[cfg(debug_assertions)]
+    type GuardData = bool;
+    #[cfg(not(debug_assertions))]
     type GuardData = ();
     type ReleaseData = u64;
 
@@ -112,22 +112,24 @@ impl SeqLockMode for Exclusive {
         unreachable!()
     }
 
-    fn acquire(lock: &LockState) -> Self::GuardData {
-        loop {
-            let x = lock.version.load(Relaxed);
-            if x % 2 == 0 {
-                if lock.version.compare_exchange(x, x + 1, Acquire, Relaxed).is_ok() {
-                    return;
-                }
-            } else {
-                yield_now();
-            }
+    fn acquire<BM: BufferManager>(bm: BM, page_id: u64) -> (&'static UnsafeCell<BM::Page>, Self::GuardData) {
+        let p = bm.acquire_exclusive(page_id);
+        #[cfg(debug_assertions)]
+        {
+            (p, false)
+        }
+        #[cfg(not(debug_assertions))]
+        {
+            (p, ())
         }
     }
 
-    fn release(lock: &LockState, (): ()) -> Self::ReleaseData {
-        let prev = lock.version.fetch_add(1, Release);
-        prev + 1
+    fn release(bm: impl BufferManager, page_address: usize, guard_data: Self::GuardData) -> Self::ReleaseData {
+        #[cfg(debug_assertions)]
+        if std::thread::panicking() && guard_data {
+            panic!("unwinding out of written exclusive lock")
+        }
+        bm.release_exclusive(page_address)
     }
 }
 
@@ -138,11 +140,11 @@ impl SeqLockMode for Shared {
     type GuardData = ();
     type ReleaseData = u64;
 
-    fn acquire(_s: &LockState) -> Self::GuardData {
+    fn acquire<BM: BufferManager>(bm: BM, page_id: u64) -> (&'static UnsafeCell<BM::Page>, Self::GuardData) {
         unimplemented!()
     }
 
-    fn release(_s: &LockState, _d: Self::GuardData) -> Self::ReleaseData {
+    fn release(bm: impl BufferManager, page_address: usize, guard_data: Self::GuardData) -> Self::ReleaseData {
         unimplemented!()
     }
 

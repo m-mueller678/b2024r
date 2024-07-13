@@ -8,7 +8,7 @@ pub trait Wrapper<T: Sized>: Sized {
     fn get_mut(&mut self) -> &mut T;
 }
 
-pub trait SeqLockWrappable {
+pub trait SeqLockWrappable: 'static {
     type Wrapper<T>: Wrapper<T>;
 }
 
@@ -28,7 +28,7 @@ impl<T> Wrapper<T> for T {
 }
 
 pub trait SeqLockWrappableIdentity {}
-impl<X: SeqLockWrappableIdentity + ?Sized> SeqLockWrappable for X {
+impl<X: SeqLockWrappableIdentity + ?Sized + 'static> SeqLockWrappable for X {
     type Wrapper<T> = T;
 }
 
