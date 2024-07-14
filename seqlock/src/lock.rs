@@ -11,13 +11,13 @@ pub struct LockState {
     pub(crate) version: AtomicU64,
 }
 
-pub struct Guard<BM: BufferManager, M: SeqLockMode, T: SeqLockWrappable + ?Sized> {
+pub struct Guard<'bm, BM: BufferManager<'bm>, M: SeqLockMode, T: SeqLockWrappable + ?Sized> {
     bm: BM,
     guard_data: M::GuardData,
-    access: ManuallyDrop<T::Wrapper<Guarded<'static, M, T>>>,
+    access: ManuallyDrop<T::Wrapper<Guarded<'bm, M, T>>>,
 }
 
-impl<BM: BufferManager, T: SeqLockWrappable + ?Sized> Guard<BM, Exclusive, T> {
+impl<'bm, BM: BufferManager<'bm>, T: SeqLockWrappable + ?Sized> Guard<'bm, BM, Exclusive, T> {
     pub fn reset_written(&mut self) {
         #[cfg(debug_assertions)]
         {
@@ -26,7 +26,7 @@ impl<BM: BufferManager, T: SeqLockWrappable + ?Sized> Guard<BM, Exclusive, T> {
     }
 }
 
-impl<BM: BufferManager, M: SeqLockMode, T: SeqLockWrappable + ?Sized> Debug for Guard<BM, M, T> {
+impl<'bm, BM: BufferManager<'bm>, M: SeqLockMode, T: SeqLockWrappable + ?Sized> Debug for Guard<'bm, BM, M, T> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Guard")
             .field("data", &self.guard_data)
@@ -35,14 +35,14 @@ impl<BM: BufferManager, M: SeqLockMode, T: SeqLockWrappable + ?Sized> Debug for 
     }
 }
 
-impl<BM: BufferManager, M: SeqLockMode, T: SeqLockWrappable + ?Sized> Drop for Guard<BM, M, T> {
+impl<'bm, BM: BufferManager<'bm>, M: SeqLockMode, T: SeqLockWrappable + ?Sized> Drop for Guard<'bm, BM, M, T> {
     /// dropping an exclusive lock that has been used for writing during unwinding will abort the process on debug builds
     fn drop(&mut self) {
         M::release(self.bm, self.page_address(), self.guard_data);
     }
 }
 
-impl<BM: BufferManager, M: SeqLockMode, T: SeqLockWrappable + ?Sized> Guard<BM, M, T> {
+impl<'bm, BM: BufferManager<'bm>, M: SeqLockMode, T: SeqLockWrappable + ?Sized> Guard<'bm, BM, M, T> {
     pub fn ptr(&self) -> *mut T {
         M::as_ptr(&(*self.access).get().p)
     }
@@ -52,7 +52,7 @@ impl<BM: BufferManager, M: SeqLockMode, T: SeqLockWrappable + ?Sized> Guard<BM, 
     }
 }
 
-impl<BM: BufferManager, T: SeqLockWrappable> Guard<BM, Optimistic, T> {
+impl<'bm, BM: BufferManager<'bm>, T: SeqLockWrappable> Guard<'bm, BM, Optimistic, T> {
     pub fn release_unchecked(self) {
         forget(self);
     }
@@ -61,7 +61,7 @@ impl<BM: BufferManager, T: SeqLockWrappable> Guard<BM, Optimistic, T> {
         drop(self.clone())
     }
 
-    pub fn upgrade(self) -> Guard<BM, Exclusive, T> {
+    pub fn upgrade(self) -> Guard<'bm, BM, Exclusive, T> {
         let ptr = Optimistic::as_ptr(&(*self.access).get().p);
         self.bm.upgrade_lock(self.bm.from_contained_address(ptr as usize), self.guard_data);
         let x = Guard {
@@ -77,7 +77,7 @@ impl<BM: BufferManager, T: SeqLockWrappable> Guard<BM, Optimistic, T> {
     }
 }
 
-impl<BM: BufferManager, T: SeqLockWrappable> Clone for Guard<BM, Optimistic, T> {
+impl<'bm, BM: BufferManager<'bm>, T: SeqLockWrappable> Clone for Guard<'bm, BM, Optimistic, T> {
     fn clone(&self) -> Self {
         Guard {
             bm: self.bm,
@@ -87,8 +87,8 @@ impl<BM: BufferManager, T: SeqLockWrappable> Clone for Guard<BM, Optimistic, T> 
     }
 }
 
-impl<BM: BufferManager, T: SeqLockWrappable> Guard<BM, Exclusive, T> {
-    pub fn downgrade(self) -> Guard<BM, Optimistic, T> {
+impl<'bm, BM: BufferManager<'bm>, T: SeqLockWrappable> Guard<'bm, BM, Exclusive, T> {
+    pub fn downgrade(self) -> Guard<'bm, BM, Optimistic, T> {
         let ptr = self.ptr();
         let guard_data = Exclusive::release(self.bm, self.page_address(), self.guard_data);
         let bm = self.bm;
@@ -102,7 +102,7 @@ impl<BM: BufferManager, T: SeqLockWrappable> Guard<BM, Exclusive, T> {
     }
 }
 
-impl<BM: BufferManager, M: SeqLockMode, T: SeqLockWrappable> Guard<BM, M, T> {
+impl<'bm, BM: BufferManager<'bm>, M: SeqLockMode, T: SeqLockWrappable> Guard<'bm, BM, M, T> {
     /// unlike drop, calling this on an exclusive lock during unwinding is ok.
     pub fn release(self) {
         M::release(self.bm, self.page_address(), self.guard_data);
@@ -110,10 +110,10 @@ impl<BM: BufferManager, M: SeqLockMode, T: SeqLockWrappable> Guard<BM, M, T> {
     }
 
     /// mapped object must lie within source object
-    pub unsafe fn map<U: SeqLockWrappable + ?Sized + 'static>(
+    pub unsafe fn map<U: SeqLockWrappable + ?Sized + 'bm>(
         mut self,
-        f: impl FnOnce(T::Wrapper<Guarded<'static, M, T>>) -> U::Wrapper<Guarded<'static, M, U>>,
-    ) -> Guard<BM, M, U> {
+        f: impl FnOnce(T::Wrapper<Guarded<'bm, M, T>>) -> U::Wrapper<Guarded<'bm, M, U>>,
+    ) -> Guard<'bm, BM, M, U> {
         unsafe {
             let Guard { bm, guard_data, ref mut access } = self;
             let access_taken = ManuallyDrop::take(access);
@@ -123,15 +123,15 @@ impl<BM: BufferManager, M: SeqLockMode, T: SeqLockWrappable> Guard<BM, M, T> {
     }
 }
 
-impl<BM: BufferManager, M: SeqLockMode, T: SeqLockWrappable + ?Sized> Deref for Guard<BM, M, T> {
-    type Target = T::Wrapper<Guarded<'static, M, T>>;
+impl<'bm, BM: BufferManager<'bm>, M: SeqLockMode, T: SeqLockWrappable + ?Sized> Deref for Guard<'bm, BM, M, T> {
+    type Target = T::Wrapper<Guarded<'bm, M, T>>;
 
     fn deref(&self) -> &Self::Target {
         &self.access
     }
 }
 
-impl<BM: BufferManager, T: SeqLockWrappable> DerefMut for Guard<BM, Exclusive, T> {
+impl<'bm, BM: BufferManager<'bm>, T: SeqLockWrappable> DerefMut for Guard<'bm, BM, Exclusive, T> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         #[cfg(debug_assertions)]
         {
@@ -141,17 +141,17 @@ impl<BM: BufferManager, T: SeqLockWrappable> DerefMut for Guard<BM, Exclusive, T
     }
 }
 
-pub unsafe trait BufferManager: Copy + Sized {
+pub unsafe trait BufferManager<'bm>: Copy + Sized {
     type Page: Sized + SeqLockWrappable;
 
     /// Returned page is exclusively locked
-    fn alloc(&self) -> (u64, &'static UnsafeCell<Self::Page>);
+    fn alloc(&self) -> (u64, &'bm UnsafeCell<Self::Page>);
     /// Page must be exclusively locked.
     /// The lock is automatically released.
     fn free(&self, page_address: usize);
     fn release_exclusive(self, page_address: usize) -> u64;
-    fn acquire_exclusive(self, page_id: u64) -> (&'static UnsafeCell<Self::Page>);
-    fn acquire_optimistic(self, page_id: u64) -> (&'static UnsafeCell<Self::Page>, u64);
+    fn acquire_exclusive(self, page_id: u64) -> (&'bm UnsafeCell<Self::Page>);
+    fn acquire_optimistic(self, page_id: u64) -> (&'bm UnsafeCell<Self::Page>, u64);
     fn release_optimistic(self, page_address: usize, version: u64);
     fn upgrade_lock(self, page_address: usize, version: u64);
 
@@ -160,18 +160,18 @@ pub unsafe trait BufferManager: Copy + Sized {
     fn from_contained_address(self, address: usize) -> usize;
 }
 
-pub trait BmExt: BufferManager {
-    fn lock_optimistic(self, page_id: u64) -> Guard<Self, Optimistic, Self::Page> {
+pub trait BmExt<'bm>: BufferManager<'bm> {
+    fn lock_optimistic(self, page_id: u64) -> Guard<'bm, Self, Optimistic, Self::Page> {
         let (page, guard_data) = self.acquire_optimistic(page_id);
         Guard { bm: self, guard_data, access: ManuallyDrop::new(unsafe { Guarded::wrap_unchecked(page.get()) }) }
     }
 
-    fn lock_exclusive(self, page_id: u64) -> Guard<Self, Exclusive, Self::Page> {
+    fn lock_exclusive(self, page_id: u64) -> Guard<'bm, Self, Exclusive, Self::Page> {
         let page = self.acquire_exclusive(page_id);
         Guard { bm: self, guard_data: false, access: ManuallyDrop::new(unsafe { Guarded::wrap_unchecked(page.get()) }) }
     }
 
-    fn lock_new(self) -> (u64, Guard<Self, Exclusive, Self::Page>) {
+    fn lock_new(self) -> (u64, Guard<'bm, Self, Exclusive, Self::Page>) {
         let (id, page) = self.alloc();
         (
             id,

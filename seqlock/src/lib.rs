@@ -52,8 +52,12 @@ pub trait SeqLockMode: SeqLockModeImpl + 'static {
     const PESSIMISTIC: bool;
     const EXCLUSIVE: bool;
 
-    fn acquire<BM: BufferManager>(bm: BM, page_id: u64) -> (&'static UnsafeCell<BM::Page>, Self::GuardData);
-    fn release(bm: impl BufferManager, page_address: usize, guard_data: Self::GuardData) -> Self::ReleaseData;
+    fn acquire<'bm, BM: BufferManager<'bm>>(bm: BM, page_id: u64) -> (&'bm UnsafeCell<BM::Page>, Self::GuardData);
+    fn release<'bm, BM: BufferManager<'bm>>(
+        bm: BM,
+        page_address: usize,
+        guard_data: Self::GuardData,
+    ) -> Self::ReleaseData;
 
     fn release_error() -> !;
 }
@@ -79,11 +83,15 @@ impl SeqLockMode for Optimistic {
         unwind::start()
     }
 
-    fn acquire<BM: BufferManager>(bm: BM, page_id: u64) -> (&'static UnsafeCell<BM::Page>, Self::GuardData) {
+    fn acquire<'bm, BM: BufferManager<'bm>>(bm: BM, page_id: u64) -> (&'bm UnsafeCell<BM::Page>, Self::GuardData) {
         bm.acquire_optimistic(page_id)
     }
 
-    fn release(bm: impl BufferManager, page_address: usize, guard_data: Self::GuardData) -> Self::ReleaseData {
+    fn release<'bm, BM: BufferManager<'bm>>(
+        bm: BM,
+        page_address: usize,
+        guard_data: Self::GuardData,
+    ) -> Self::ReleaseData {
         bm.release_optimistic(page_address, guard_data)
     }
 }
@@ -112,7 +120,7 @@ impl SeqLockMode for Exclusive {
         unreachable!()
     }
 
-    fn acquire<BM: BufferManager>(bm: BM, page_id: u64) -> (&'static UnsafeCell<BM::Page>, Self::GuardData) {
+    fn acquire<'bm, BM: BufferManager<'bm>>(bm: BM, page_id: u64) -> (&'bm UnsafeCell<BM::Page>, Self::GuardData) {
         let p = bm.acquire_exclusive(page_id);
         #[cfg(debug_assertions)]
         {
@@ -124,7 +132,11 @@ impl SeqLockMode for Exclusive {
         }
     }
 
-    fn release(bm: impl BufferManager, page_address: usize, guard_data: Self::GuardData) -> Self::ReleaseData {
+    fn release<'bm, BM: BufferManager<'bm>>(
+        bm: BM,
+        page_address: usize,
+        guard_data: Self::GuardData,
+    ) -> Self::ReleaseData {
         #[cfg(debug_assertions)]
         if std::thread::panicking() && guard_data {
             panic!("unwinding out of written exclusive lock")
@@ -140,11 +152,15 @@ impl SeqLockMode for Shared {
     type GuardData = ();
     type ReleaseData = u64;
 
-    fn acquire<BM: BufferManager>(bm: BM, page_id: u64) -> (&'static UnsafeCell<BM::Page>, Self::GuardData) {
+    fn acquire<'bm, BM: BufferManager<'bm>>(bm: BM, page_id: u64) -> (&'bm UnsafeCell<BM::Page>, Self::GuardData) {
         unimplemented!()
     }
 
-    fn release(bm: impl BufferManager, page_address: usize, guard_data: Self::GuardData) -> Self::ReleaseData {
+    fn release<'bm, BM: BufferManager<'bm>>(
+        bm: BM,
+        page_address: usize,
+        guard_data: Self::GuardData,
+    ) -> Self::ReleaseData {
         unimplemented!()
     }
 
