@@ -50,7 +50,7 @@ struct MyStruct {
 #[allow(dead_code)]
 #[derive(SeqlockAccessors)]
 #[seq_lock_wrapper(MyWrapper)]
-struct MyStructGeneric<T: Deref + SeqLockWrappable, U>
+struct MyStructGeneric<T: Deref + SeqLockWrappable, U: 'static>
 where
     T::Target: Deref,
 {

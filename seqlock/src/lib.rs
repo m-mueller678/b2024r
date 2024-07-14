@@ -11,7 +11,7 @@ use std::cmp::Ordering;
 use std::fmt::Debug;
 use std::marker::PhantomData;
 use std::mem::{align_of, align_of_val_raw, size_of, transmute, MaybeUninit};
-use std::ops::{Bound, Range, RangeBounds};
+use std::ops::{Bound, Deref, Range, RangeBounds};
 use std::ptr::slice_from_raw_parts_mut;
 use std::sync::atomic::Ordering::{Acquire, Relaxed, Release};
 use std::thread::{panicking, yield_now};
@@ -600,3 +600,60 @@ mod tests {
         );
     }
 }
+
+// #[allow(dead_code)]
+// #[derive(SeqlockAccessors)]
+// #[seq_lock_wrapper(MyWrapper)]
+// struct MyStructGeneric<T: Deref + SeqLockWrappable, U>
+// where
+//     T::Target: Deref,
+// {
+//     #[allow(dead_code)]
+//     x: T,
+//     #[seq_lock_skip_accessor]
+//     #[allow(dead_code)]
+//     u: U,
+// }
+
+//
+// seqlock_wrapper!(MyWrapper);
+//
+// #[allow(dead_code)]
+// struct MyStructGeneric<T: Deref + SeqLockWrappable, U> where
+//     T::Target: Deref {
+//     #[allow(dead_code)]
+//     x: T,
+//     #[allow(dead_code)]
+//     u: U,
+// }
+// impl<T: Deref + SeqLockWrappable, U> crate::SeqLockWrappable for
+// MyStructGeneric<T, U> where T::Target: Deref {
+//     type Wrapper<WrappedParam> = MyWrapper<WrappedParam>;
+// }
+// impl<'wrapped_guard, SeqLockModeParam: crate::SeqLockMode, T: Deref +
+// SeqLockWrappable, U>
+// MyWrapper<crate::Guarded<'wrapped_guard, SeqLockModeParam,
+//     MyStructGeneric<T, U>>> where T::Target: Deref {
+//     fn x_mut<'b>(&'b mut self)
+//                  ->
+//                  <T as
+//                  crate::SeqLockWrappable>::Wrapper<crate::Guarded<'b,
+//                      SeqLockModeParam, T>> {
+//         unsafe {
+//             crate::Guarded::wrap_unchecked(
+//                 core::ptr::addr_of_mut!((*self.0.as_ptr()).x)
+//             )
+//         }
+//     }
+//     fn x<'b>(&'b self)
+//              ->
+//              <T as
+//              crate::SeqLockWrappable>::Wrapper<crate::Guarded<'b,
+//                  SeqLockModeParam::SharedDowngrade, T>> {
+//         unsafe {
+//             crate::Guarded::wrap_unchecked(
+//                 core::ptr::addr_of_mut!((*self.0.as_ptr()).x)
+//                 )
+//         }
+//     }
+// }
