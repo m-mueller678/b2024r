@@ -1,5 +1,6 @@
 #![allow(unused_variables)]
 
+use crate::lock::LockState;
 use crate::{Exclusive, Optimistic, SeqLockMode, SeqLockModeImpl};
 use bytemuck::Pod;
 use std::cmp::Ordering;
@@ -8,9 +9,11 @@ use std::ptr::slice_from_raw_parts_mut;
 use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering::Relaxed;
 
-pub fn optimistic_release(lock: &AtomicU64, expected: u64) {
-    if lock.load(Relaxed) != expected {
-        Optimistic::release_error()
+impl LockState {
+    pub fn release_optimistic(&self, expected: u64) {
+        if self.version.load(Relaxed) != expected {
+            Optimistic::release_error()
+        }
     }
 }
 

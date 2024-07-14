@@ -1,10 +1,11 @@
 use crate::basic_node::{BasicInner, BasicLeaf, BasicNodeData};
 use crate::key_source::SourceSlice;
-use crate::page::{Page, PageId, PageTail, PAGE_TAIL_SIZE};
+use crate::page::{page_id_from_3x16, page_id_to_3x16, Page, PageId, PageTail, PAGE_TAIL_SIZE};
 use crate::W;
 use bytemuck::{Pod, Zeroable};
 use seqlock::{
-    Exclusive, Guard, Guarded, Optimistic, SeqLockMode, SeqLockWrappable, SeqlockAccessors, Shared, Wrapper,
+    BufferManager, Exclusive, Guard, Guarded, Optimistic, SeqLockMode, SeqLockWrappable, SeqlockAccessors, Shared,
+    Wrapper,
 };
 use std::fmt::{Debug, Formatter};
 use std::mem::size_of;
@@ -16,8 +17,7 @@ pub mod node_tag {
 }
 
 pub const PAGE_SIZE: usize = 1024;
-pub const PAGE_HEAD_SIZE: usize = 8;
-pub const NODE_TAIL_SIZE: usize = PAGE_TAIL_SIZE - size_of::<CommonNodeHead>();
+pub const NODE_TAIL_SIZE: usize = PAGE_SIZE - size_of::<CommonNodeHead>();
 
 #[derive(Pod, Copy, Clone, Zeroable, SeqlockAccessors)]
 #[repr(C)]
@@ -32,9 +32,8 @@ pub struct CommonNodeHead {
 }
 
 #[no_mangle]
-pub unsafe fn print_node(p: *const Page) {
-    let tail = p.byte_offset(PAGE_HEAD_SIZE as isize).cast::<PageTail>();
-    println!("{:#?}", Guarded::<Shared, PageTail>::wrap_unchecked(tail as *mut PageTail));
+pub unsafe fn print_node(p: *const PageTail) {
+    println!("{:#?}", Guarded::<Shared, PageTail>::wrap_unchecked(p as *mut PageTail));
 }
 
 impl<M: SeqLockMode> Debug for W<Guarded<'_, M, PageTail>> {
@@ -63,9 +62,9 @@ pub unsafe trait Node: SeqLockWrappable + Pod {
 
     /// fails iff parent_insert fails.
     /// if node is near empty, no split is performed and parent_insert is not called.
-    fn split(
-        this: &mut W<Guarded<Exclusive, Self>>,
-        parent_insert: impl ParentInserter,
+    fn split<'bm, BM: BufferManager<'bm>>(
+        this: &mut W<Guarded<'bm, Exclusive, Self>>,
+        parent_insert: impl ParentInserter<'bm, BM>,
         ref_key: &[u8],
     ) -> Result<(), ()>;
 
@@ -87,8 +86,8 @@ pub struct KindInner;
 #[repr(C)]
 pub struct KindLeaf;
 
-pub trait ParentInserter {
-    fn insert_upper_sibling(self, separator: impl SourceSlice) -> Result<Guard<'static, Exclusive, PageTail>, ()>;
+pub trait ParentInserter<'bm, BM: BufferManager<'bm>> {
+    fn insert_upper_sibling(self, separator: impl SourceSlice) -> Result<Guard<'bm, BM, Exclusive, PageTail>, ()>;
 }
 
 pub trait NodeKind: Pod {
@@ -109,15 +108,15 @@ impl NodeKind for KindInner {
     type DebugVal = PageId;
 
     fn from_lower(x: Self::Lower) -> [Self::SliceType; 3] {
-        x.to_3x16()
+        page_id_to_3x16(x)
     }
 
     fn to_lower(x: [Self::SliceType; 3]) -> Self::Lower {
-        PageId::from_3x16(x)
+        page_id_from_3x16(x)
     }
 
     fn to_debug(x: Vec<Self::SliceType>) -> Self::DebugVal {
-        PageId::from_3x16(x.try_into().unwrap())
+        page_id_from_3x16(x.try_into().unwrap())
     }
 }
 
@@ -177,7 +176,7 @@ impl<'a, N: Node, M: SeqLockMode> W<Guarded<'a, M, N>> {
 
     #[allow(clippy::wrong_self_convention)]
     pub fn as_bytes(self) -> Guarded<'a, M, [u8]> {
-        const SIZE: usize = PAGE_SIZE - PAGE_HEAD_SIZE;
+        const SIZE: usize = PAGE_TAIL_SIZE;
         self.0.cast::<[u8; SIZE]>().as_slice()
     }
 

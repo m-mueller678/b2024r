@@ -1,5 +1,6 @@
 #![allow(unused_variables)]
 
+use crate::lock::LockState;
 use crate::{Exclusive, Optimistic, SeqLockMode, SeqLockModeImpl};
 use bytemuck::Pod;
 use radium::Radium;
@@ -9,10 +10,12 @@ use std::mem::{size_of, MaybeUninit};
 use std::sync::atomic::Ordering::{Acquire, Relaxed};
 use std::sync::atomic::{compiler_fence, AtomicU64};
 
-pub fn optimistic_release(lock: &AtomicU64, expected: u64) {
-    compiler_fence(Acquire);
-    if lock.load(Relaxed) != expected {
-        Optimistic::release_error()
+impl LockState {
+    pub fn release_optimistic(&self, expected: u64) {
+        compiler_fence(Acquire);
+        if self.version.load(Relaxed) != expected {
+            Optimistic::release_error()
+        }
     }
 }
 

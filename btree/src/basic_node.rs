@@ -1,15 +1,16 @@
 use crate::key_source::{common_prefix, key_head, SourceSlice};
-use crate::node::{
-    node_tag, CommonNodeHead, KindInner, KindLeaf, Node, NodeKind, ParentInserter, PAGE_HEAD_SIZE, PAGE_SIZE,
-};
-use crate::page::PageId;
+use crate::node::{node_tag, CommonNodeHead, KindInner, KindLeaf, Node, NodeKind, ParentInserter, PAGE_SIZE};
+use crate::page::{page_id_from_3x16, page_id_to_3x16, PageId, PageTail, PAGE_TAIL_SIZE};
 use crate::tree::Supreme;
 use crate::{MAX_KEY_SIZE, W};
 use bstr::{BStr, BString};
 use bytemuck::{Pod, Zeroable};
 use indxvec::Search;
 use itertools::Itertools;
-use seqlock::{Exclusive, Guarded, Optimistic, SeqLockMode, SeqLockWrappable, SeqlockAccessors, Shared, Wrapper};
+use seqlock::{
+    BmExt, BufferManager, Exclusive, Guarded, Optimistic, SeqLockMode, SeqLockWrappable, SeqlockAccessors, Shared,
+    Wrapper,
+};
 use std::fmt::{Debug, Formatter};
 use std::marker::PhantomData;
 use std::mem::{align_of, offset_of, size_of, swap};
@@ -31,7 +32,7 @@ pub struct BasicNodeData {
     _data: [u32; BASIC_NODE_DATA_SIZE],
 }
 
-const BASIC_NODE_DATA_SIZE: usize = (PAGE_SIZE - PAGE_HEAD_SIZE - size_of::<CommonNodeHead>() - 2 * 2 - 16 * 4) / 4;
+const BASIC_NODE_DATA_SIZE: usize = (PAGE_TAIL_SIZE - size_of::<CommonNodeHead>() - 2 * 2 - 16 * 4) / 4;
 
 #[repr(transparent)]
 #[derive(Clone, Copy, Zeroable, SeqlockAccessors)]
@@ -108,7 +109,7 @@ unsafe impl<V: NodeKind> Node for BasicNode<V> {
             let val: &dyn Debug = if V::IS_LEAF {
                 &BString::new(this.s().val(i).cast_slice::<u8>().load_slice_to_vec())
             } else {
-                &PageId::from_3x16(this.s().val(i).as_array::<3>().cast::<[u16; 3]>().load())
+                &page_id_from_3x16(this.s().val(i).as_array::<3>().cast::<[u16; 3]>().load())
             };
             let head = this.s().heads().index(i).load();
             let kl = this.s().u16(offset).load();
@@ -170,9 +171,9 @@ unsafe impl<V: NodeKind> Node for BasicNode<V> {
         }
     }
 
-    fn split(
-        this: &mut W<Guarded<Exclusive, Self>>,
-        parent_insert: impl ParentInserter,
+    fn split<'bm, BM: BufferManager<'bm>>(
+        this: &mut W<Guarded<'bm, Exclusive, Self>>,
+        parent_insert: impl ParentInserter<'bm, BM>,
         ref_key: &[u8],
     ) -> Result<(), ()> {
         // TODO tail compression
@@ -379,7 +380,7 @@ impl<'a, V: NodeKind> W<Guarded<'a, Exclusive, BasicNode<V>>> {
 
     pub fn init(&mut self, lf: impl SourceSlice, uf: impl SourceSlice, lower: [V::SliceType; 3]) {
         self.b().common_head().tag_mut().store(if V::IS_LEAF { node_tag::BASIC_LEAF } else { node_tag::BASIC_INNER });
-        assert_eq!(size_of::<BasicNode<V>>(), PAGE_SIZE - PAGE_HEAD_SIZE);
+        assert_eq!(size_of::<BasicNode<V>>(), PAGE_TAIL_SIZE);
         self.count_mut().store(0);
         self.prefix_len_mut().store(common_prefix(lf, uf) as u16);
         self.heap_freed_mut().store(0);
@@ -544,7 +545,7 @@ impl<'a> W<Guarded<'a, Exclusive, BasicNode<KindLeaf>>> {
 }
 
 impl<'a> W<Guarded<'a, Optimistic, BasicNode<KindInner>>> {
-    pub fn lookup_inner(&self, key: &[u8], high_on_equal: bool) -> PageId {
+    pub fn lookup_inner(&self, key: &[u8], high_on_equal: bool) -> u64 {
         let index = match self.find(key) {
             Err(i) => i,
             Ok(i) => i + high_on_equal as usize,
@@ -552,11 +553,11 @@ impl<'a> W<Guarded<'a, Optimistic, BasicNode<KindInner>>> {
         self.index_child(index)
     }
 
-    pub fn index_child(&self, index: usize) -> PageId {
+    pub fn index_child(&self, index: usize) -> u64 {
         if index == 0 {
-            PageId::from_3x16(self.lower().load())
+            page_id_from_3x16(self.lower().load())
         } else {
-            PageId::from_3x16(self.val(index - 1).as_array().load())
+            page_id_from_3x16(self.val(index - 1).as_array().load())
         }
     }
 }
@@ -564,13 +565,14 @@ impl<'a> W<Guarded<'a, Optimistic, BasicNode<KindInner>>> {
 impl<'a> W<Guarded<'a, Exclusive, BasicNode<KindInner>>> {
     #[allow(clippy::result_unit_err)]
     pub fn insert_inner(&mut self, key: &[u8], pid: PageId) -> Result<(), ()> {
-        let x = self.insert(key, &pid.to_3x16());
+        let x = self.insert(key, &page_id_to_3x16(pid));
         Node::validate(self.s());
         x.map(|x| debug_assert!(x.is_none()))
     }
 
-    pub fn validate_inter_node_fences<'b>(
+    pub fn validate_inter_node_fences<'bm, 'b>(
         self,
+        bm: impl BufferManager<'bm, Page = PageTail>,
         lb: &mut &'b mut [u8; MAX_KEY_SIZE],
         hb: &mut &'b mut [u8; MAX_KEY_SIZE],
         mut ll: usize,
@@ -604,13 +606,11 @@ impl<'a> W<Guarded<'a, Exclusive, BasicNode<KindInner>>> {
             k.write_to(&mut Guarded::wrap_mut(&mut hb[prefix..][..k.len()]));
             hl = k.len() + prefix;
             let htmp = hb[..hl].to_vec();
-            self.optimistic()
-                .index_child(i)
-                .lock::<Exclusive>()
+            bm.lock_exclusive(self.optimistic().index_child(i))
                 .b()
                 .0
                 .cast::<BasicInner>()
-                .validate_inter_node_fences(lb, hb, ll, hl);
+                .validate_inter_node_fences(bm, lb, hb, ll, hl);
             assert_eq!(&hb[..hl], htmp);
             swap(hb, lb);
             ll = hl;

@@ -17,8 +17,7 @@ use std::ptr::slice_from_raw_parts_mut;
 pub mod unwind;
 mod wrappable;
 
-pub use access_impl::optimistic_release;
-pub use lock::{BmExt, BufferManager, Guard};
+pub use lock::{BmExt, BufferManager, Guard, LockState};
 pub use seqlock_macros::SeqlockAccessors;
 pub use wrappable::{SeqLockWrappable, Wrapper};
 

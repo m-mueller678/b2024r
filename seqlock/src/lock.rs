@@ -4,6 +4,50 @@ use std::fmt::{Debug, Formatter};
 use std::mem::{forget, ManuallyDrop};
 use std::ops::{Deref, DerefMut};
 use std::sync::atomic::AtomicU64;
+use std::sync::atomic::Ordering::{Acquire, Relaxed, Release};
+use std::thread::yield_now;
+
+#[derive(Default)]
+pub struct LockState {
+    pub(crate) version: AtomicU64,
+}
+
+impl LockState {
+    pub fn acquire_optimistic(&self) -> u64 {
+        loop {
+            let x = self.version.load(Acquire);
+            if x % 2 == 0 {
+                return x;
+            } else {
+                yield_now();
+            }
+        }
+    }
+
+    pub fn acquire_exclusive(&self) {
+        loop {
+            let x = self.version.load(Relaxed);
+            if x % 2 == 0 {
+                if self.version.compare_exchange(x, x + 1, Acquire, Relaxed).is_ok() {
+                    return;
+                }
+            } else {
+                yield_now();
+            }
+        }
+    }
+
+    pub fn release_exclusive(&self) -> u64 {
+        let prev = self.version.fetch_add(1, Release);
+        prev + 1
+    }
+
+    pub fn upgrade_lock(&self, expected: u64) {
+        if self.version.compare_exchange(expected, expected + 1, Acquire, Relaxed).is_err() {
+            Optimistic::release_error()
+        }
+    }
+}
 
 pub struct Guard<'bm, BM: BufferManager<'bm>, M: SeqLockMode, T: SeqLockWrappable + ?Sized> {
     bm: BM,
@@ -178,3 +222,5 @@ pub trait BmExt<'bm>: BufferManager<'bm> {
         )
     }
 }
+
+impl<'bm, BM: BufferManager<'bm>> BmExt<'bm> for BM {}
