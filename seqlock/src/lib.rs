@@ -11,17 +11,14 @@ use std::cmp::Ordering;
 use std::fmt::Debug;
 use std::marker::PhantomData;
 use std::mem::{align_of, align_of_val_raw, size_of, transmute, MaybeUninit};
-use std::ops::{Bound, Deref, Range, RangeBounds};
+use std::ops::{Bound, Range, RangeBounds};
 use std::ptr::slice_from_raw_parts_mut;
-use std::sync::atomic::Ordering::{Acquire, Relaxed, Release};
-use std::thread::{panicking, yield_now};
 
 pub mod unwind;
 mod wrappable;
 
-use crate::lock::{BufferManager, LockState};
 pub use access_impl::optimistic_release;
-pub use lock::Guard;
+pub use lock::{BmExt, BufferManager, Guard};
 pub use seqlock_macros::SeqlockAccessors;
 pub use wrappable::{SeqLockWrappable, Wrapper};
 
@@ -152,14 +149,14 @@ impl SeqLockMode for Shared {
     type GuardData = ();
     type ReleaseData = u64;
 
-    fn acquire<'bm, BM: BufferManager<'bm>>(bm: BM, page_id: u64) -> (&'bm UnsafeCell<BM::Page>, Self::GuardData) {
+    fn acquire<'bm, BM: BufferManager<'bm>>(_bm: BM, _page_id: u64) -> (&'bm UnsafeCell<BM::Page>, Self::GuardData) {
         unimplemented!()
     }
 
     fn release<'bm, BM: BufferManager<'bm>>(
-        bm: BM,
-        page_address: usize,
-        guard_data: Self::GuardData,
+        _bm: BM,
+        _page_address: usize,
+        _guard_data: Self::GuardData,
     ) -> Self::ReleaseData {
         unimplemented!()
     }

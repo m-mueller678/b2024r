@@ -4,12 +4,6 @@ use std::fmt::{Debug, Formatter};
 use std::mem::{forget, ManuallyDrop};
 use std::ops::{Deref, DerefMut};
 use std::sync::atomic::AtomicU64;
-use std::sync::atomic::Ordering::{Acquire, Relaxed};
-use std::thread::panicking;
-
-pub struct LockState {
-    pub(crate) version: AtomicU64,
-}
 
 pub struct Guard<'bm, BM: BufferManager<'bm>, M: SeqLockMode, T: SeqLockWrappable + ?Sized> {
     bm: BM,
@@ -48,7 +42,7 @@ impl<'bm, BM: BufferManager<'bm>, M: SeqLockMode, T: SeqLockWrappable + ?Sized> 
     }
 
     pub fn page_address(&self) -> usize {
-        self.bm.from_contained_address(self.ptr().addr())
+        self.bm.page_address_from_contained_address(self.ptr().addr())
     }
 }
 
@@ -63,7 +57,7 @@ impl<'bm, BM: BufferManager<'bm>, T: SeqLockWrappable> Guard<'bm, BM, Optimistic
 
     pub fn upgrade(self) -> Guard<'bm, BM, Exclusive, T> {
         let ptr = Optimistic::as_ptr(&(*self.access).get().p);
-        self.bm.upgrade_lock(self.bm.from_contained_address(ptr as usize), self.guard_data);
+        self.bm.upgrade_lock(self.bm.page_address_from_contained_address(ptr as usize), self.guard_data);
         let x = Guard {
             bm: self.bm,
             #[cfg(debug_assertions)]
@@ -109,6 +103,7 @@ impl<'bm, BM: BufferManager<'bm>, M: SeqLockMode, T: SeqLockWrappable> Guard<'bm
         forget(self)
     }
 
+    /// # Safety
     /// mapped object must lie within source object
     pub unsafe fn map<U: SeqLockWrappable + ?Sized + 'bm>(
         mut self,
@@ -150,14 +145,14 @@ pub unsafe trait BufferManager<'bm>: Copy + Sized {
     /// The lock is automatically released.
     fn free(&self, page_address: usize);
     fn release_exclusive(self, page_address: usize) -> u64;
-    fn acquire_exclusive(self, page_id: u64) -> (&'bm UnsafeCell<Self::Page>);
+    fn acquire_exclusive(self, page_id: u64) -> &'bm UnsafeCell<Self::Page>;
     fn acquire_optimistic(self, page_id: u64) -> (&'bm UnsafeCell<Self::Page>, u64);
     fn release_optimistic(self, page_address: usize, version: u64);
     fn upgrade_lock(self, page_address: usize, version: u64);
 
     /// Accepts any address within a page and returns a value that can be passed as `page_address` to the other methods to refer to the containing page.
     /// This needs not be the address of the page.
-    fn from_contained_address(self, address: usize) -> usize;
+    fn page_address_from_contained_address(self, address: usize) -> usize;
 }
 
 pub trait BmExt<'bm>: BufferManager<'bm> {
