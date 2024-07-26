@@ -39,6 +39,7 @@ impl LockState {
 
     pub fn release_exclusive(&self) -> u64 {
         let prev = self.version.fetch_add(1, Release);
+        debug_assert!(prev%2==1);
         prev + 1
     }
 

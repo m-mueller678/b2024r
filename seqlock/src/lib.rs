@@ -90,7 +90,9 @@ impl SeqLockMode for Optimistic {
         page_address: usize,
         guard_data: Self::GuardData,
     ) -> Self::ReleaseData {
-        bm.release_optimistic(page_address, guard_data)
+        if !std::thread::panicking(){
+            bm.release_optimistic(page_address, guard_data)
+        }
     }
 }
 

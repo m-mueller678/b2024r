@@ -40,6 +40,7 @@ impl<P:Send+Sync+Zeroable+SeqLockWrappable> DefaultBm<P> {
     }
 
     fn to_pid(&self, address: usize) -> u64 {
+        //TODO merge with BM::page_id
         let p = self.pages();
         let first = p.0.as_ptr().addr();
         let id = (address - first) / size_of::<P>();
@@ -74,8 +75,10 @@ unsafe impl<'bm,P:Send+Sync+Zeroable+SeqLockWrappable> BufferManager<'bm> for &'
     }
 
     fn free(self, page_address: usize) {
+        let pid = self.to_pid(page_address);
+        self.pages().1[pid as usize].release_exclusive();
         let mut freed = self.freed.lock().unwrap();
-        freed.push(self.to_pid(page_address));
+        freed.push(pid);
         self.any_freed.store(true, Relaxed);
     }
 
