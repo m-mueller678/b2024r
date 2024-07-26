@@ -28,6 +28,16 @@ impl<P:Send+Sync+Zeroable+SeqLockWrappable> DefaultBm<P> {
         }
     }
 
+    pub fn new_with_page_count(page_count:usize)->Self{
+        DefaultBm {
+            any_freed:AtomicBool::new(false),
+            freed:Mutex::new(Vec::new()),
+            next_index:AtomicU64::new(0),
+            page_count,
+            pages:OnceLock::new(),
+        }
+    }
+
     fn pages(&self)->&(Box<[UnsafeCell<P>]>, Box<[LockState]>){
         self.pages.get_or_init(|| {
             let pages = (0..self.page_count)
