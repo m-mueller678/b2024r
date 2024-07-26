@@ -308,7 +308,6 @@ impl<'a, V: NodeKind> W<Guarded<'a, Exclusive, BasicNode<V>>> {
             let head = self.s().heads().index(head_index).load();
             self.hints_mut().as_slice().index(hint_index).store(head);
         }
-        Node::validate(self.s());
     }
 
     #[allow(clippy::result_unit_err)]
