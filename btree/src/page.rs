@@ -1,12 +1,7 @@
 use crate::node::{CommonNodeHead, NODE_TAIL_SIZE, PAGE_SIZE};
-use crate::W;
 use bytemuck::{Pod, Zeroable};
-use seqlock::{DefaultBm, Guarded, SeqLockMode, SeqlockAccessors};
-use std::cell::UnsafeCell;
-use std::fmt::Debug;
+use seqlock::SeqlockAccessors;
 use std::mem::{align_of, size_of};
-use std::sync::atomic::{AtomicBool, AtomicU64};
-use std::sync::{Mutex, OnceLock};
 
 pub type PageId = u64;
 pub fn page_id_to_3x16(p: u64) -> [u16; 3] {
@@ -33,13 +28,3 @@ pub struct PageTail {
     #[seq_lock_skip_accessor]
     _pad: [u8; NODE_TAIL_SIZE],
 }
-
-#[repr(align(1024), C)]
-pub struct Page {
-    page: UnsafeCell<PageTail>,
-}
-
-const _: () = {
-    assert!(PAGE_SIZE == align_of::<Page>());
-    assert!(PAGE_SIZE == size_of::<Page>());
-};

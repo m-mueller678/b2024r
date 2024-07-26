@@ -1,56 +1,57 @@
+use crate::{BufferManager, LockState, SeqLockWrappable};
+use bytemuck::Zeroable;
 use std::cell::UnsafeCell;
+use std::mem::size_of;
 use std::sync::atomic::Ordering::Relaxed;
 use std::sync::atomic::{AtomicBool, AtomicU64};
-use std::sync::{LazyLock, Mutex, OnceLock};
-use std::mem::size_of;
-use bytemuck::Zeroable;
-use crate::{BufferManager, LockState, SeqLockWrappable};
+use std::sync::{Mutex, OnceLock};
 
-unsafe impl<P:Send+Sync+Zeroable+SeqLockWrappable> Sync for DefaultBm<P> {}
+unsafe impl<P: Send + Sync + Zeroable + SeqLockWrappable> Sync for DefaultBm<P> {}
 
-pub struct DefaultBm<P:Send+Sync+Zeroable+SeqLockWrappable> {
+pub struct DefaultBm<P: Send + Sync + Zeroable + SeqLockWrappable> {
     any_freed: AtomicBool,
     freed: Mutex<Vec<u64>>,
     next_index: AtomicU64,
+    #[allow(clippy::type_complexity)]
     pages: OnceLock<(Box<[UnsafeCell<P>]>, Box<[LockState]>)>,
-    page_count:usize,
+    page_count: usize,
 }
 
-
-impl<P:Send+Sync+Zeroable+SeqLockWrappable> DefaultBm<P> {
-    pub const fn new_lazy()->Self{
+impl<P: Send + Sync + Zeroable + SeqLockWrappable> DefaultBm<P> {
+    pub const fn new_lazy() -> Self {
         DefaultBm {
-            any_freed:AtomicBool::new(false),
-            freed:Mutex::new(Vec::new()),
-            next_index:AtomicU64::new(0),
-            page_count:(1 << 30)/ size_of::<P>(),
-            pages:OnceLock::new(),
+            any_freed: AtomicBool::new(false),
+            freed: Mutex::new(Vec::new()),
+            next_index: AtomicU64::new(0),
+            page_count: (1 << 30) / size_of::<P>(),
+            pages: OnceLock::new(),
         }
     }
 
-    pub fn new_with_page_count(page_count:usize)->Self{
+    pub fn new_with_page_count(page_count: usize) -> Self {
         DefaultBm {
-            any_freed:AtomicBool::new(false),
-            freed:Mutex::new(Vec::new()),
-            next_index:AtomicU64::new(0),
+            any_freed: AtomicBool::new(false),
+            freed: Mutex::new(Vec::new()),
+            next_index: AtomicU64::new(0),
             page_count,
-            pages:OnceLock::new(),
+            pages: OnceLock::new(),
         }
     }
 
-    fn pages(&self)->&(Box<[UnsafeCell<P>]>, Box<[LockState]>){
+    fn pages(&self) -> &(Box<[UnsafeCell<P>]>, Box<[LockState]>) {
         self.pages.get_or_init(|| {
             let pages = (0..self.page_count)
                 .map(|_| UnsafeCell::new(Zeroable::zeroed()))
                 .collect::<Vec<UnsafeCell<P>>>()
                 .into_boxed_slice();
-            let locks = (0..self.page_count).map(|_| LockState::default()).collect::<Vec<LockState>>().into_boxed_slice();
+            let locks =
+                (0..self.page_count).map(|_| LockState::default()).collect::<Vec<LockState>>().into_boxed_slice();
             (pages, locks)
         })
     }
 }
 
-unsafe impl<'bm,P:Send+Sync+Zeroable+SeqLockWrappable> BufferManager<'bm> for &'bm DefaultBm<P> {
+unsafe impl<'bm, P: Send + Sync + Zeroable + SeqLockWrappable> BufferManager<'bm> for &'bm DefaultBm<P> {
     type Page = P;
 
     fn alloc(self) -> (u64, &'bm UnsafeCell<Self::Page>) {
@@ -87,9 +88,9 @@ unsafe impl<'bm,P:Send+Sync+Zeroable+SeqLockWrappable> BufferManager<'bm> for &'
         self.pages().1[self.page_id(page_address) as usize].release_exclusive()
     }
 
-    fn page_id(self,page_address:usize)->u64{
-        let page_start:*const UnsafeCell<P> = self.pages().0.as_ptr();
-        let id=(page_address - page_start.addr())/size_of::<P>();
+    fn page_id(self, page_address: usize) -> u64 {
+        let page_start: *const UnsafeCell<P> = self.pages().0.as_ptr();
+        let id = (page_address - page_start.addr()) / size_of::<P>();
         id as u64
     }
 

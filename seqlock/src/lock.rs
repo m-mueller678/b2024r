@@ -39,7 +39,7 @@ impl LockState {
 
     pub fn release_exclusive(&self) -> u64 {
         let prev = self.version.fetch_add(1, Release);
-        debug_assert!(prev%2==1);
+        debug_assert!(prev % 2 == 1);
         prev + 1
     }
 
@@ -181,7 +181,7 @@ impl<'bm, BM: BufferManager<'bm>, T: SeqLockWrappable> DerefMut for Guard<'bm, B
     }
 }
 
-pub unsafe trait BufferManager<'bm>: 'bm+Copy +Send+Sync+ Sized {
+pub unsafe trait BufferManager<'bm>: 'bm + Copy + Send + Sync + Sized {
     type Page: Sized + SeqLockWrappable;
 
     /// Returned page is exclusively locked
@@ -196,7 +196,7 @@ pub unsafe trait BufferManager<'bm>: 'bm+Copy +Send+Sync+ Sized {
 
     /// page must be locked.
     /// For optimistic locks, wrong id may be returned if the lock has become invalid.
-    fn page_id(self,page_address:usize)->u64;
+    fn page_id(self, page_address: usize) -> u64;
     fn upgrade_lock(self, page_address: usize, version: u64);
 
     /// Accepts any address within a page and returns a value that can be passed as `page_address` to the other methods to refer to the containing page.

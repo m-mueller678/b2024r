@@ -91,7 +91,7 @@ impl<'bm, BM: BufferManager<'bm, Page = PageTail>> Tree<'bm, BM> {
             if self.bm.page_id(node.page_address()) == split_target {
                 let mut node = node.upgrade();
                 let mut parent = parent.upgrade();
-                self.ensure_parent_not_root(&mut node, &mut parent);
+                self.ensure_parent_not_root(&mut parent);
                 debug_assert!(node.common().tag().load() == node_tag::BASIC_INNER);
                 if Self::split_locked_node(
                     k,
@@ -116,11 +116,7 @@ impl<'bm, BM: BufferManager<'bm, Page = PageTail>> Tree<'bm, BM> {
         }
     }
 
-    fn ensure_parent_not_root(
-        &self,
-        node: &mut Guard<'bm, BM, Exclusive, PageTail>,
-        parent: &mut Guard<'bm, BM, Exclusive, PageTail>,
-    ) {
+    fn ensure_parent_not_root(&self, parent: &mut Guard<'bm, BM, Exclusive, PageTail>) {
         if self.bm.page_id(parent.page_address()) == self.meta {
             let mut meta = parent.b().0.cast::<MetadataPage>();
             let (new_root_id, mut new_root_guard) = self.bm.lock_new();
@@ -141,7 +137,7 @@ impl<'bm, BM: BufferManager<'bm, Page = PageTail>> Tree<'bm, BM> {
             Err(()) => {
                 node.reset_written();
                 let mut parent = parent.upgrade();
-                self.ensure_parent_not_root(&mut node, &mut parent);
+                self.ensure_parent_not_root(&mut parent);
                 if Self::split_locked_node(
                     k,
                     &mut node.b().node_cast::<BasicLeaf>(),
@@ -178,9 +174,9 @@ impl<'bm, BM: BufferManager<'bm, Page = PageTail>> Tree<'bm, BM> {
         Some(unsafe { node.map(|_| key) })
     }
 
-    fn split_locked_node<'a, N: Node>(
+    fn split_locked_node<N: Node>(
         k: &[u8],
-        leaf: &mut W<Guarded<'a, Exclusive, N>>,
+        leaf: &mut W<Guarded<'_, Exclusive, N>>,
         parent: W<Guarded<Exclusive, BasicNode<KindInner>>>,
         bm: BM,
     ) -> Result<(), ()> {

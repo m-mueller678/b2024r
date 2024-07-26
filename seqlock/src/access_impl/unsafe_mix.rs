@@ -8,8 +8,8 @@ use radium::{Atom, Radium};
 use std::cmp::Ordering;
 use std::ffi::c_void;
 use std::mem::{align_of, size_of, MaybeUninit};
+use std::sync::atomic::fence;
 use std::sync::atomic::Ordering::{Acquire, Relaxed};
-use std::sync::atomic::{compiler_fence, fence, AtomicU64};
 
 impl LockState {
     pub fn release_optimistic(&self, expected: u64) {

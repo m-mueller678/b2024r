@@ -5,6 +5,7 @@
 extern crate core;
 
 use bytemuck::Pod;
+use libc::abort;
 use std::cell::UnsafeCell;
 use std::cmp::Ordering;
 use std::fmt::Debug;
@@ -12,15 +13,14 @@ use std::marker::PhantomData;
 use std::mem::{align_of, align_of_val_raw, size_of, transmute, MaybeUninit};
 use std::ops::{Bound, Range, RangeBounds};
 use std::ptr::slice_from_raw_parts_mut;
-use libc::abort;
 
 pub mod unwind;
 mod wrappable;
 
+pub use default_bm::DefaultBm;
 pub use lock::{BmExt, BufferManager, Guard, LockState};
 pub use seqlock_macros::SeqlockAccessors;
 pub use wrappable::{SeqLockWrappable, Wrapper};
-pub use default_bm::DefaultBm;
 
 #[derive(Debug)]
 pub enum Never {}
@@ -39,8 +39,8 @@ impl From<Never> for () {
 
 mod access_impl;
 
-mod lock;
 mod default_bm;
+mod lock;
 
 #[allow(private_bounds)]
 pub trait SeqLockMode: SeqLockModeImpl + 'static {
@@ -90,7 +90,7 @@ impl SeqLockMode for Optimistic {
         page_address: usize,
         guard_data: Self::GuardData,
     ) -> Self::ReleaseData {
-        if !std::thread::panicking(){
+        if !std::thread::panicking() {
             bm.release_optimistic(page_address, guard_data)
         }
     }
@@ -140,9 +140,7 @@ impl SeqLockMode for Exclusive {
         #[cfg(debug_assertions)]
         if std::thread::panicking() && guard_data {
             eprintln!("unwinding out of written exclusive lock");
-            unsafe{
-                abort()
-            }
+            unsafe { abort() }
         }
         bm.release_exclusive(page_address)
     }

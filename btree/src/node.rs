@@ -1,6 +1,6 @@
 use crate::basic_node::{BasicInner, BasicLeaf, BasicNodeData};
 use crate::key_source::SourceSlice;
-use crate::page::{page_id_from_3x16, page_id_to_3x16, Page, PageId, PageTail, PAGE_TAIL_SIZE};
+use crate::page::{page_id_from_3x16, page_id_to_3x16, PageId, PageTail, PAGE_TAIL_SIZE};
 use crate::W;
 use bytemuck::{Pod, Zeroable};
 use seqlock::{

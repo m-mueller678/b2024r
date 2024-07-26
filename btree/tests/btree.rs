@@ -5,7 +5,7 @@ use dev_utils::mixed_test_keys;
 use rand::distributions::{Distribution, Uniform, WeightedIndex};
 use rand::rngs::SmallRng;
 use rand::SeedableRng;
-use seqlock::{BufferManager, DefaultBm};
+use seqlock::DefaultBm;
 use std::sync::atomic::Ordering::Relaxed;
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU8};
 use std::sync::Barrier;

@@ -1,5 +1,5 @@
 use crate::key_source::{common_prefix, key_head, SourceSlice};
-use crate::node::{node_tag, CommonNodeHead, KindInner, KindLeaf, Node, NodeKind, ParentInserter, PAGE_SIZE};
+use crate::node::{node_tag, CommonNodeHead, KindInner, KindLeaf, Node, NodeKind, ParentInserter};
 use crate::page::{page_id_from_3x16, page_id_to_3x16, PageId, PageTail, PAGE_TAIL_SIZE};
 use crate::tree::Supreme;
 use crate::{MAX_KEY_SIZE, W};
@@ -624,7 +624,7 @@ mod tests {
     use crate::basic_node::{BasicNode, NodeKind};
     use crate::key_source::SourceSlice;
     use crate::node::{KindInner, KindLeaf, Node, ParentInserter};
-    use crate::page::{page_id_to_3x16, PageId, PageTail};
+    use crate::page::{page_id_to_3x16, PageTail};
     use bytemuck::Zeroable;
     use rand::prelude::SliceRandom;
     use rand::rngs::SmallRng;

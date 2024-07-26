@@ -8,6 +8,7 @@ use rand::prelude::Distribution;
 use rand::rngs::SmallRng;
 use rand::SeedableRng;
 use rip_shuffle::RipShuffleParallel;
+use seqlock::DefaultBm;
 use std::fmt::Display;
 use std::ops::Range;
 use std::str::FromStr;
@@ -119,7 +120,8 @@ fn main() {
     };
     // threads must be spawned after setting up counters
     rayon::ThreadPoolBuilder::default().build_global().unwrap();
-    let tree = &Tree::new();
+    let bm = &DefaultBm::new_lazy();
+    let tree = &Tree::new(bm);
     let mut keys = args.keys();
     let pre_insert_count = (keys.len() as f64 * args.pre_insert_ratio) as usize;
     keys.par_shuffle(&mut SmallRng::seed_from_u64(0x42));
