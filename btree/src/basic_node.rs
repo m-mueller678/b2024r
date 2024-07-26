@@ -687,7 +687,7 @@ mod tests {
             }
         }
 
-        let (p1, mut ne1) = bm.lock_new();
+        let (_, mut ne1) = bm.lock_new();
         let mut fake_parent = FakeParent(None, bm);
         let mut n1 = ne1.b().0.cast::<BasicNode<V>>();
         n1.init(&[0][..], &[ufb, 1][..], lower);

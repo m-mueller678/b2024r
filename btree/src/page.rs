@@ -1,7 +1,6 @@
 use crate::node::{CommonNodeHead, NODE_TAIL_SIZE, PAGE_SIZE};
 use bytemuck::{Pod, Zeroable};
 use seqlock::SeqlockAccessors;
-use std::mem::{align_of, size_of};
 
 pub type PageId = u64;
 pub fn page_id_to_3x16(p: u64) -> [u16; 3] {
