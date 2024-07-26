@@ -176,7 +176,6 @@ unsafe impl<V: NodeKind> Node for BasicNode<V> {
         parent_insert: impl ParentInserter<'bm, BM>,
         ref_key: &[u8],
     ) -> Result<(), ()> {
-        // TODO tail compression
         let left = &mut BasicNode::<V>::zeroed();
         let mut left = Guarded::<Exclusive, _>::wrap_mut(left);
         let count = this.count().load() as usize;
