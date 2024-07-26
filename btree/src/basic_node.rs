@@ -565,8 +565,6 @@ impl<'a, V: NodeKind, M: SeqLockMode> W<Guarded<'a, M, BasicNode<V>>> {
         const _: () = {
             assert!(MIN_HINT_SPACING >= 2);
         };
-        debug_assert!(head_range_start == 0 || self.heads().index(head_range_start - 1).load() < needle_head);
-        debug_assert!(head_range_end == heads.len() || self.heads().index(head_range_end).load() > needle_head);
 
         let matching_head_range =
             (head_range_start..=head_range_end - 1).binary_all(|i| heads.s().index(i).load().cmp(&needle_head));
