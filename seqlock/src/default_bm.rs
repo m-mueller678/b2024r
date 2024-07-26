@@ -38,15 +38,6 @@ impl<P:Send+Sync+Zeroable+SeqLockWrappable> DefaultBm<P> {
             (pages, locks)
         })
     }
-
-    fn to_pid(&self, address: usize) -> u64 {
-        //TODO merge with BM::page_id
-        let p = self.pages();
-        let first = p.0.as_ptr().addr();
-        let id = (address - first) / size_of::<P>();
-        debug_assert!(id < p.0.len());
-        id as u64
-    }
 }
 
 unsafe impl<'bm,P:Send+Sync+Zeroable+SeqLockWrappable> BufferManager<'bm> for &'bm DefaultBm<P> {
@@ -75,7 +66,7 @@ unsafe impl<'bm,P:Send+Sync+Zeroable+SeqLockWrappable> BufferManager<'bm> for &'
     }
 
     fn free(self, page_address: usize) {
-        let pid = self.to_pid(page_address);
+        let pid = self.page_id(page_address);
         self.pages().1[pid as usize].release_exclusive();
         let mut freed = self.freed.lock().unwrap();
         freed.push(pid);
@@ -83,7 +74,7 @@ unsafe impl<'bm,P:Send+Sync+Zeroable+SeqLockWrappable> BufferManager<'bm> for &'
     }
 
     fn release_exclusive(self, page_address: usize) -> u64 {
-        self.pages().1[self.to_pid(page_address) as usize].release_exclusive()
+        self.pages().1[self.page_id(page_address) as usize].release_exclusive()
     }
 
     fn page_id(self,page_address:usize)->u64{
@@ -105,11 +96,11 @@ unsafe impl<'bm,P:Send+Sync+Zeroable+SeqLockWrappable> BufferManager<'bm> for &'
     }
 
     fn release_optimistic(self, page_address: usize, version: u64) {
-        self.pages().1[self.to_pid(page_address) as usize].release_optimistic(version)
+        self.pages().1[self.page_id(page_address) as usize].release_optimistic(version)
     }
 
     fn upgrade_lock(self, page_address: usize, version: u64) {
-        self.pages().1[self.to_pid(page_address) as usize].upgrade_lock(version)
+        self.pages().1[self.page_id(page_address) as usize].upgrade_lock(version)
     }
 
     fn page_address_from_contained_address(self, address: usize) -> usize {
