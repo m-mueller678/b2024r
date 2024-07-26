@@ -16,7 +16,12 @@ pub mod node_tag {
     pub const BASIC_LEAF: u8 = 251;
 }
 
+#[cfg(feature = "page_1k")]
 pub const PAGE_SIZE: usize = 1024;
+
+#[cfg(feature = "page_4k")]
+pub const PAGE_SIZE: usize = 4096;
+
 pub const NODE_TAIL_SIZE: usize = PAGE_SIZE - size_of::<CommonNodeHead>();
 
 #[derive(Pod, Copy, Clone, Zeroable, SeqlockAccessors)]

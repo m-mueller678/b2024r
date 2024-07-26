@@ -12,9 +12,11 @@ bstr = "1.9.1"
 itertools = "0.12.1"
 
 [features]
-default = []
+default = ["validate_node","page_4k"]
 validate_node=[]
 validate_tree=[]
+page_4k=[]
+page_1k=[]
 
 [dev-dependencies]
 random_word = { version = "0.4.3",features = ["en"] }

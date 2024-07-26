@@ -158,6 +158,7 @@ unsafe impl<V: NodeKind> Node for BasicNode<V> {
                 left_count,
             );
         }
+        tmp.update_hints(0, tmp.count().load() as usize, 0);
         this.store(tmp.load()); //TODO optimize copy
     }
 
@@ -217,9 +218,11 @@ unsafe impl<V: NodeKind> Node for BasicNode<V> {
         debug_assert!(this.key(lr.end - 1).cmp(sep_key.slice(this.prefix_len().load() as usize..)).is_lt());
         debug_assert!(sep_key.slice(this.prefix_len().load() as usize..).cmp(this.key(rr.start)).is_le());
         left.count_mut().store(lr.len() as u16);
-        copy_records(this.s(), &mut left, lr, 0, ref_key);
+        copy_records(this.s(), &mut left, lr.clone(), 0, ref_key);
+        left.update_hints(0, lr.count(), 0);
         right.count_mut().store(rr.len() as u16);
-        copy_records(this.s(), right, rr, 0, ref_key);
+        copy_records(this.s(), right, rr.clone(), 0, ref_key);
+        right.update_hints(0, rr.count(), 0);
         Node::validate(left.s());
         Node::validate(right.s());
         this_mut.store(left.load()); //TODO optimize copy
