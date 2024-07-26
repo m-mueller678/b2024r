@@ -97,6 +97,7 @@ impl<'bm, BM: BufferManager<'bm, Page = PageTail>> Tree<'bm, BM> {
                     k,
                     &mut node.b().node_cast::<BasicInner>(),
                     parent.b().node_cast::<BasicInner>(),
+                    self.bm,
                 )
                 .is_ok()
                 {
@@ -145,6 +146,7 @@ impl<'bm, BM: BufferManager<'bm, Page = PageTail>> Tree<'bm, BM> {
                     k,
                     &mut node.b().node_cast::<BasicLeaf>(),
                     parent.b().node_cast::<BasicInner>(),
+                    self.bm,
                 )
                 .is_err()
                 {
@@ -176,12 +178,13 @@ impl<'bm, BM: BufferManager<'bm, Page = PageTail>> Tree<'bm, BM> {
         Some(unsafe { node.map(|_| key) })
     }
 
-    fn split_locked_node<N: Node>(
+    fn split_locked_node<'a, N: Node>(
         k: &[u8],
-        leaf: &mut W<Guarded<Exclusive, N>>,
+        leaf: &mut W<Guarded<'a, Exclusive, N>>,
         parent: W<Guarded<Exclusive, BasicNode<KindInner>>>,
+        bm: BM,
     ) -> Result<(), ()> {
-        N::split(leaf, parent, k)
+        N::split(leaf, (parent, bm), k)
     }
 
     pub fn lock_path(&self, key: &[u8]) -> Vec<Guard<'bm, BM, Exclusive, PageTail>> {
@@ -237,16 +240,19 @@ pub enum Supreme<T> {
     Sup,
 }
 
-// impl ParentInserter for W<Guarded<'_, Exclusive, BasicNode<KindInner>>> {
-//     fn insert_upper_sibling(mut self, separator: impl SourceSlice) -> Result<Guard<'bm,BM, Exclusive, PageTail>, ()> {
-//         let new_node = PageId::alloc();
-//         separator.to_stack_buffer::<MAX_KEY_SIZE, _>(|sep| {
-//             if let Ok(()) = self.insert_inner(sep, new_node) {
-//                 Ok(new_node.lock::<Exclusive>())
-//             } else {
-//                 new_node.free();
-//                 Err(())
-//             }
-//         })
-//     }
-// }
+impl<'g, 'bm, BM: BufferManager<'bm, Page = PageTail>> ParentInserter<'bm, BM>
+    for (W<Guarded<'g, Exclusive, BasicNode<KindInner>>>, BM)
+{
+    fn insert_upper_sibling(self, separator: impl SourceSlice) -> Result<Guard<'bm, BM, Exclusive, PageTail>, ()> {
+        let (mut guard, bm) = self;
+        let (new_page, new_guard) = bm.lock_new();
+        separator.to_stack_buffer::<MAX_KEY_SIZE, _>(|sep| {
+            if let Ok(()) = guard.insert_inner(sep, new_page) {
+                Ok(new_guard)
+            } else {
+                new_guard.free();
+                Err(())
+            }
+        })
+    }
+}

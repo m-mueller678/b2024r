@@ -1,10 +1,11 @@
 #![feature(inline_const_pat)]
 
-use btree::Tree;
+use btree::{PageTail, Tree};
 use dev_utils::mixed_test_keys;
 use rand::distributions::{Distribution, Uniform, WeightedIndex};
 use rand::rngs::SmallRng;
 use rand::SeedableRng;
+use seqlock::BufferManager;
 use std::sync::atomic::Ordering::Relaxed;
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU8};
 use std::sync::Barrier;
@@ -29,12 +30,13 @@ fn inc_state_12(x: &AtomicU8) {
     .ok();
 }
 
-fn batch_ops(
+fn batch_ops<'bm, BM: BufferManager<'bm, Page = PageTail>>(
     threads: usize,
     batches: u32,
     key_count: usize,
     op_weights: (impl Fn(usize, u32) -> [u32; 3] + Sync),
-    mut after_batch: (impl FnMut(u32, &Tree) + Send),
+    mut after_batch: (impl FnMut(u32, &Tree<BM>) + Send),
+    bm: BM,
 ) {
     #[repr(u32)]
     #[derive(Debug)]
@@ -48,7 +50,7 @@ fn batch_ops(
     let key_states: &Vec<KeyState> = &(0..keys.len()).map(|_| Default::default()).collect();
     let barrier = &Barrier::new(threads);
     // value is batch as ne bytes
-    let tree = &Tree::new();
+    let tree = &Tree::new(bm);
     let op_weights = &op_weights;
     let mut after_batch = Some(&mut after_batch);
     std::thread::scope(|scope| {

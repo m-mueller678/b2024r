@@ -62,8 +62,8 @@ pub unsafe trait Node: SeqLockWrappable + Pod {
 
     /// fails iff parent_insert fails.
     /// if node is near empty, no split is performed and parent_insert is not called.
-    fn split<'bm, BM: BufferManager<'bm>>(
-        this: &mut W<Guarded<'bm, Exclusive, Self>>,
+    fn split<'g, 'bm, BM: BufferManager<'bm>>(
+        this: &mut W<Guarded<'g, Exclusive, Self>>,
         parent_insert: impl ParentInserter<'bm, BM>,
         ref_key: &[u8],
     ) -> Result<(), ()>;

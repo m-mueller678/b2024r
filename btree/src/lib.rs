@@ -13,6 +13,7 @@ mod page;
 
 mod tree;
 
+pub use page::PageTail;
 pub use tree::Tree;
 
 const MAX_KEY_SIZE: usize = 512;

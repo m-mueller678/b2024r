@@ -180,7 +180,7 @@ impl<'bm, BM: BufferManager<'bm>, T: SeqLockWrappable> DerefMut for Guard<'bm, B
     }
 }
 
-pub unsafe trait BufferManager<'bm>: Copy + Sized {
+pub unsafe trait BufferManager<'bm>: 'bm+Copy +Send+Sync+ Sized {
     type Page: Sized + SeqLockWrappable;
 
     /// Returned page is exclusively locked
