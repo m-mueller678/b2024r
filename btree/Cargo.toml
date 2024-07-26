@@ -12,6 +12,7 @@ bstr = "1.9.1"
 itertools = "0.12.1"
 
 [features]
+default = []
 validate_node=[]
 validate_tree=[]
 

@@ -20,6 +20,12 @@ use std::ptr::addr_of_mut;
 pub type BasicLeaf = BasicNode<KindLeaf>;
 pub type BasicInner = BasicNode<KindInner>;
 
+const HINT_COUNT: usize = 16;
+const MIN_HINT_SPACING: usize = 3;
+
+// must align with min hint spacing, so hints are updated when min count is reached
+const MIN_HINT_COUNT: usize = MIN_HINT_SPACING * (HINT_COUNT + 1);
+
 #[derive(Copy, Clone, Zeroable, Pod)]
 #[repr(align(8))]
 #[repr(C)]
@@ -28,7 +34,7 @@ pub struct BasicNodeData {
     heap_bump: u16,
     heap_freed: u16,
     _pad: u16,
-    hints: [u32; 16],
+    hints: [u32; HINT_COUNT],
     _data: [u32; BASIC_NODE_DATA_SIZE],
 }
 
@@ -44,6 +50,7 @@ const BASIC_NODE_DATA_SIZE: usize = (PAGE_TAIL_SIZE - size_of::<CommonNodeHead>(
 #[seq_lock_accessor(upper_fence_len: u16 = 0.common.upper_fence_len)]
 #[seq_lock_accessor(heap_bump: u16 = 0.heap_bump)]
 #[seq_lock_accessor(heap_freed: u16 = 0.heap_freed)]
+#[seq_lock_accessor(hints: [u32;HINT_COUNT] = 0.hints)]
 pub struct BasicNode<V: NodeKind>(
     #[seq_lock_skip_accessor] BasicNodeData,
     #[seq_lock_skip_accessor] PhantomData<V::SliceType>,
@@ -81,6 +88,13 @@ unsafe impl<V: NodeKind> Node for BasicNode<V> {
     fn validate(this: W<Guarded<'_, Shared, Self>>) {
         if !cfg!(feature = "validate_node") {
             return;
+        }
+        let count = this.count().load() as usize;
+        if count >= MIN_HINT_COUNT {
+            let spacing = count / (HINT_COUNT + 1);
+            for i in 0..HINT_COUNT {
+                assert_eq!(this.hints().as_slice().index(i).load(), this.heads().index((i + 1) * spacing).load());
+            }
         }
         let record_size_sum: usize = this.s().slots().iter().map(|x| this.stored_record_size(x.load() as usize)).sum();
         let calculated = this.heap_end() - record_size_sum;
@@ -277,6 +291,26 @@ impl<'a, V: NodeKind> W<Guarded<'a, Exclusive, BasicNode<V>>> {
         }
     }
 
+    fn update_hints(&mut self, old_count: usize, new_count: usize, mut change_index: usize) {
+        debug_assert!(old_count != new_count);
+        if new_count < MIN_HINT_COUNT {
+            return;
+        }
+        let spacing = new_count / (HINT_COUNT + 1);
+        if spacing != old_count / (HINT_COUNT + 1) {
+            change_index = 0;
+        }
+        for hint_index in 0..HINT_COUNT {
+            let head_index = spacing * (hint_index + 1);
+            if head_index < change_index {
+                continue;
+            }
+            let head = self.s().heads().index(head_index).load();
+            self.hints_mut().as_slice().index(hint_index).store(head);
+        }
+        Node::validate(self.s());
+    }
+
     #[allow(clippy::result_unit_err)]
     fn insert(&mut self, key: &[u8], val: &[V::SliceType]) -> Result<Option<()>, ()> {
         Node::validate(self.s());
@@ -325,6 +359,7 @@ impl<'a, V: NodeKind> W<Guarded<'a, Exclusive, BasicNode<V>>> {
                         self.relocate_by::<true, u32>(Self::HEAD_OFFSET + 4 * insert_at, count - insert_at, 1);
                         self.count_mut().store(count as u16 + 1);
                         self.b().heads().index(insert_at).store(key_head(key));
+                        self.update_hints(count, count + 1, insert_at);
                         self.heap_write_new(key, val, insert_at);
                         Node::validate(self.s());
                         return Ok(None);
@@ -365,6 +400,7 @@ impl<'a, V: NodeKind> W<Guarded<'a, Exclusive, BasicNode<V>>> {
             }
         }
         self.count_mut().store((count - 1) as u16);
+        self.update_hints(count, count - 1, index);
         Node::validate(self.s());
         Some(())
     }
@@ -501,7 +537,37 @@ impl<'a, V: NodeKind, M: SeqLockMode> W<Guarded<'a, M, BasicNode<V>>> {
         if heads.is_empty() {
             return Err(0);
         }
-        let matching_head_range = (0..=heads.len() - 1).binary_all(|i| heads.s().index(i).load().cmp(&needle_head));
+        let mut head_range_start = 0;
+        let mut head_range_end = heads.len();
+        if heads.len() >= MIN_HINT_COUNT {
+            let spacing = heads.len() / (HINT_COUNT + 1);
+            let mut hint_index = 0;
+            while hint_index < HINT_COUNT {
+                let hint = self.hints().as_slice().index(hint_index).load();
+                if hint < needle_head {
+                    head_range_start = (hint_index + 1) * spacing + 1;
+                } else {
+                    break;
+                }
+                hint_index += 1;
+            }
+            while hint_index < HINT_COUNT {
+                let hint = self.hints().as_slice().index(hint_index).load();
+                if hint > needle_head {
+                    head_range_end = (hint_index + 1) * spacing;
+                    break;
+                }
+                hint_index += 1;
+            }
+        }
+        const _: () = {
+            assert!(MIN_HINT_SPACING >= 2);
+        };
+        debug_assert!(head_range_start == 0 || self.heads().index(head_range_start - 1).load() < needle_head);
+        debug_assert!(head_range_end == heads.len() || self.heads().index(head_range_end).load() > needle_head);
+
+        let matching_head_range =
+            (head_range_start..=head_range_end - 1).binary_all(|i| heads.s().index(i).load().cmp(&needle_head));
         if matching_head_range.is_empty() {
             return Err(matching_head_range.start);
         }
