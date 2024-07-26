@@ -142,6 +142,8 @@ impl SeqLockMode for Exclusive {
             eprintln!("unwinding out of written exclusive lock");
             unsafe { abort() }
         }
+        #[cfg(not(debug_assertions))]
+        let () = guard_data;
         bm.release_exclusive(page_address)
     }
 }

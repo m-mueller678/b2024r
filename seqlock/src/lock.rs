@@ -12,6 +12,11 @@ pub struct LockState {
     pub(crate) version: AtomicU64,
 }
 
+#[cfg(debug_assertions)]
+const EXCLUSIVE_GUARD_DATA_INIT: bool = false;
+#[cfg(not(debug_assertions))]
+const EXCLUSIVE_GUARD_DATA_INIT: () = ();
+
 impl LockState {
     pub fn acquire_optimistic(&self) -> u64 {
         loop {
@@ -105,10 +110,7 @@ impl<'bm, BM: BufferManager<'bm>, T: SeqLockWrappable> Guard<'bm, BM, Optimistic
         self.bm.upgrade_lock(self.bm.page_address_from_contained_address(ptr as usize), self.guard_data);
         let x = Guard {
             bm: self.bm,
-            #[cfg(debug_assertions)]
-            guard_data: false,
-            #[cfg(not(debug_assertions))]
-            guard_data: true,
+            guard_data: EXCLUSIVE_GUARD_DATA_INIT,
             access: ManuallyDrop::new(unsafe { Guarded::wrap_unchecked(ptr) }),
         };
         self.release_unchecked();
@@ -212,7 +214,11 @@ pub trait BmExt<'bm>: BufferManager<'bm> {
 
     fn lock_exclusive(self, page_id: u64) -> Guard<'bm, Self, Exclusive, Self::Page> {
         let page = self.acquire_exclusive(page_id);
-        Guard { bm: self, guard_data: false, access: ManuallyDrop::new(unsafe { Guarded::wrap_unchecked(page.get()) }) }
+        Guard {
+            bm: self,
+            guard_data: EXCLUSIVE_GUARD_DATA_INIT,
+            access: ManuallyDrop::new(unsafe { Guarded::wrap_unchecked(page.get()) }),
+        }
     }
 
     fn lock_new(self) -> (u64, Guard<'bm, Self, Exclusive, Self::Page>) {
@@ -221,7 +227,7 @@ pub trait BmExt<'bm>: BufferManager<'bm> {
             id,
             Guard {
                 bm: self,
-                guard_data: false,
+                guard_data: EXCLUSIVE_GUARD_DATA_INIT,
                 access: ManuallyDrop::new(unsafe { Guarded::wrap_unchecked(page.get()) }),
             },
         )
