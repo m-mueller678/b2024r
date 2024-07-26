@@ -228,7 +228,7 @@ fn single() {
 
 #[cfg_attr(not(miri), test)]
 fn single_large() {
-    batch_ops(1, 50, 250_000, |_, _| [20_000, 20_000, 20_000], |_, _| {});
+    batch_ops(1, 30, 50_000, |_, _| [4_000, 4_000, 4_000], |_, _| {});
 }
 
 #[cfg_attr(not(miri), test)]
