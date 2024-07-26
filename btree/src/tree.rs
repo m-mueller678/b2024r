@@ -88,7 +88,7 @@ impl<'bm, BM: BufferManager<'bm, Page = PageTail>> Tree<'bm, BM> {
     fn split_and_insert(&self, split_target: PageId, k: &[u8], val: &[u8]) -> Option<()> {
         let parent_id = {
             let [parent, node] = self.descend(k, Some(split_target));
-            if node.page_id() == split_target {
+            if self.bm.page_id(node.page_address()) == split_target {
                 let mut node = node.upgrade();
                 let mut parent = parent.upgrade();
                 self.ensure_parent_not_root(&mut node, &mut parent);
@@ -103,7 +103,7 @@ impl<'bm, BM: BufferManager<'bm, Page = PageTail>> Tree<'bm, BM> {
                 {
                     None
                 } else {
-                    Some(parent.page_id())
+                    Some(self.bm.page_id(parent.page_address()))
                 }
             } else {
                 None
@@ -121,7 +121,7 @@ impl<'bm, BM: BufferManager<'bm, Page = PageTail>> Tree<'bm, BM> {
         node: &mut Guard<'bm, BM, Exclusive, PageTail>,
         parent: &mut Guard<'bm, BM, Exclusive, PageTail>,
     ) {
-        if parent.page_id() == self.meta {
+        if self.bm.page_id(parent.page_address()) == self.meta {
             let mut meta = parent.b().0.cast::<MetadataPage>();
             let (new_root_id, mut new_root_guard) = self.bm.lock_new();
             new_root_guard.b().0.cast::<BasicInner>().init(&[][..], &[][..], page_id_to_3x16(meta.root().load()));
@@ -150,7 +150,7 @@ impl<'bm, BM: BufferManager<'bm, Page = PageTail>> Tree<'bm, BM> {
                 )
                 .is_err()
                 {
-                    let parent_id = parent.page_id();
+                    let parent_id = self.bm.page_id(parent.page_address());
                     drop(parent);
                     drop(node);
                     return self.split_and_insert(parent_id, k, val);

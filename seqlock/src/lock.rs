@@ -184,14 +184,18 @@ pub unsafe trait BufferManager<'bm>: 'bm+Copy +Send+Sync+ Sized {
     type Page: Sized + SeqLockWrappable;
 
     /// Returned page is exclusively locked
-    fn alloc(&self) -> (u64, &'bm UnsafeCell<Self::Page>);
+    fn alloc(self) -> (u64, &'bm UnsafeCell<Self::Page>);
     /// Page must be exclusively locked.
     /// The lock is automatically released.
-    fn free(&self, page_address: usize);
+    fn free(self, page_address: usize);
     fn release_exclusive(self, page_address: usize) -> u64;
     fn acquire_exclusive(self, page_id: u64) -> &'bm UnsafeCell<Self::Page>;
     fn acquire_optimistic(self, page_id: u64) -> (&'bm UnsafeCell<Self::Page>, u64);
     fn release_optimistic(self, page_address: usize, version: u64);
+
+    /// page must be locked.
+    /// For optimistic locks, wrong id may be returned if the lock has become invalid.
+    fn page_id(self,page_address:usize)->u64;
     fn upgrade_lock(self, page_address: usize, version: u64);
 
     /// Accepts any address within a page and returns a value that can be passed as `page_address` to the other methods to refer to the containing page.
