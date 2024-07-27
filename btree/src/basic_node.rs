@@ -584,6 +584,44 @@ impl<'a, V: NodeKind, M: SeqLockMode> W<Guarded<'a, M, BasicNode<V>>> {
 }
 
 impl<'a, M: SeqLockMode> W<Guarded<'a, M, BasicNode<KindLeaf>>> {
+    pub fn iterator_suffix<'b>(self, index: isize) -> Guarded<'a, M, [u8]>
+    where
+        Self: Copy,
+    {
+        self.key(index as usize)
+    }
+
+    pub fn iterator_value<'b>(self, index: isize) -> Guarded<'a, M, [u8]>
+    where
+        Self: Copy,
+    {
+        self.val(index as usize)
+    }
+
+    pub fn iterator_valid(self, i: isize) -> bool
+    where
+        Self: Copy,
+    {
+        (i as usize) < self.count().load() as usize
+    }
+
+    pub fn iterator_start(self, key: &[u8]) -> isize
+    where
+        Self: Copy,
+    {
+        match self.find(key) {
+            Ok(x) => x as isize,
+            Err(x) => x as isize,
+        }
+    }
+
+    pub fn iterator_advance(self, index: &mut isize)
+    where
+        Self: Copy,
+    {
+        *index += 1;
+    }
+
     pub fn lookup_leaf(self, key: &[u8]) -> Option<Guarded<'a, M, [u8]>>
     where
         Self: Copy,

@@ -153,6 +153,12 @@ impl<'a, M: SeqLockMode> W<Guarded<'a, M, PageTail>> {
     }
 }
 
+pub fn node_guard_cast<'bm, N: Node, BM: BufferManager<'bm, Page = PageTail>, M: SeqLockMode>(
+    guard: Guard<'bm, BM, M, PageTail>,
+) -> Guard<'bm, BM, M, N> {
+    unsafe { guard.map(|x| x.node_cast::<N>()) }
+}
+
 impl<'a, N: Node> W<Guarded<'a, Shared, N>> {
     pub fn to_debug(self) -> DebugNode<N::DebugVal> {
         let (keys, values) = N::to_debug_kv(self);
