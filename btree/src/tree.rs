@@ -1,3 +1,4 @@
+use std::cell::RefCell;
 use crate::basic_node::{BasicInner, BasicLeaf, BasicNode};
 use crate::key_source::SourceSlice;
 use crate::node::{node_guard_cast, node_tag, CommonNodeHead, KindInner, Node, ParentInserter};
@@ -7,6 +8,10 @@ use bytemuck::{Pod, Zeroable};
 use seqlock::{BmExt, BufferManager, Exclusive, Guard, Guarded, Optimistic, SeqlockAccessors};
 use std::marker::PhantomData;
 use std::mem::size_of;
+use seqlock::unwind::catch;
+
+pub const FENCES_INCLUDE_PREFIX:bool=true;
+pub const BRANCH_HIGH_ON_EQUAL:bool=true;
 
 pub struct Tree<'bm, BM: BufferManager<'bm, Page = PageTail>> {
     meta: u64,
@@ -71,6 +76,7 @@ impl<'bm, BM: BufferManager<'bm, Page = PageTail>> Tree<'bm, BM> {
     }
 
     fn descend(&self, k: &[u8], stop_at: Option<PageId>) -> [Guard<'bm, BM, Optimistic, PageTail>; 2] {
+        assert!(BRANCH_HIGH_ON_EQUAL);
         let mut parent = self.bm.lock_optimistic(self.meta);
         let mut node_pid = parent.s().cast::<MetadataPage>().root().load();
         let mut node = self.bm.lock_optimistic(node_pid);
@@ -159,9 +165,9 @@ impl<'bm, BM: BufferManager<'bm, Page = PageTail>> Tree<'bm, BM> {
         }
     }
 
-    pub fn range_iterator<'t>(&'t self, mut start: &[u8]) -> TreeIterator<'t, 'bm, BM> {
+    pub fn range_iterator<'t,'b>(&'t self, mut start: &[u8],buffer:&mut[u8;MAX_KEY_SIZE]) -> TreeIterator<'b,'t, 'bm, BM> {
         let mut iter =
-            TreeIterator { key_buffer: Zeroable::zeroed(), tree: self, current_leaf: Err((false, start.len())) };
+            TreeIterator { key_buffer: buffer, tree: self, current_leaf: Err((false, start.len())) };
         iter
     }
 
@@ -259,16 +265,89 @@ impl<'g, 'bm, BM: BufferManager<'bm, Page = PageTail>> ParentInserter<'bm, BM>
     }
 }
 
-pub struct TreeIterator<'a, 'bm, BM: BufferManager<'bm, Page = PageTail>> {
+pub struct TreeIterator<'b, 't, 'bm, BM: BufferManager<'bm, Page = PageTail>> {
     key_buffer: [u8; MAX_KEY_SIZE],
-    tree: &'a Tree<'bm, BM>,
-    // Ok(current node)
-    // Err(key is known first, key length)
-    current_leaf: Result<(Guard<'bm, BM, Optimistic, BasicLeaf>, isize), (bool, usize)>,
+    key_len:usize,
+    prefix_len:usize,
+    is_known_first_key:bool,
+    assume_key_first:bool,
+    use_lock_coupling:bool,
+    tree: &'t Tree<'bm, BM>,
+    current_leaf:Option< (Guard<'bm, BM, Optimistic, BasicLeaf>, isize) >,
 }
 
-impl<'a, 'bm, BM: BufferManager<'bm, Page = PageTail>> Iterator for TreeIterator<'a, 'bm, BM> {
-    type Item = (Guarded<'bm, Optimistic, [u8]>, Guarded<'bm, Optimistic, [u8]>, Guarded<'bm, Optimistic, [u8]>);
+enum TreeIteratorResult<'iter,'bm,BM: BufferManager<'bm, Page = PageTail>>{
+    KeyValue{
+        key:&'iter[u8],
+        value:Guarded<'iter,Optimistic,[u8]>
+    },
+    PageEnd{
+        fence_key:&'iter [u8],
+        lock:Guard<'bm,BM,Optimistic,[u8]>,
+    },
+    LockFail{
+        last_key:&'iter [u8],
+    }
+}
+
+impl<'b, 't, 'bm, BM: BufferManager<'bm, Page = PageTail>> TreeIterator<'b, 't,'bm,BM> {
+    fn try_tree_next<'iter>(&'iter mut self)->TreeIteratorResult<'iter,'bm,BM>{
+        catch(||{
+            self.tree_next()
+        }).unwrap_or_else(|_|{
+            TreeIteratorResult::LockFail {last_key:&self.key_buffer[..self.key_len]}
+        })
+    }
+
+    fn tree_next<'iter>(&'iter mut self)->TreeIteratorResult<'iter,'bm,BM>{
+        // be careful about unwind safety
+        loop {
+            return match &mut self.current_leaf {
+                Some((node, index)) => {
+                    if node.iterator_valid(*index) {
+                        let suffix=node.iterator_suffix(*index);
+                        let value = node.iterator_value(*index);
+                        node.iterator_advance(index);
+                        suffix.load_slice_into(&mut self.key_buffer[self.prefix_len..]);
+                        self.key_len = self.prefix_len+suffix.len();
+                        TreeIteratorResult::KeyValue {key:&self.key_buffer[..self.key_len],value}
+                    } else {
+                        if self.use_lock_coupling{
+                            unimplemented!()
+                        }else{
+                            assert!(FENCES_INCLUDE_PREFIX);
+                            assert!(BRANCH_HIGH_ON_EQUAL); // if fence key is present as key, it will be in next node
+                            let fence=node.upper_fence().slice(self.prefix_len..);
+                            self.key_len = self.prefix_len+fence.len();
+                            self.is_known_first_key=self.assume_key_first;
+                            fence.load_slice_into(&mut self.key_buffer[self.prefix_len..]);
+                            let lock = self.current_leaf.take().0;
+                            TreeIteratorResult::PageEnd {fence_key:&self.key_buffer[..self.key_len],lock}
+                        }
+                    }
+                }
+                None =>{
+                    let [parent, node] = self.tree.descend(&self.key_buffer[..*self.key_len], None);
+                    parent.release_unchecked();
+                    let index = if self.is_known_first_key { 0 } else {
+                        node.iterator_start(&self.key_buffer[..*self.key_len])
+                    };
+                    self.current_leaf = Some((node,index));
+                    continue
+                }
+            }
+        }
+    }
+
+    fn restart_with_last_key(&mut self){
+        let () = self.current_leaf.take();
+        self.current_leaf=None;
+        self.assume_key_first=false;
+    }
+}
+
+impl<'b,'a, 'bm, BM: BufferManager<'bm, Page = PageTail>> Iterator for TreeIterator<'b,'a, 'bm, BM> {
+    type Item = (&'b [u8], Guarded<'bm, Optimistic, [u8]>);
 
     fn next(&mut self) -> Option<Self::Item> {
         loop {
