@@ -173,7 +173,7 @@ impl Default for PerfCounters {
 
 impl PerfCounters {
     pub fn new() -> Self {
-        Self::with_counters(["instructions", "cycles", "branch-misses"])
+        Self::with_counters(["task-clock","instructions", "cycles", "branch-misses"])
     }
     pub fn with_counters<'a>(counters: impl IntoIterator<Item = &'a str>) -> Self {
         static INIT_PFM: Once = Once::new();
@@ -225,9 +225,9 @@ impl PerfCounters {
             multiplexed |= v.time_enabled != v.time_running;
             (n.as_str(), v.value as f64 * v.time_enabled as f64 / v.time_running as f64)
         });
-        let time = std::iter::once(("time", self.time.unwrap().as_secs_f64()));
         let mut out: Map<_, _> =
-            perf_counters.chain(time).map(|(n, x)| (n.to_string(), Value::from(x / scale))).collect();
+            perf_counters.map(|(n, x)| (n.to_string(), Value::from(x / scale))).collect();
+        out.insert("time".to_string(), Value::from(self.time.unwrap().as_secs_f64()));
         out.insert("scale".to_string(), Value::from(scale));
         out.insert("multiplexed".to_string(), Value::from(multiplexed));
         out

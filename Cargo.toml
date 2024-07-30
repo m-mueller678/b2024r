@@ -8,3 +8,6 @@ members = [ "seqlock", "seqlock_macros","btree", "dev_utils"]
 [profile.test-optimized]
 inherits = "test"
 opt-level = 3
+
+[profile.bench]
+debug = true

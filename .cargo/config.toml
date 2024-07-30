@@ -1,0 +1,4 @@
+[target.x86_64-unknown-linux-gnu]
+linker = "/usr/bin/clang"
+# this fixes call graphs for perf, see https://github.com/llvm/llvm-project/issues/53156
+rustflags = ["-Clink-arg=-fuse-ld=lld", "-Clink-arg=-Wl,--no-rosegment"]
