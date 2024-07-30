@@ -3,7 +3,7 @@
 use btree::Tree;
 use dev_utils::serde_json::{Map, Value};
 use dev_utils::zipf::ZipfDistribution;
-use dev_utils::{mixed_test_keys, PerfCounters};
+use dev_utils::{generate_keys, random_fixed_size_generator, seq_u64_generator, test_mix_generator, PerfCounters};
 use rand::prelude::Distribution;
 use rand::rngs::SmallRng;
 use rand::SeedableRng;
@@ -32,8 +32,14 @@ struct Args {
 
 impl Args {
     fn keys(&self) -> Vec<Box<[u8]>> {
-        assert_eq!(self.key_set_name, "test-mix");
-        mixed_test_keys(self.key_count, false, 42)
+        let generator: Box<dyn Sync + for<'a> Fn(&'a mut _, _) -> _> = match self.key_set_name.as_str() {
+            "test-mix" => Box::new(test_mix_generator(self.key_count, 42)),
+            "dense64" => Box::new(seq_u64_generator(self.key_count, &mut SmallRng::seed_from_u64(42))),
+            "sparse64" => Box::new(random_fixed_size_generator(8)),
+            "sparse32" => Box::new(random_fixed_size_generator(4)),
+            a => panic!("unknown key set: {a:?}"),
+        };
+        generate_keys(self.key_count, false, 43, &generator)
     }
 }
 

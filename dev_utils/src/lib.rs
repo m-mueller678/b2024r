@@ -49,14 +49,18 @@ pub fn mixed_test_keys(count: usize, sorted: bool, seed: u64) -> Vec<Box<[u8]>> 
         count,
         sorted,
         hash(&(seed, 1)),
-        &mixed_generator(vec![
-            Box::new(alpha_generator(5..=20)),
-            Box::new(ascii_bin_generator(20..=30)),
-            Box::new(path_generator(30..=120)),
-            Box::new(seq_u64_generator((count / 5 / 4000).max(1), &mut SmallRng::seed_from_u64(hash(&(seed, 2))))),
-            Box::new(random_fixed_size_generator(8)),
-        ]),
+        &test_mix_generator(count,hash(&(seed, 2))),
     )
+}
+
+pub fn test_mix_generator(count: usize, seed: u64)->impl Sync + Fn(&mut SmallRng, usize) -> Vec<u8>{
+    mixed_generator(vec![
+        Box::new(alpha_generator(5..=20)),
+        Box::new(ascii_bin_generator(20..=30)),
+        Box::new(path_generator(30..=120)),
+        Box::new(seq_u64_generator((count / 5 / 4000).max(1), &mut SmallRng::seed_from_u64(seed))),
+        Box::new(random_fixed_size_generator(8)),
+    ])
 }
 
 #[allow(clippy::type_complexity)]
