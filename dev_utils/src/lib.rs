@@ -1,3 +1,4 @@
+use std::cell::Cell;
 use minstant::Instant;
 use rand::distributions::{Distribution, Uniform};
 use rand::rngs::SmallRng;
@@ -7,7 +8,8 @@ use serde_json::{Map, Value};
 use std::collections::HashSet;
 use std::hash::{DefaultHasher, Hash, Hasher};
 use std::ops::RangeInclusive;
-use std::sync::Once;
+use std::sync::{Mutex, Once};
+use std::thread::LocalKey;
 use std::time::Duration;
 pub use {serde_json, zipf};
 
@@ -232,4 +234,36 @@ impl PerfCounters {
         out.insert("multiplexed".to_string(), Value::from(multiplexed));
         out
     }
+}
+
+pub fn _counter_inc(val:f64,local:&'static LocalKey<Cell<(u64,f64)>>,global:&'static Mutex<(u64,f64)>,name:&str,print_interval:u32){
+    let sync_interval = print_interval.min(10);
+    local.with(|local|{
+        let x = local.get();
+        let x2 = (x.0+1,x.1+val);
+        if x2.0 % (1<< sync_interval) == 0{
+            local.set((0,0.0));
+            let mut lock = global.lock().unwrap();
+            lock.0+=x2.0;
+            lock.1+=x2.1;
+            let (count,sum) = *lock;
+            drop(lock);
+            if count % (1<<print_interval) == 0{
+                eprintln!("counter {name:40?}, cnt: {count:10}, sum: {sum:10}, avg: {:10}",sum/count as f64);
+            }
+        }else{
+            local.set(x2);
+        }
+    });
+}
+
+#[macro_export]
+macro_rules! average_counter {
+    ($name:literal,$value:expr,$print_interval_log2:expr) => {
+        {
+            std::thread_local!{static LOCAL:std::cell::Cell<(u64,f64)>=std::cell::Cell::new((0,0.0))};
+            static GLOBAL:std::sync::Mutex<(u64,f64)>=std::sync::Mutex::new((0,0.0));
+            $crate::_counter_inc($value as f64,&LOCAL,&GLOBAL,$name,$print_interval_log2);
+        }
+    };
 }
