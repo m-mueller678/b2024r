@@ -28,6 +28,9 @@ impl<'bm, BM: BufferManager<'bm, Page = PageTail>> Tree<'bm, BM> {
     }
 
     fn validate_fences_exclusive(&self) {
+        if !cfg!(feature = "validate_tree") {
+            return;
+        }
         let mut low_buffer = [0u8; MAX_KEY_SIZE];
         let mut high_buffer = [0u8; MAX_KEY_SIZE];
         let meta = self.bm.lock_exclusive(self.meta);

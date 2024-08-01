@@ -681,9 +681,6 @@ impl<'a> W<Guarded<'a, Exclusive, BasicNode<KindInner>>> {
         mut ll: usize,
         mut hl: usize,
     ) {
-        if !cfg!(feature = "validate_tree") {
-            return;
-        }
         assert!(
             self.s().lower_fence().mem_cmp(&lb[..ll]).is_eq(),
             "wrong lf {:?}\n{:?}",
