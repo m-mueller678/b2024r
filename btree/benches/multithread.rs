@@ -118,6 +118,9 @@ where
 }
 
 fn main() {
+    if cfg!(any(feature = "validate_node", feature = "validate_node", debug_assertions)) {
+        eprintln!("warning: debug assertions or validation enabled");
+    }
     let args = get_args();
     let mut perf = if let Some(c) = &args.counters {
         PerfCounters::with_counters(c.iter().map(|x| x.as_str()))
@@ -133,6 +136,7 @@ fn main() {
     keys.par_shuffle(&mut SmallRng::seed_from_u64(0x42));
     let keys = &keys;
     let value = &vec![42u8; args.payload_size];
+    dbg!();
     let mut run_insert_jobs = |range: Range<usize>| {
         run_jobs(&mut perf, args.threads, 0.0, |tid| {
             let range = range.clone();
