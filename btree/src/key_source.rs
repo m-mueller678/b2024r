@@ -11,8 +11,13 @@ pub fn common_prefix(a: impl SourceSlice, b: impl SourceSlice) -> usize {
 
 pub fn key_head(k: impl SourceSlice) -> u32 {
     let mut buffer = [0u8; 4];
-    let common_len = k.len().min(4);
-    k.slice_end(common_len).write_to(&mut Guarded::wrap_mut(&mut buffer[..common_len]));
+    let k_len = k.len();
+    if k_len >= 4 {
+        // having a special case for len>=4 allows for better code gen, ~5% speedup
+        k.slice_end(4).write_to(&mut Guarded::wrap_mut(&mut buffer[..]));
+    } else {
+        k.write_to(&mut Guarded::wrap_mut(&mut buffer[..k_len]));
+    }
     u32::from_be_bytes(buffer)
 }
 
