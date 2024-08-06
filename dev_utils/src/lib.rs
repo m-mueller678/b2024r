@@ -170,7 +170,7 @@ impl Default for PerfCounters {
 
 impl PerfCounters {
     pub fn new() -> Self {
-        Self::with_counters(["task-clock", "instructions", "cycles", "branch-misses"])
+        Self::with_counters(["task-clock", "instructions", "cycles", "branch-misses", "cache-misses"])
     }
     pub fn with_counters<'a>(counters: impl IntoIterator<Item = &'a str>) -> Self {
         static INIT_PFM: Once = Once::new();
