@@ -566,14 +566,8 @@ impl<'a, V: NodeKind, M: SeqLockMode> W<Guarded<'a, M, BasicNode<V>>> {
             assert!(MIN_HINT_SPACING >= 2);
         };
 
-        dbg!(head_range_start..=head_range_end - 1);
-        dbg!();
-        let matching_head_range =
-            (head_range_start..=head_range_end - 1).binary_all(|i| dbg!(dbg!(heads.s().index(dbg!(i)).load()).cmp(&needle_head)));
-        dbg!(matching_head_range.clone());
-        for h in matching_head_range.clone(){
-            assert!(heads.s().index(h).load() == needle_head);
-        }
+        let matching_head_range = (head_range_start..=head_range_end - 1)
+            .binary_all(|i| dbg!(dbg!(heads.s().index(dbg!(i)).load()).cmp(&needle_head)));
         if matching_head_range.is_empty() {
             return Err(matching_head_range.start);
         }
@@ -583,13 +577,10 @@ impl<'a, V: NodeKind, M: SeqLockMode> W<Guarded<'a, M, BasicNode<V>>> {
         }
         let key_position = (matching_head_range.start..=matching_head_range.end - 1).binary_by(|i| {
             let key = self.key(i);
-            let key=key.optimistic();
-            if key.len()<=4 || truncated.len()<=4{
-                let a=key.mem_cmp(truncated);
-                let b= key.len().cmp(&truncated.len());
-                assert_eq!(a,b);
-                a
-            }else{
+            let key = key.optimistic();
+            if key.len() <= 4 || truncated.len() <= 4 {
+                key.len().cmp(&truncated.len())
+            } else {
                 assert!(key.slice(..4).mem_cmp(&truncated[..4]).is_eq());
                 key.slice(4..).mem_cmp(&truncated[4..])
             }
@@ -599,10 +590,10 @@ impl<'a, V: NodeKind, M: SeqLockMode> W<Guarded<'a, M, BasicNode<V>>> {
 }
 
 #[test]
-fn index_vec(){
-    let array = [1,2];
+fn index_vec() {
+    let array = [1, 2];
     let matching_range = (0..=1).binary_all(|i| array[i].cmp(&1));
-    assert_eq!(matching_range , 0..1);
+    assert_eq!(matching_range, 0..1);
 }
 impl<'a, M: SeqLockMode> W<Guarded<'a, M, BasicNode<KindLeaf>>> {
     pub fn iterator_suffix<'b>(self, index: isize) -> Guarded<'a, M, [u8]>

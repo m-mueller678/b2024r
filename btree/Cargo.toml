@@ -5,7 +5,7 @@ edition = "2021"
 
 [dependencies]
 seqlock = {path = "../seqlock" }
-indxvec = "1.9"
+indxvec = { git = 'https://github.com/m-mueller678/indxvec.git'}
 bytemuck = { version = "1.15.0",features = ["derive"] }
 rand = { version = "0.8.5",features = ["small_rng"] }
 bstr = "1.9.1"
