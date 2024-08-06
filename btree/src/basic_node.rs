@@ -566,8 +566,8 @@ impl<'a, V: NodeKind, M: SeqLockMode> W<Guarded<'a, M, BasicNode<V>>> {
             assert!(MIN_HINT_SPACING >= 2);
         };
 
-        let matching_head_range = (head_range_start..=head_range_end - 1)
-            .binary_all(|i| dbg!(dbg!(heads.s().index(dbg!(i)).load()).cmp(&needle_head)));
+        let matching_head_range =
+            (head_range_start..=head_range_end - 1).binary_all(|i| heads.s().index(i).load().cmp(&needle_head));
         if matching_head_range.is_empty() {
             return Err(matching_head_range.start);
         }
