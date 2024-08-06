@@ -7,7 +7,7 @@ use serde_json::{Map, Value};
 use std::cell::Cell;
 use std::collections::HashSet;
 use std::hash::{DefaultHasher, Hash, Hasher};
-use std::ops::RangeInclusive;
+use std::ops::{Range, RangeInclusive};
 use std::sync::{Mutex, Once};
 use std::thread::LocalKey;
 use std::time::Duration;
@@ -52,9 +52,9 @@ pub fn mixed_test_keys(count: usize, sorted: bool, seed: u64) -> Vec<Box<[u8]>> 
 
 pub fn test_mix_generator(count: usize, seed: u64) -> impl Sync + Fn(&mut SmallRng, usize) -> Vec<u8> {
     mixed_generator(vec![
-        Box::new(alpha_generator(5..=20)),
-        Box::new(ascii_bin_generator(20..=30)),
-        Box::new(path_generator(30..=120)),
+        Box::new(alpha_generator(5..21)),
+        Box::new(ascii_bin_generator(20..31)),
+        Box::new(path_generator(30..121)),
         Box::new(seq_u64_generator((count / 5 / 4000).max(1), &mut SmallRng::seed_from_u64(seed))),
         Box::new(random_fixed_size_generator(8)),
     ])
@@ -79,8 +79,8 @@ pub fn seq_u64_generator_0<R: Rng>() -> impl Fn(&mut R, usize) -> Vec<u8> {
     move |_, index| (index as u64).to_be_bytes().to_vec()
 }
 
-pub fn alpha_generator<R: Rng>(len_range: RangeInclusive<usize>) -> impl Fn(&mut R, usize) -> Vec<u8> {
-    let dist = Uniform::<usize>::new(*len_range.start(), *len_range.end());
+pub fn alpha_generator<R: Rng>(len_range: Range<usize>) -> impl Fn(&mut R, usize) -> Vec<u8> {
+    let dist = Uniform::<usize>::new(len_range.start, len_range.end);
     let alpha_dist = Uniform::<u8>::new(b'A', b'Z');
     move |rng, _i| {
         let len = dist.sample(rng);
@@ -88,8 +88,8 @@ pub fn alpha_generator<R: Rng>(len_range: RangeInclusive<usize>) -> impl Fn(&mut
     }
 }
 
-pub fn ascii_bin_generator<R: Rng>(len_range: RangeInclusive<usize>) -> impl Fn(&mut R, usize) -> Vec<u8> {
-    let dist = Uniform::<usize>::new(*len_range.start(), *len_range.end());
+pub fn ascii_bin_generator<R: Rng>(len_range: Range<usize>) -> impl Fn(&mut R, usize) -> Vec<u8> {
+    let dist = Uniform::<usize>::new(len_range.start, len_range.end);
     move |rng, _i| {
         let len = dist.sample(rng);
         (0..len).map(|_| if rng.gen() { b'0' } else { b'1' }).collect()
@@ -119,14 +119,14 @@ fn hash(h: &impl Hash) -> u64 {
     hasher.finish()
 }
 
-pub fn path_generator<R: Rng>(min_len_range: RangeInclusive<usize>) -> impl Fn(&mut R, usize) -> Vec<u8> {
+pub fn path_generator<R: Rng>(min_len_range: Range<usize>) -> impl Fn(&mut R, usize) -> Vec<u8> {
     let words = if cfg!(miri) {
         vec!["ab", "anti", "antibody", "antics", "the", "there", "then"]
     } else {
         include_str!("word1000.txt").split('\n').collect()
     };
     let word_dist = Uniform::new(0, words.len());
-    let len_dist = Uniform::new(min_len_range.start(), min_len_range.end());
+    let len_dist = Uniform::new(min_len_range.start, min_len_range.end);
     let cardinality_dist = Uniform::new(1, 6);
     move |rng, _i| {
         let target_len = len_dist.sample(rng);
