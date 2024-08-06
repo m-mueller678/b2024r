@@ -1,10 +1,10 @@
-use std::cell::Cell;
 use minstant::Instant;
 use rand::distributions::{Distribution, Uniform};
 use rand::rngs::SmallRng;
 use rand::{Rng, SeedableRng};
 use rayon::prelude::*;
 use serde_json::{Map, Value};
+use std::cell::Cell;
 use std::collections::HashSet;
 use std::hash::{DefaultHasher, Hash, Hasher};
 use std::ops::RangeInclusive;
@@ -47,15 +47,10 @@ pub fn generate_keys(
 }
 
 pub fn mixed_test_keys(count: usize, sorted: bool, seed: u64) -> Vec<Box<[u8]>> {
-    generate_keys(
-        count,
-        sorted,
-        hash(&(seed, 1)),
-        &test_mix_generator(count,hash(&(seed, 2))),
-    )
+    generate_keys(count, sorted, hash(&(seed, 1)), &test_mix_generator(count, hash(&(seed, 2))))
 }
 
-pub fn test_mix_generator(count: usize, seed: u64)->impl Sync + Fn(&mut SmallRng, usize) -> Vec<u8>{
+pub fn test_mix_generator(count: usize, seed: u64) -> impl Sync + Fn(&mut SmallRng, usize) -> Vec<u8> {
     mixed_generator(vec![
         Box::new(alpha_generator(5..=20)),
         Box::new(ascii_bin_generator(20..=30)),
@@ -175,7 +170,7 @@ impl Default for PerfCounters {
 
 impl PerfCounters {
     pub fn new() -> Self {
-        Self::with_counters(["task-clock","instructions", "cycles", "branch-misses"])
+        Self::with_counters(["task-clock", "instructions", "cycles", "branch-misses"])
     }
     pub fn with_counters<'a>(counters: impl IntoIterator<Item = &'a str>) -> Self {
         static INIT_PFM: Once = Once::new();
@@ -227,8 +222,7 @@ impl PerfCounters {
             multiplexed |= v.time_enabled != v.time_running;
             (n.as_str(), v.value as f64 * v.time_enabled as f64 / v.time_running as f64)
         });
-        let mut out: Map<_, _> =
-            perf_counters.map(|(n, x)| (n.to_string(), Value::from(x / scale))).collect();
+        let mut out: Map<_, _> = perf_counters.map(|(n, x)| (n.to_string(), Value::from(x / scale))).collect();
         out.insert("time".to_string(), Value::from(self.time.unwrap().as_secs_f64()));
         out.insert("scale".to_string(), Value::from(scale));
         out.insert("multiplexed".to_string(), Value::from(multiplexed));
@@ -236,22 +230,28 @@ impl PerfCounters {
     }
 }
 
-pub fn _counter_inc(val:f64,local:&'static LocalKey<Cell<(u64,f64)>>,global:&'static Mutex<(u64,f64)>,name:&str,print_interval:u32){
+pub fn _counter_inc(
+    val: f64,
+    local: &'static LocalKey<Cell<(u64, f64)>>,
+    global: &'static Mutex<(u64, f64)>,
+    name: &str,
+    print_interval: u32,
+) {
     let sync_interval = print_interval.min(10);
-    local.with(|local|{
+    local.with(|local| {
         let x = local.get();
-        let x2 = (x.0+1,x.1+val);
-        if x2.0 % (1<< sync_interval) == 0{
-            local.set((0,0.0));
+        let x2 = (x.0 + 1, x.1 + val);
+        if x2.0 % (1 << sync_interval) == 0 {
+            local.set((0, 0.0));
             let mut lock = global.lock().unwrap();
-            lock.0+=x2.0;
-            lock.1+=x2.1;
-            let (count,sum) = *lock;
+            lock.0 += x2.0;
+            lock.1 += x2.1;
+            let (count, sum) = *lock;
             drop(lock);
-            if count % (1<<print_interval) == 0{
-                eprintln!("counter {name:40?}, cnt: {count:10}, sum: {sum:10}, avg: {:10}",sum/count as f64);
+            if count % (1 << print_interval) == 0 {
+                eprintln!("counter {name:40?}, cnt: {count:10}, sum: {sum:10}, avg: {:10}", sum / count as f64);
             }
-        }else{
+        } else {
             local.set(x2);
         }
     });
@@ -259,11 +259,9 @@ pub fn _counter_inc(val:f64,local:&'static LocalKey<Cell<(u64,f64)>>,global:&'st
 
 #[macro_export]
 macro_rules! average_counter {
-    ($name:literal,$value:expr,$print_interval_log2:expr) => {
-        {
-            std::thread_local!{static LOCAL:std::cell::Cell<(u64,f64)>=std::cell::Cell::new((0,0.0))};
-            static GLOBAL:std::sync::Mutex<(u64,f64)>=std::sync::Mutex::new((0,0.0));
-            $crate::_counter_inc($value as f64,&LOCAL,&GLOBAL,$name,$print_interval_log2);
-        }
-    };
+    ($name:literal,$value:expr,$print_interval_log2:expr) => {{
+        std::thread_local! {static LOCAL:std::cell::Cell<(u64,f64)>=std::cell::Cell::new((0,0.0))};
+        static GLOBAL: std::sync::Mutex<(u64, f64)> = std::sync::Mutex::new((0, 0.0));
+        $crate::_counter_inc($value as f64, &LOCAL, &GLOBAL, $name, $print_interval_log2);
+    }};
 }

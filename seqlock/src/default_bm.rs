@@ -119,19 +119,18 @@ unsafe impl<'bm, P: Send + Sync + Zeroable + SeqLockWrappable> BufferManager<'bm
     }
 }
 
-
 #[macro_export]
 macro_rules! static_bm_impl {
     ($static_path:path,$for_type:ty,$page_type:ty) => {
-        unsafe impl<'bm> $crate::BufferManager<'bm> for $for_type{
+        unsafe impl<'bm> $crate::BufferManager<'bm> for $for_type {
             type Page = $page_type;
 
             #[inline(always)]
             fn alloc(self) -> (u64, &'bm std::cell::UnsafeCell<Self::Page>) {
                 #[allow(dead_code)]
-                fn type_check(){
-                    fn guard<'bm,BM:$crate::BufferManager<'bm,Page=$page_type>>(x:BM){}
-                    let x:&'static _ = & $static_path;
+                fn type_check() {
+                    fn guard<'bm, BM: $crate::BufferManager<'bm, Page = $page_type>>(x: BM) {}
+                    let x: &'static _ = &$static_path;
                     guard(x);
                 }
 
@@ -140,42 +139,42 @@ macro_rules! static_bm_impl {
 
             #[inline(always)]
             fn free(self, page_address: usize) {
-                $crate::BufferManager::free(&$static_path,page_address)
+                $crate::BufferManager::free(&$static_path, page_address)
             }
 
             #[inline(always)]
             fn release_exclusive(self, page_address: usize) -> u64 {
-                $crate::BufferManager::release_exclusive(&$static_path,page_address)
+                $crate::BufferManager::release_exclusive(&$static_path, page_address)
             }
 
             #[inline(always)]
             fn acquire_exclusive(self, page_id: u64) -> &'bm std::cell::UnsafeCell<Self::Page> {
-                $crate::BufferManager::acquire_exclusive(&$static_path,page_id)
+                $crate::BufferManager::acquire_exclusive(&$static_path, page_id)
             }
 
             #[inline(always)]
             fn acquire_optimistic(self, page_id: u64) -> (&'bm std::cell::UnsafeCell<Self::Page>, u64) {
-                $crate::BufferManager::acquire_optimistic(&$static_path,page_id)
+                $crate::BufferManager::acquire_optimistic(&$static_path, page_id)
             }
 
             #[inline(always)]
             fn release_optimistic(self, page_address: usize, version: u64) {
-                $crate::BufferManager::release_optimistic(&$static_path,page_address,version)
+                $crate::BufferManager::release_optimistic(&$static_path, page_address, version)
             }
 
             #[inline(always)]
             fn page_id(self, page_address: usize) -> u64 {
-                $crate::BufferManager::page_id(&$static_path,page_address)
+                $crate::BufferManager::page_id(&$static_path, page_address)
             }
 
             #[inline(always)]
             fn upgrade_lock(self, page_address: usize, version: u64) {
-                $crate::BufferManager::upgrade_lock(&$static_path,page_address,version)
+                $crate::BufferManager::upgrade_lock(&$static_path, page_address, version)
             }
 
             #[inline(always)]
             fn page_address_from_contained_address(self, address: usize) -> usize {
-                $crate::BufferManager::page_address_from_contained_address(&$static_path,address)
+                $crate::BufferManager::page_address_from_contained_address(&$static_path, address)
             }
         }
     };

@@ -16,7 +16,8 @@ impl LockState {
         fence(Acquire);
         if self.version.load(Relaxed) != expected {
             if !std::thread::panicking() {
-            Optimistic::release_error()}
+                Optimistic::release_error()
+            }
         }
     }
 }
