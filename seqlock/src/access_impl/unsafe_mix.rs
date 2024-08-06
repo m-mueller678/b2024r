@@ -11,6 +11,9 @@ use std::mem::{align_of, size_of, MaybeUninit};
 use std::sync::atomic::fence;
 use std::sync::atomic::Ordering::{Acquire, Relaxed};
 
+#[path = "ref_impl.rs"]
+mod ref_impl;
+
 impl LockState {
     pub fn release_optimistic(&self, expected: u64) {
         fence(Acquire);

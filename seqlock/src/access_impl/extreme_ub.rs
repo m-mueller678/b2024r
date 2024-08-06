@@ -10,6 +10,9 @@ use std::mem::{size_of, MaybeUninit};
 use std::sync::atomic::Ordering::{Acquire, Relaxed};
 use std::sync::atomic::{compiler_fence, AtomicU64};
 
+#[path = "ref_impl.rs"]
+mod ref_impl;
+
 impl LockState {
     pub fn release_optimistic(&self, expected: u64) {
         compiler_fence(Acquire);

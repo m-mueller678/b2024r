@@ -9,6 +9,9 @@ use std::ptr::slice_from_raw_parts_mut;
 use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering::Relaxed;
 
+#[path = "ref_impl.rs"]
+mod ref_impl;
+
 impl LockState {
     pub fn release_optimistic(&self, expected: u64) {
         if self.version.load(Relaxed) != expected {
