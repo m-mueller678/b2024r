@@ -22,7 +22,10 @@ pub fn key_head(k: impl SourceSlice) -> u32 {
 }
 
 pub trait SourceSlice<T: Pod + SeqLockWrappable = u8>: Copy {
-    fn join<B: SourceSlice<T>>(self, b: B) -> impl SourceSlice<T> {
+    fn index_ss(self, i: usize) -> T {
+        self.slice_start(i).iter().next().unwrap()
+    }
+    fn join<B: SourceSlice<T>>(self, b: B) -> SourceSlicePair<T, Self, B> {
         SourceSlicePair(self, b, PhantomData)
     }
     fn to_stack_buffer<const SIZE: usize, R>(self, f: impl FnOnce(&mut [T]) -> R) -> R {
@@ -156,5 +159,59 @@ impl<T: Pod + SeqLockWrappable, A: SourceSlice<T>, B: SourceSlice<T>> SourceSlic
 
     fn iter(self) -> impl Iterator<Item = T> {
         self.0.iter().chain(self.1.iter())
+    }
+}
+
+#[derive(Copy, Clone)]
+pub struct HeadSourceSlice {
+    array: u32,
+    start: usize,
+    end: usize,
+}
+
+impl HeadSourceSlice {
+    pub fn empty() -> Self {
+        HeadSourceSlice { array: 0, start: 0, end: 0 }
+    }
+    pub fn from_head_len(head: u32, len: usize) -> Self {
+        HeadSourceSlice { array: head, start: 0, end: len.min(4) }
+    }
+}
+
+impl SourceSlice<u8> for HeadSourceSlice {
+    fn write_to(self, dst: &mut Guarded<Exclusive, [u8]>) {
+        dst.store_slice(&self.array.to_be_bytes()[self.start..self.end])
+    }
+
+    fn slice_start(mut self, start: usize) -> Self {
+        self.start += start;
+        self
+    }
+
+    fn slice_end(mut self, end: usize) -> Self {
+        self.end = self.start + end;
+        self
+    }
+
+    fn len(self) -> usize {
+        self.end - self.start
+    }
+
+    fn iter(self) -> impl Iterator<Item = u8> {
+        self
+    }
+}
+
+impl Iterator for HeadSourceSlice {
+    type Item = u8;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.start == self.end {
+            None
+        } else {
+            let v = self.array >> (8 * (3 - self.start) as u32);
+            self.start += 1;
+            Some(v as u8)
+        }
     }
 }

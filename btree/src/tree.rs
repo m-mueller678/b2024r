@@ -1,6 +1,6 @@
 use crate::basic_node::{BasicInner, BasicLeaf, BasicNode};
 use crate::key_source::SourceSlice;
-use crate::node::{node_guard_cast, node_tag, CommonNodeHead, KindInner, Node, ParentInserter};
+use crate::node::{node_tag, CommonNodeHead, KindInner, Node, ParentInserter};
 use crate::page::{page_id_to_3x16, PageId, PageTail, PAGE_TAIL_SIZE};
 use crate::{MAX_KEY_SIZE, W};
 use bytemuck::{Pod, Zeroable};
@@ -162,12 +162,6 @@ impl<'bm, BM: BufferManager<'bm, Page = PageTail>> Tree<'bm, BM> {
         }
     }
 
-    pub fn range_iterator<'t>(&'t self, mut start: &[u8]) -> TreeIterator<'t, 'bm, BM> {
-        let mut iter =
-            TreeIterator { key_buffer: Zeroable::zeroed(), tree: self, current_leaf: Err((false, start.len())) };
-        iter
-    }
-
     pub fn lookup_to_vec(&self, k: &[u8]) -> Option<Vec<u8>> {
         seqlock::unwind::repeat(|| self.try_lookup(k).map(|v| v.load_slice_to_vec()))
     }
@@ -259,43 +253,5 @@ impl<'g, 'bm, BM: BufferManager<'bm, Page = PageTail>> ParentInserter<'bm, BM>
                 Err(())
             }
         })
-    }
-}
-
-pub struct TreeIterator<'a, 'bm, BM: BufferManager<'bm, Page = PageTail>> {
-    key_buffer: [u8; MAX_KEY_SIZE],
-    tree: &'a Tree<'bm, BM>,
-    // Ok(current node)
-    // Err(key is known first, key length)
-    current_leaf: Result<(Guard<'bm, BM, Optimistic, BasicLeaf>, isize), (bool, usize)>,
-}
-
-impl<'a, 'bm, BM: BufferManager<'bm, Page = PageTail>> Iterator for TreeIterator<'a, 'bm, BM> {
-    type Item = (Guarded<'bm, Optimistic, [u8]>, Guarded<'bm, Optimistic, [u8]>, Guarded<'bm, Optimistic, [u8]>);
-
-    fn next(&mut self) -> Option<Self::Item> {
-        loop {
-            match &mut self.current_leaf {
-                Ok((node, index)) => {
-                    if node.iterator_valid(*index) {
-                        let ret = (node.prefix(), node.iterator_suffix(*index), node.iterator_value(*index));
-                        node.iterator_advance(index);
-                        return Some(ret);
-                    } else {
-                        let prefix = node.prefix_len().load() as usize;
-                        let fence = node.upper_fence().slice(prefix..);
-                        fence.load_slice(&mut self.key_buffer[prefix..]);
-                        self.current_leaf = Err((true, prefix + fence.len()));
-                    }
-                }
-                Err((is_first, key_length)) => {
-                    let [parent, node] = self.tree.descend(&self.key_buffer[..*key_length], None);
-                    parent.release_unchecked();
-                    let node = node_guard_cast::<BasicLeaf, _, _>(node);
-                    let index = if *is_first { 0 } else { node.iterator_start(&self.key_buffer[..*key_length]) };
-                    self.current_leaf = Ok((node, index))
-                }
-            }
-        }
     }
 }

@@ -127,21 +127,54 @@ fn batch_ops(
                                                 let mut batch_matches = false;
                                                 let mut new_batch_matches = false;
                                                 let mut was_present = false;
-                                                let is_ok = tree.lookup_inspect(&keys[index], |v| {
+                                                let result = tree.lookup_inspect(&keys[index], |v| {
                                                     if let Some(v) = v {
                                                         was_present = true;
                                                         batch_matches = v
                                                             .mem_cmp(&ks.old_write_batch.load(Relaxed).to_ne_bytes())
                                                             .is_eq();
                                                         new_batch_matches = v.mem_cmp(&batch.to_ne_bytes()).is_eq();
-                                                        batch_matches && ks.old_present.load(Relaxed)
-                                                            || new_batch_matches && ks.inserted.load(Relaxed) != 0
+                                                        if batch_matches && ks.old_present.load(Relaxed) {
+                                                            Ok(())
+                                                        } else if new_batch_matches && ks.inserted.load(Relaxed) != 0 {
+                                                            Ok(())
+                                                        } else {
+                                                            let found_batch = v.load_slice_to_vec();
+                                                            let found_batch: [u8; 8] =
+                                                                found_batch[..].try_into().map_err(|_| {
+                                                                    format!(
+                                                                        "batch has bad length {}: {:?}",
+                                                                        found_batch.len(),
+                                                                        found_batch
+                                                                    )
+                                                                })?;
+                                                            let mut message = format!(
+                                                                "found batch {}",
+                                                                u64::from_ne_bytes(found_batch)
+                                                            );
+                                                            if ks.old_present.load(Relaxed) {
+                                                                message = format!(
+                                                                    "{message} was present as {}",
+                                                                    ks.old_write_batch.load(Relaxed)
+                                                                )
+                                                            }
+                                                            if ks.inserted.load(Relaxed) != 0 {
+                                                                message = format!("{message} is inserted as {batch}")
+                                                            }
+                                                            Err(message)
+                                                        }
                                                     } else {
                                                         was_present = false;
-                                                        !ks.old_present.load(Relaxed) || ks.removed.load(Relaxed) != 0
+                                                        if !ks.old_present.load(Relaxed)
+                                                            || ks.removed.load(Relaxed) != 0
+                                                        {
+                                                            Ok(())
+                                                        } else {
+                                                            Err("value missing".to_string())
+                                                        }
                                                     }
                                                 });
-                                                assert!(is_ok);
+                                                result.unwrap();
                                             }
                                         }
                                         Op::Insert => {

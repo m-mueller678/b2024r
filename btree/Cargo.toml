@@ -24,6 +24,7 @@ random_word = { version = "0.4.3",features = ["en"] }
 rayon = "1.10.0"
 dev_utils = {path = "../dev_utils"}
 rip_shuffle = "0.2.0"
+anyhow = "1.0.86"
 
 [[bench]]
 name="multithread"
