@@ -1,4 +1,5 @@
 #![feature(thread_sleep_until)]
+#![feature(cfg_overflow_checks)]
 
 use btree::Tree;
 use dev_utils::serde_json::{json, Map, Value};
@@ -12,6 +13,7 @@ use rand::SeedableRng;
 use rip_shuffle::RipShuffleParallel;
 use seqlock::DefaultBm;
 use std::fmt::Display;
+use std::io::{stdout, IsTerminal};
 use std::ops::Range;
 use std::str::FromStr;
 use std::sync::atomic::Ordering::Relaxed;
@@ -120,6 +122,9 @@ where
 }
 
 fn main() {
+    if cfg!(overflow_checks) {
+        panic!();
+    }
     let build_info: Option<Value> = serde_json::from_str(include_str!(concat!(env!("OUT_DIR"), "/build_info.json")))
         .inspect_err(|e| eprintln!("failed to parse build info: {e}"))
         .ok();
@@ -173,15 +178,17 @@ fn main() {
             local_ops
         }
     });
-    println!(
-        "{:#}",
-        json! ({
-            "benches":{
-                "pre_insert":pre_insert,
-                "insert":insert,
-                "lookup":lookup,
-            },
-            "build":build_info
-        })
-    );
+    let output = json! ({
+        "benches":{
+            "pre_insert":pre_insert,
+            "insert":insert,
+            "lookup":lookup,
+        },
+        "build":build_info
+    });
+    if stdout().is_terminal() {
+        println!("{:#}", output);
+    } else {
+        println!("{}", output);
+    }
 }
