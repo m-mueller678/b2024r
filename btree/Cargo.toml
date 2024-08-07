@@ -19,12 +19,23 @@ validate_tree=[]
 page_4k=[]
 page_1k=[]
 
+# these are repeated here to be recordded by the build script
+seqlock_ab=["seqlock/impl_atomic_byte"]
+seqlock_ub=["seqlock/impl_ub"]
+seqlock_eub=["seqlock/impl_extreme_ub"]
+seqlock_asm=["seqlock/impl_asm_read"]
+
 [dev-dependencies]
 random_word = { version = "0.4.3",features = ["en"] }
 rayon = "1.10.0"
 dev_utils = {path = "../dev_utils"}
 rip_shuffle = "0.2.0"
 anyhow = "1.0.86"
+
+[build-dependencies]
+git2 = "0.19.0"
+serde = { version = "1.0.204", features = ["derive"] }
+serde_json = "1.0.122"
 
 [[bench]]
 name="multithread"

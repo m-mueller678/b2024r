@@ -1,9 +1,11 @@
 #![feature(thread_sleep_until)]
 
 use btree::Tree;
-use dev_utils::serde_json::{Map, Value};
+use dev_utils::serde_json::{json, Map, Value};
 use dev_utils::zipf::ZipfDistribution;
-use dev_utils::{generate_keys, random_fixed_size_generator, seq_u64_generator, test_mix_generator, PerfCounters};
+use dev_utils::{
+    generate_keys, random_fixed_size_generator, seq_u64_generator, serde_json, test_mix_generator, PerfCounters,
+};
 use rand::prelude::Distribution;
 use rand::rngs::SmallRng;
 use rand::SeedableRng;
@@ -118,6 +120,9 @@ where
 }
 
 fn main() {
+    let build_info: Option<Value> = serde_json::from_str(include_str!(concat!(env!("OUT_DIR"), "/build_info.json")))
+        .inspect_err(|e| eprintln!("failed to parse build info: {e}"))
+        .ok();
     if cfg!(any(feature = "validate_node", feature = "validate_node", debug_assertions)) {
         eprintln!("warning: debug assertions or validation enabled");
     }
@@ -149,9 +154,7 @@ fn main() {
         })
     };
     let pre_insert = run_insert_jobs(0..pre_insert_count);
-    dbg!(pre_insert);
     let insert = run_insert_jobs(pre_insert_count..keys.len());
-    dbg!(insert);
     let zipf = ZipfDistribution::new(keys.len(), args.zipf).unwrap();
     let lookup = run_jobs(&mut perf, args.threads, args.lookup_duration, |tid| {
         let mut local_ops = 0;
@@ -170,5 +173,15 @@ fn main() {
             local_ops
         }
     });
-    dbg!(lookup);
+    println!(
+        "{:#}",
+        json! ({
+            "benches":{
+                "pre_insert":pre_insert,
+                "insert":insert,
+                "lookup":lookup,
+            },
+            "build":build_info
+        })
+    );
 }
