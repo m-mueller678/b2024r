@@ -76,14 +76,18 @@ impl<'bm, BM: BufferManager<'bm, Page = PageTail>> Tree<'bm, BM> {
     fn descend(&self, k: &[u8], stop_at: Option<PageId>) -> [Guard<'bm, BM, Optimistic, PageTail>; 2] {
         let mut parent = self.bm.lock_optimistic(self.meta);
         let mut node_pid = parent.s().cast::<MetadataPage>().root().load();
+        parent.check(); // check here so we do not attempt to lock wrong page id
         let mut node = self.bm.lock_optimistic(node_pid);
-        parent.check();
+        parent.check(); // check here again to ensure node is still the same child
         while node.s().common().tag().load() == node_tag::BASIC_INNER && Some(node_pid) != stop_at {
             parent.release_unchecked();
             parent = node;
             node_pid = parent.node_cast::<BasicInner>().lookup_inner(k, true);
+            parent.check(); // check here so we do not attempt to lock wrong page id
             node = self.bm.lock_optimistic(node_pid);
-            parent.check();
+            parent.check(); // check here again to ensure node is still the same child
+                            // We check here instead of the loop start to ensure the returned child guard always points to the right node.
+                            // Otherwise, a caller may acquire an exclusive lock on the wrong page before dropping the parent guard
         }
         [parent, node]
     }
