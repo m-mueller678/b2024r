@@ -122,8 +122,6 @@ where
 }
 
 fn main() {
-    inner_find();
-    return;
     if cfg!(overflow_checks) {
         panic!();
     }
