@@ -8,7 +8,6 @@ use radium::{Atom, Radium};
 use std::cmp::Ordering;
 use std::ffi::c_void;
 use std::mem::{align_of, size_of, MaybeUninit};
-use std::ptr::NonNull;
 use std::sync::atomic::fence;
 use std::sync::atomic::Ordering::{Acquire, Relaxed};
 
@@ -27,17 +26,17 @@ impl LockState {
 }
 
 unsafe impl SeqLockModeImpl for Optimistic {
-    type Pointer<'a, T: ?Sized + 'a> = NonNull<T>;
+    type Pointer<'a, T: ?Sized + 'a> = *mut T;
     unsafe fn from_pointer<'a, T: ?Sized + 'a>(x: *mut T) -> Self::Pointer<'a, T> {
-        NonNull::new_unchecked(x)
+        x
     }
 
     fn as_ptr<'a, T: 'a + ?Sized>(x: &Self::Pointer<'a, T>) -> *mut T {
-        x.as_ptr()
+        *x
     }
 
     unsafe fn load<T: Pod>(p: &Self::Pointer<'_, T>) -> T {
-        let p: *mut T = p.as_ptr();
+        let p: *mut T = *p;
         let mut dst = MaybeUninit::<T>::uninit();
         #[inline(always)]
         unsafe fn atomic_load<T, A: Atomic + PartialEq>(src: *mut T, dst: *mut T) {
@@ -61,12 +60,12 @@ unsafe impl SeqLockModeImpl for Optimistic {
     }
 
     unsafe fn load_slice<T: Pod>(p: &Self::Pointer<'_, [T]>, dst: &mut [MaybeUninit<T>]) {
-        std::ptr::copy_nonoverlapping::<T>((p.as_ptr()).cast::<T>(), dst.as_mut_ptr() as *mut T, p.as_ptr().len());
+        std::ptr::copy_nonoverlapping::<T>((*p).cast::<T>(), dst.as_mut_ptr() as *mut T, p.len());
     }
 
     unsafe fn bit_cmp_slice<T: Pod>(p: &Self::Pointer<'_, [T]>, other: &[T]) -> Ordering {
         let cmp_len = p.len().min(other.len()) * size_of::<T>();
-        let r = libc::memcmp((p.as_ptr()).cast::<c_void>(), other.as_ptr() as *const c_void, cmp_len);
+        let r = libc::memcmp((*p).cast::<c_void>(), other.as_ptr() as *const c_void, cmp_len);
         r.cmp(&0).then(p.len().cmp(&other.len()))
     }
 
@@ -74,6 +73,6 @@ unsafe impl SeqLockModeImpl for Optimistic {
         p: &Self::Pointer<'_, [T]>,
         dst: &mut <Exclusive as SeqLockModeImpl>::Pointer<'_, [T]>,
     ) {
-        std::ptr::copy_nonoverlapping::<T>((p.as_ptr()).cast::<T>(), dst.as_mut_ptr(), p.as_ptr().len());
+        std::ptr::copy_nonoverlapping::<T>((*p).cast::<T>(), dst.as_mut_ptr(), p.len());
     }
 }
