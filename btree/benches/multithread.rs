@@ -1,7 +1,7 @@
 #![feature(thread_sleep_until)]
 #![feature(cfg_overflow_checks)]
 
-use btree::Tree;
+use btree::{inner_find, Tree};
 use dev_utils::serde_json::{json, Map, Value};
 use dev_utils::zipf::ZipfDistribution;
 use dev_utils::{
@@ -122,6 +122,8 @@ where
 }
 
 fn main() {
+    inner_find();
+    return;
     if cfg!(overflow_checks) {
         panic!();
     }

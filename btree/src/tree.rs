@@ -4,9 +4,14 @@ use crate::node::{node_tag, CommonNodeHead, KindInner, Node, ParentInserter};
 use crate::page::{page_id_to_3x16, PageId, PageTail, PAGE_TAIL_SIZE};
 use crate::{MAX_KEY_SIZE, W};
 use bytemuck::{Pod, Zeroable};
-use seqlock::{BmExt, BufferManager, Exclusive, Guard, Guarded, Optimistic, SeqlockAccessors};
+use rand::distributions::Uniform;
+use rand::rngs::SmallRng;
+use rand::{Rng, SeedableRng};
+use seqlock::{BmExt, BufferManager, DefaultBm, Exclusive, Guard, Guarded, Optimistic, SeqlockAccessors};
+use std::hint::black_box;
 use std::marker::PhantomData;
 use std::mem::size_of;
+use std::time::Instant;
 
 pub struct Tree<'bm, BM: BufferManager<'bm, Page = PageTail>> {
     meta: u64,
@@ -258,4 +263,33 @@ impl<'g, 'bm, BM: BufferManager<'bm, Page = PageTail>> ParentInserter<'bm, BM>
             }
         })
     }
+}
+
+pub fn inner_find() {
+    use rand::distributions::Distribution;
+
+    let bm = DefaultBm::<PageTail>::new_lazy();
+    let mut pages = Vec::new();
+    for p in 0..std::env::var("P").unwrap().parse().unwrap() {
+        let (node_id, mut node_lock) = bm.lock_new();
+        let mut node = node_lock.b().0.cast::<BasicInner>();
+        node.init(&[][..], &[][..], page_id_to_3x16(0));
+        for i in 0..100u64 {
+            node.insert_inner(&i.to_be_bytes(), i).unwrap()
+        }
+        drop(node_lock);
+        pages.push(node_id);
+    }
+    let iterations: u64 = std::env::var("N").unwrap().parse().unwrap();
+    let start = Instant::now();
+    let rng = &mut SmallRng::seed_from_u64(42);
+    let mut range_sampler = Uniform::new(0, pages.len());
+    for i in 0..iterations {
+        let node_id = pages[range_sampler.sample(rng)];
+        let node_opt = bm.lock_optimistic(node_id);
+        let node_opt = node_opt.0.cast::<BasicInner>();
+        black_box(node_opt.lookup_inner(&(rng.gen::<u64>() % 64).to_be_bytes(), true));
+    }
+    let end = Instant::now();
+    println!("{}", iterations as f64 / end.duration_since(start).as_secs_f64());
 }
