@@ -509,14 +509,24 @@ impl<'a, V: NodeKind, M: SeqLockMode> W<Guarded<'a, M, BasicNode<V>>> {
         head.join(tail)
     }
 
-    fn key_tail_len(self, index: usize) -> (Guarded<'a, M, [u8]>, usize) {
-        let offset = self.s().slots().index(index).load() as usize;
+    fn key_tail_len_with_slots(self, index: usize, slots: Guarded<'a, M, [u16]>) -> (Guarded<'a, M, [u8]>, usize) {
+        let offset = slots.index(index).load() as usize;
         let len = self.s().u16(offset).load() as usize;
         let tail_len = len.saturating_sub(4);
         (self.slice(offset + record_to_key_offset::<V>(), tail_len), len)
     }
 
-    fn key_tail(self, index: usize) -> Guarded<'a, M, [u8]> {
+    fn key_tail_len(self, index: usize) -> (Guarded<'a, M, [u8]>, usize)
+    where
+        Self: Copy,
+    {
+        self.key_tail_len_with_slots(index, self.slots())
+    }
+
+    fn key_tail(self, index: usize) -> Guarded<'a, M, [u8]>
+    where
+        Self: Copy,
+    {
         self.key_tail_len(index).0
     }
 
@@ -589,8 +599,8 @@ impl<'a, V: NodeKind, M: SeqLockMode> W<Guarded<'a, M, BasicNode<V>>> {
         if slots.len() != heads.len() {
             M::release_error()
         }
-        let key_position = (matching_head_range.start..=matching_head_range.end - 1).binary_by(|i| {
-            let (tail, len) = self.key_tail_len(i);
+        let key_position = (matching_head_range.start..=matching_head_range.end - 1).binary_by(move |i| {
+            let (tail, len) = self.s().key_tail_len_with_slots(i, slots.s());
             let tail = tail.optimistic();
             if tail.is_empty() || truncated.len() <= 4 {
                 len.cmp(&truncated.len())
