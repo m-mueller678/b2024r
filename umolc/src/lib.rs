@@ -1,41 +1,35 @@
-use std::marker::PhantomData;
-use std::mem::{MaybeUninit, transmute};
 use radium::marker::Atomic;
-use radium::{Atom, Radium};
+use radium::Radium;
+use std::marker::PhantomData;
 use std::ops::{Deref, DerefMut};
 use std::sync::atomic::Ordering::Relaxed;
-use static_assertions::{assert_eq_align, assert_eq_size};
+
+mod cast;
+
+pub use cast::*;
 
 pub struct OlcAtomic<T: Atomic> {
-    _not_send_sync:PhantomData<*mut u8>,
+    _not_send_sync: PhantomData<*mut u8>,
     x: T::Atom,
 }
 
 impl<T: Atomic> OlcAtomic<T> {
-    fn r(&self)->T {
+    pub fn r(&self) -> T {
         self.x.load(Relaxed)
     }
 
-    fn new(x: T) -> Self {
-        OlcAtomic { x:T::Atom::new(x),_not_send_sync:PhantomData }
+    pub fn new(x: T) -> Self {
+        OlcAtomic { x: T::Atom::new(x), _not_send_sync: PhantomData }
     }
 
-    fn get_mut(&mut self) -> &mut T {
+    pub fn get_mut(&mut self) -> &mut T {
         self.x.get_mut()
     }
 }
 
 pub unsafe trait OlcSafe: Sized {}
 
-fn assert_size_align<Src,Dst>(){
-    assert!(size_of::<Src>() == size_of::<Dst>() && align_of::<Src>() >= align_of::<Dst>())
-}
-
-pub fn cast_slice<A:OlcSafe,B:OlcSafe>(a:&[A])->&[B]{
-    assert_size_align::<A,B>();
-
-}
-
+#[derive(Eq, PartialEq)]
 pub struct OlcVersion {
     v: u64,
 }
@@ -54,14 +48,12 @@ pub unsafe trait BufferManager<'bm>: 'bm + Copy + Send + Sync + Sized {
     fn free(self, g: Self::GuardX);
 }
 
-trait BufferManagerGuard<'bm, B: BufferManager<'bm>>:Sized {
+pub trait BufferManagerGuard<'bm, B: BufferManager<'bm>>: Sized {
     fn acquire_wait(bm: B, page_id: u64) -> Self;
-    fn acquire_wait_version(bm: B, page_id: u64, v: OlcVersion) -> Option<Self> {
-        None
-    }
+    fn acquire_wait_version(bm: B, page_id: u64, v: OlcVersion) -> Option<Self>;
     fn release(self, bm: B) -> OlcVersion;
 }
 
-trait BufferManageGuardUpgrade<'bm, B: BufferManager<'bm>, Target>:Sized {
+pub trait BufferManageGuardUpgrade<'bm, B: BufferManager<'bm>, Target>: Sized {
     fn try_upgrade(self) -> Result<Target, Self>;
 }
