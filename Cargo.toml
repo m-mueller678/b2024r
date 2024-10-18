@@ -1,7 +1,7 @@
 [workspace]
 resolver = "2"
 
-members = [ "seqlock", "seqlock_macros","btree", "dev_utils", "umolc"]
+members = [ "seqlock", "seqlock_macros","btree", "dev_utils", "umolc", "umolc_btree"]
 
 [profile.test]
 

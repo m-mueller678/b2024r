@@ -1,0 +1,15 @@
+[package]
+name = "umolc_btree"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+umolc = {path = "../umolc"}
+bytemuck = "1.19.0"
+
+[features]
+default = ["page_4k"]
+validate_node=[]
+validate_tree=[]
+page_4k=[]
+page_1k=[]
