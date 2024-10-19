@@ -1,29 +1,18 @@
-use radium::marker::Atomic;
-use radium::Radium;
-use std::marker::PhantomData;
 use std::ops::{Deref, DerefMut};
-use std::sync::atomic::Ordering::Relaxed;
 
-mod cast;
+mod o_ptr;
 
-pub use cast::*;
-
-pub struct OlcAtomic<T: Atomic> {
-    _not_send_sync: PhantomData<*mut u8>,
-    x: T::Atom,
-}
+pub use o_ptr::OPtr;
 
 #[derive(Eq, PartialEq)]
 pub struct OlcVersion {
     v: u64,
 }
 
-
-
 pub unsafe trait BufferManager<'bm>: 'bm + Copy + Send + Sync + Sized {
     type Page;
     type GuardO: BufferManagerGuard<'bm, Self>
-        + Deref<Target = *const Self::Page>
+        + OptimisticGuard<Self::Page>
         + BufferManageGuardUpgrade<'bm, Self, Self::GuardS>
         + BufferManageGuardUpgrade<'bm, Self, Self::GuardX>;
     type GuardS: BufferManagerGuard<'bm, Self>
@@ -38,6 +27,10 @@ pub trait BufferManagerGuard<'bm, B: BufferManager<'bm>>: Sized {
     fn acquire_wait(bm: B, page_id: u64) -> Self;
     fn acquire_wait_version(bm: B, page_id: u64, v: OlcVersion) -> Option<Self>;
     fn release(self, bm: B) -> OlcVersion;
+}
+
+pub trait OptimisticGuard<T> {
+    fn o_ptr(&self) -> OPtr<'_, T>;
 }
 
 pub trait BufferManageGuardUpgrade<'bm, B: BufferManager<'bm>, Target>: Sized {
