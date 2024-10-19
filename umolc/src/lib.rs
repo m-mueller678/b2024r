@@ -13,31 +13,17 @@ pub struct OlcAtomic<T: Atomic> {
     x: T::Atom,
 }
 
-impl<T: Atomic> OlcAtomic<T> {
-    pub fn r(&self) -> T {
-        self.x.load(Relaxed)
-    }
-
-    pub fn new(x: T) -> Self {
-        OlcAtomic { x: T::Atom::new(x), _not_send_sync: PhantomData }
-    }
-
-    pub fn get_mut(&mut self) -> &mut T {
-        self.x.get_mut()
-    }
-}
-
-pub unsafe trait OlcSafe: Sized {}
-
 #[derive(Eq, PartialEq)]
 pub struct OlcVersion {
     v: u64,
 }
 
+
+
 pub unsafe trait BufferManager<'bm>: 'bm + Copy + Send + Sync + Sized {
-    type Page: OlcSafe;
+    type Page;
     type GuardO: BufferManagerGuard<'bm, Self>
-        + Deref<Target = Self::Page>
+        + Deref<Target = *const Self::Page>
         + BufferManageGuardUpgrade<'bm, Self, Self::GuardS>
         + BufferManageGuardUpgrade<'bm, Self, Self::GuardX>;
     type GuardS: BufferManagerGuard<'bm, Self>

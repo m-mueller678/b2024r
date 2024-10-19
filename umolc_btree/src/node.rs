@@ -1,4 +1,4 @@
-use umolc::OlcAtomic;
+use umolc::{BufferManager, OlcAtomic, OlcSafe};
 
 pub mod node_tag {
     pub const METADATA_MARKER: u8 = 43;
@@ -26,18 +26,12 @@ pub struct CommonNodeHead {
 
 #[no_mangle]
 pub unsafe fn print_page(p: *const Page) {
-    todo!();
-}
-
-impl<M: SeqLockMode> Debug for W<Guarded<'_, M, PageTail>> {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        match self.optimistic().node_cast::<BasicLeaf>().tag().load() {
-            node_tag::BASIC_LEAF => Node::format(&self.optimistic().node_cast::<BasicLeaf>(), f),
-            node_tag::BASIC_INNER => Node::format(&self.optimistic().node_cast::<BasicInner>(), f),
-            node_tag::METADATA_MARKER => write!(f, "MetadataPage"),
-            x => write!(f, "UnknownNode{{tag:0x{x:x}}}"),
-        }
+    let p:Page = p.read();
+    if p.common.tag.r() == node_tag::METADATA_MARKER{
+        println!("MetadataPage");
+        return;
     }
+    todo!();
 }
 
 #[derive(Eq, PartialEq, Debug)]
@@ -49,21 +43,21 @@ pub struct DebugNode<V> {
     pub values: Vec<V>,
 }
 
-pub unsafe trait Node: SeqLockWrappable + Pod {
+pub unsafe trait Node<'bm,BM:BufferManager<'bm>,PI:ParentInserter<'bm,BM>>: OlcSafe {
     const TAG: u8;
     type DebugVal: Eq + Debug;
 
     /// fails iff parent_insert fails.
     /// if node is near empty, no split is performed and parent_insert is not called.
-    fn split<'g, 'bm, BM: BufferManager<'bm>>(
-        this: &mut W<Guarded<'g, Exclusive, Self>>,
-        parent_insert: impl ParentInserter<'bm, BM>,
+    fn split<'g>(
+        this: &mut Self,
+        parent_insert: PI,
         ref_key: &[u8],
     ) -> Result<(), ()>;
 
-    fn find_separator<'a>(this: &'a W<Guarded<'a, Shared, Self>>, ref_key: &'a [u8]) -> (usize, impl SourceSlice + 'a);
+    fn find_separator<'a>(this: &'a Self, ref_key: &'a [u8]) -> (usize, impl SourceSlice + 'a);
 
-    fn to_debug_kv(this: W<Guarded<Shared, Self>>) -> (Vec<Vec<u8>>, Vec<Self::DebugVal>);
+    fn to_debug_kv(this: &Self) -> (Vec<Vec<u8>>, Vec<Self::DebugVal>);
 
     fn merge(this: &mut W<Guarded<Exclusive, Self>>, right: &mut W<Guarded<Exclusive, Self>>, ref_key: &[u8]);
     fn format(this: &W<Guarded<Optimistic, Self>>, f: &mut Formatter) -> std::fmt::Result
@@ -215,3 +209,5 @@ pub struct Page {
     pub common: CommonNodeHead,
     _pad: [OlcAtomic<u8>; NODE_TAIL_SIZE],
 }
+
+unsafe impl OlcSafe for Page{}
