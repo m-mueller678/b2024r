@@ -9,6 +9,8 @@ bytemuck = { version = "1.19.0",features = ["derive"] }
 as_base = "0.1.3"
 extend = "1.2.0"
 static_assertions = "1.1.0"
+bstr = "1.10.0"
+itertools = "0.13.0"
 
 [features]
 default = ["page_4k"]

@@ -1,17 +1,5 @@
+mod basic_node;
 pub mod key_source;
 pub mod node;
 
-pub fn add(left: u64, right: u64) -> u64 {
-    left + right
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn it_works() {
-        let result = add(2, 2);
-        assert_eq!(result, 4);
-    }
-}
+const MAX_KEY_SIZE: usize = 512;

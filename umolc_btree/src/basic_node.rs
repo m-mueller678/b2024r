@@ -1,0 +1,733 @@
+use crate::key_source::{common_prefix, key_head, HeadSourceSlice, SourceSlice, SourceSlicePair};
+use crate::node::{
+    node_tag, page_cast, page_cast_mut, page_id_from_3x16, CommonNodeHead, NodeDynamic, NodeKind, NodeStatic, Page,
+    ToFromPage, NODE_TAIL_SIZE, PAGE_SIZE,
+};
+use bstr::BString;
+use bytemuck::{Pod, Zeroable};
+use itertools::Itertools;
+use std::fmt::{Debug, Formatter};
+use std::marker::PhantomData;
+use std::mem::{align_of, offset_of, size_of, swap};
+use std::ops::Range;
+use std::ptr::addr_of_mut;
+use umolc::BufferManager;
+
+const HINT_COUNT: usize = 16;
+const MIN_HINT_SPACING: usize = 3;
+
+// must align with min hint spacing, so hints are updated when min count is reached
+const MIN_HINT_COUNT: usize = MIN_HINT_SPACING * (HINT_COUNT + 1);
+
+#[derive(Copy, Clone, Zeroable, Pod)]
+#[repr(C, align(16), packed)]
+pub struct BasicNode<V: NodeKind> {
+    common: CommonNodeHead,
+    heap_bump: u16,
+    heap_freed: u16,
+    _pad: u16,
+    hints: [u32; HINT_COUNT],
+    _data: [u32; BASIC_NODE_DATA_SIZE],
+    _p: PhantomData<V>,
+}
+
+const BASIC_NODE_DATA_SIZE: usize = (PAGE_SIZE - size_of::<CommonNodeHead>() - 2 * 2 - 16 * 4) / 4;
+
+impl<V: NodeKind> BasicNode<V> {
+    fn u16(&self, offset: usize) -> usize {
+        assert!(offset + 2 <= size_of::<Self>());
+        unsafe { (self as *const Self as *const u8).add(offset).cast::<u16>().read_unaligned() as usize }
+    }
+
+    fn lower(&self) -> &[u8; Self::INNER_VAL_LEN] {
+        assert!(!V::IS_LEAF);
+        assert_eq!(4 % align_of::<[V::SliceType; 3]>(), 0);
+        self.slice(offset_of!(Self, _data), Self::INNER_VAL_LEN)
+    }
+    fn round_up(x: usize) -> usize {
+        x + (x % 2)
+    }
+
+    fn reserved_head_count(count: usize) -> usize {
+        count.next_multiple_of(HEAD_RESERVATION)
+    }
+    fn slots(&self) -> &[u16] {
+        let count = self.common.count as usize;
+        let offset = Self::HEAD_OFFSET + 4 * Self::reserved_head_count(count);
+        self.slice(offset, count * 2).slice_cast::<u16>()
+    }
+
+    fn key_combined(&self, index: usize) -> SourceSlicePair<u8, HeadSourceSlice, &[u8]> {
+        let head = self.heads()[index];
+        let offset = self.slots()[index] as usize;
+        let len = self.u16(offset);
+        let tail_len = len.saturating_sub(4);
+        let head = HeadSourceSlice::from_head_len(head, len);
+        let tail = self.slice(offset + Self::RECORD_TO_KEY_OFFSET, tail_len);
+        head.join(tail)
+    }
+
+    fn key_tail_len_with_slots(&self, index: usize, slots: &[u16]) -> (&[u8], usize) {
+        let offset = slots[index];
+        let len = self.s().u16(offset).load() as usize;
+        let tail_len = len.saturating_sub(4);
+        (self.slice(offset + record_to_key_offset::<V>(), tail_len), len)
+    }
+
+    fn record_val_len(&self, offset: usize) -> usize {
+        if V::IS_LEAF {
+            self.u16(offset + 2)
+        } else {
+            Self::INNER_VAL_LEN
+        }
+    }
+    // fn key_tail_len(self, index: usize) -> (Guarded<'a, M, [u8]>, usize)
+    // where
+    //     Self: Copy,
+    // {
+    //     self.key_tail_len_with_slots(index, self.slots())
+    // }
+
+    // fn key_tail(self, index: usize) -> Guarded<'a, M, [u8]>
+    // where
+    //     Self: Copy,
+    // {
+    //     self.key_tail_len(index).0
+    // }
+
+    fn val(&self, index: usize) -> &[u8] {
+        let offset = self.slots()[index] as usize;
+        self.slice(offset + Self::RECORD_TO_KEY_OFFSET + self.u16(offset), self.record_val_len(offset))
+    }
+
+    fn find(self, key: &[u8]) -> Result<usize, usize>
+    where
+        Self: Copy,
+    {
+        let prefix_len = self.prefix_len().load() as usize;
+        if prefix_len > key.len() {
+            M::release_error();
+        }
+        let truncated = &key[prefix_len..];
+        self.find_truncated(truncated)
+    }
+
+    fn find_truncated(self, truncated: &[u8]) -> Result<usize, usize>
+    where
+        Self: Copy,
+    {
+        let needle_head = key_head(truncated);
+        let heads = self.heads();
+        if heads.is_empty() {
+            return Err(0);
+        }
+        let mut head_range_start = 0;
+        let mut head_range_end = heads.len();
+        if heads.len() >= MIN_HINT_COUNT {
+            let spacing = heads.len() / (HINT_COUNT + 1);
+            let mut hint_index = 0;
+            while hint_index < HINT_COUNT {
+                let hint = self.hints().as_slice().index(hint_index).load();
+                if hint < needle_head {
+                    head_range_start = (hint_index + 1) * spacing + 1;
+                } else {
+                    break;
+                }
+                hint_index += 1;
+            }
+            while hint_index < HINT_COUNT {
+                let hint = self.hints().as_slice().index(hint_index).load();
+                if hint > needle_head {
+                    head_range_end = (hint_index + 1) * spacing;
+                    break;
+                }
+                hint_index += 1;
+            }
+        }
+        const _: () = {
+            assert!(MIN_HINT_SPACING >= 2);
+        };
+
+        let matching_head_range =
+            (head_range_start..=head_range_end - 1).binary_all(|i| heads.s().index(i).load().cmp(&needle_head));
+        if matching_head_range.is_empty() {
+            return Err(matching_head_range.start);
+        }
+        let slots = self.slots();
+        if slots.len() != heads.len() {
+            M::release_error()
+        }
+        let key_position = (matching_head_range.start..=matching_head_range.end - 1).binary_by(move |i| {
+            let (tail, len) = self.s().key_tail_len_with_slots(i, slots.s());
+            let tail = tail.optimistic();
+            if tail.is_empty() || truncated.len() <= 4 {
+                len.cmp(&truncated.len())
+            } else {
+                tail.mem_cmp(&truncated[4..])
+            }
+        });
+        key_position
+    }
+
+    const HEAD_OFFSET: usize = offset_of!(Self, _data) + lower_head_slots::<V>() * 4;
+
+    fn heads(&self) -> &[u32] {
+        &self.as_page().as_slice()[Self::HEAD_OFFSET..][..self.common.count as usize]
+    }
+    fn copy_records(&self, dst: &mut Self, src_range: Range<usize>, dst_start: usize) {
+        let dst_range = dst_start..(src_range.end + dst_start - src_range.start);
+        let dpl = dst.prefix_len().load() as usize;
+        let spl = self.prefix_len().load() as usize;
+        let restore_prefix: &[u8] = if dpl < spl { &self.as_page().prefix()[dpl..] } else { &[][..] };
+        let prefix_grow = if dpl > spl { dpl - spl } else { 0 };
+        for (src_i, dst_i) in src_range.clone().zip(dst_range.clone()) {
+            let key = restore_prefix.join(self.key_combined(src_i).slice(prefix_grow..));
+            dst.heap_write_new(key, self.val(src_i), dst_i);
+            dst.b().heads().index(dst_i).store(key_head(key));
+        }
+    }
+
+    /// returns the number of keys in the low node and the separator
+    fn find_separator<'a>(&'a self) -> (usize, impl SourceSlice<u8> + 'a) {
+        let prefix_len = self.common.prefix_len as usize;
+        let count = self.common.count as usize;
+        if V::IS_LEAF {
+            let range_start = count / 2 - count / 8;
+            let range_end = count / 2 + count / 8;
+            let common_prefix = common_prefix(self.key_combined(range_start - 1), self.key_combined(range_end));
+            let best_split = (range_start..=range_end)
+                .filter(|&lc| {
+                    self.key_combined(lc - 1).len() == common_prefix
+                        || self.key_combined(lc - 1).index_ss(common_prefix)
+                            != self.key_combined(lc).index_ss(common_prefix)
+                })
+                .min_by_key(|&lc| (lc as isize - count as isize / 2).abs())
+                .unwrap();
+            let sep = self.key_combined(best_split).slice(..common_prefix + 1);
+            (best_split, self.as_page().prefix().join(sep))
+        } else {
+            let low_count = count / 2;
+            let sep = self.as_page().prefix().join(self.key_combined(low_count));
+            (low_count, sep)
+        }
+    }
+
+    fn relocate_by<const UP: bool, T: Pod>(&mut self, offset: usize, count: usize, dist: usize) {
+        assert_eq!(offset % size_of::<T>(), 0);
+        let offset = offset / size_of::<T>();
+        if UP {
+            self.as_page().as_slice::<T>().copy_within(offset..offset + count, offset + dist);
+        } else {
+            self.as_page().as_slice::<T>().copy_within(offset..offset + count, offset - dist);
+        }
+    }
+    fn heap_write_new(&mut self, key: impl SourceSlice, val: &[u8], write_slot: usize) {
+        let key_len = key.len();
+        let tail_offset = key.len().min(4);
+        let key_tail = key.slice_start(tail_offset);
+        let tail_len = key_len - tail_offset;
+        let size = Self::record_size(tail_len, val.len());
+        let offset = self.heap_bump().load() as usize - size;
+        self.store_u16(offset, key_len as u16);
+        if V::IS_LEAF {
+            self.store_u16(offset + 2, val.len() as u16);
+        }
+        let key_offset = offset + record_to_key_offset::<V>();
+        key_tail.write_to(self.slice_mut(key_offset, tail_len));
+        self.slice_mut(key_offset + tail_len, val.len()).copy_from_slice(val);
+        self.heap_bump = offset as u16;
+        self.set_slot(write_slot, offset as u16);
+    }
+
+    fn update_hints(&mut self, old_count: usize, new_count: usize, mut change_index: usize) {
+        debug_assert!(old_count != new_count);
+        if new_count < MIN_HINT_COUNT {
+            return;
+        }
+        let spacing = new_count / (HINT_COUNT + 1);
+        if spacing != old_count / (HINT_COUNT + 1) {
+            change_index = 0;
+        }
+        for hint_index in 0..HINT_COUNT {
+            let head_index = spacing * (hint_index + 1);
+            if head_index < change_index {
+                continue;
+            }
+            let head = self.s().heads().index(head_index).load();
+            self.hints_mut().as_slice().index(hint_index).store(head);
+        }
+    }
+
+    #[allow(clippy::result_unit_err)]
+    fn insert(&mut self, key: &[u8], val: &[V::SliceType]) -> Result<Option<()>, ()> {
+        Node::validate(self.s());
+        if !V::IS_LEAF {
+            assert_eq!(val.len(), 3);
+        }
+        let key = &key[self.prefix_len().load() as usize..];
+        let index = self.s().find_truncated(key);
+        let count = self.count().load() as usize;
+        let record_size = Self::record_size(key.len().saturating_sub(4), val.len());
+        loop {
+            let new_heap_start;
+            match index {
+                Ok(existing) => {
+                    new_heap_start = Self::HEAD_OFFSET + Self::reserved_head_count(count) * 4 + count * 2;
+                    if record_size <= (self.heap_bump().load() as usize - new_heap_start) {
+                        let old_size = self.s().stored_record_size(self.s().slots().index(existing).load() as usize);
+                        self.heap_freed_mut().update(|x| x + old_size as u16);
+                        self.heap_write_new(key, val, existing);
+                        Node::validate(self.s());
+                        return Ok(Some(()));
+                    }
+                }
+                Err(insert_at) => {
+                    new_heap_start = Self::HEAD_OFFSET + Self::reserved_head_count(count + 1) * 4 + (count + 1) * 2;
+                    if new_heap_start + record_size <= self.heap_bump().load() as usize {
+                        let orhc = Self::reserved_head_count(count);
+                        let nrhc = Self::reserved_head_count(count + 1);
+                        if nrhc == orhc {
+                            self.relocate_by::<true, u16>(
+                                Self::HEAD_OFFSET + nrhc * 4 + insert_at * 2,
+                                count - insert_at,
+                                1,
+                            );
+                        } else {
+                            self.relocate_by::<true, u16>(
+                                Self::HEAD_OFFSET + orhc * 4 + insert_at * 2,
+                                count - insert_at,
+                                HEAD_RESERVATION * 2 + 1,
+                            );
+                            self.relocate_by::<true, u16>(
+                                Self::HEAD_OFFSET + orhc * 4,
+                                insert_at,
+                                HEAD_RESERVATION * 2,
+                            );
+                        }
+                        self.relocate_by::<true, u32>(Self::HEAD_OFFSET + 4 * insert_at, count - insert_at, 1);
+                        self.count_mut().store(count as u16 + 1);
+                        self.b().heads().index(insert_at).store(key_head(key));
+                        self.update_hints(count, count + 1, insert_at);
+                        self.heap_write_new(key, val, insert_at);
+                        Node::validate(self.s());
+                        return Ok(None);
+                    }
+                }
+            }
+            if self.heap_bump().load() as usize + (self.s().heap_freed.load() as usize) < new_heap_start + record_size {
+                Node::validate(self.s());
+                return Err(());
+            }
+            self.compactify();
+        }
+    }
+
+    pub fn remove(&mut self, key: &[u8]) -> Option<()> {
+        let Ok(index) = self.s().find(key) else {
+            return None;
+        };
+        let offset = self.s().slots().index(index).load() as usize;
+        let record_size = self.s().stored_record_size(offset);
+        self.heap_freed_mut().update(|x| x + record_size as u16);
+        let count = self.count().load() as usize;
+        {
+            let orhc = Self::reserved_head_count(count);
+            let nrhc = Self::reserved_head_count(count - 1);
+            self.relocate_by::<false, u32>(Self::HEAD_OFFSET + 4 * index + 4, count - 1 - index, 1);
+            if nrhc == orhc {
+                self.relocate_by::<false, u16>(Self::HEAD_OFFSET + nrhc * 4 + index * 2 + 2, count - 1 - index, 1);
+            } else {
+                self.relocate_by::<false, u16>(Self::HEAD_OFFSET + orhc * 4, index, HEAD_RESERVATION * 2);
+                self.relocate_by::<false, u16>(
+                    Self::HEAD_OFFSET + orhc * 4 + index * 2 + 2,
+                    count - 1 - index,
+                    HEAD_RESERVATION * 2 + 1,
+                );
+            }
+        }
+        self.count_mut().store((count - 1) as u16);
+        self.update_hints(count, count - 1, index);
+        Node::validate(self.s());
+        Some(())
+    }
+
+    fn record_size(key_tail: usize, val: usize) -> usize {
+        Self::RECORD_TO_KEY_OFFSET + key_tail + val
+    }
+
+    pub fn init(&mut self, lf: impl SourceSlice, uf: impl SourceSlice, lower: [V::SliceType; 3]) {
+        self.as_page_mut().common_init(if V::IS_LEAF { node_tag::BASIC_LEAF } else { node_tag::BASIC_INNER }, lf, uf);
+        self.heap_freed = 0;
+        self.heap_bump = size_of::<Self>() as u16 - self.common.lower_fence_len - self.common.upper_fence_len;
+    }
+
+    fn compactify(&mut self) {
+        let buffer = &mut [0u8; PAGE_SIZE];
+        let heap_end = self.s().heap_end();
+        let mut dst_offset = heap_end;
+        for i in 0..self.common.count as usize {
+            let offset = self.slots()[i] as usize;
+            let val_len = if V::IS_LEAF { self.u16(offset + 2) } else { Self::INNER_VAL_LEN };
+            let record_len = Self::RECORD_TO_KEY_OFFSET + self.u16(offset) + val_len;
+            buffer[dst_offset..][..record_len].copy_from_slice(self.slice(offset, record_len));
+            self.b().slots().index(i).store(dst_offset as u16);
+        }
+        self.slice_mut(dst_offset, heap_end - dst_offset).copy_from_slice(&buffer[dst_offset..heap_end]);
+        debug_assert_eq!(self.heap_bump().load() + self.heap_freed, dst_offset as u16);
+        self.heap_freed = 0;
+        self.heap_bump = dst_offset as u16;
+        self.validate();
+    }
+
+    fn lookup_leaf(self, key: &[u8]) -> Option<&[u8]>
+    where
+        Self: Copy,
+    {
+        if let Ok(i) = self.find(key) {
+            Some(self.val(i))
+        } else {
+            None
+        }
+    }
+
+    #[allow(clippy::result_unit_err)]
+    fn insert_leaf(&mut self, key: &[u8], val: &[u8]) -> Result<Option<()>, ()> {
+        self.validate();
+        let x = self.insert(key, val);
+        self.validate();
+        x
+    }
+
+    const RECORD_TO_KEY_OFFSET: usize = if V::IS_LEAF { 4 } else { 2 };
+    const INNER_VAL_LEN: usize = 6;
+}
+
+impl<V: NodeKind> Debug for BasicNode<V> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        let mut s = f.debug_struct(std::any::type_name::<Self>());
+        macro_rules! fields {
+            ($base:expr => $($f:ident),*) => {$(s.field(std::stringify!($f),$base.$f);)*};
+        }
+        fields!(self.common => count, lower_fence_len, upper_fence_len, prefix_len);
+        fields!(self => heap_bump, heap_freed);
+        s.field("lf", &BString::new(self.lower_fence()));
+        s.field("uf", &BString::new(self.upper_fence()));
+        let records_fmt = (0..self.common.count as usize).format_with(",\n", |i, f| {
+            let offset = self.slots()[i] as usize;
+            let val: &dyn Debug = if V::IS_LEAF {
+                &BString::new(self.val(i))
+            } else {
+                &page_id_from_3x16(self.val(i).as_array::<3>().cast::<[u16; 3]>().load())
+            };
+            let head = self.heads()[i];
+            let kl = self.u16(offset);
+            let key = BString::new(self.key_tail(i));
+            f(&mut format_args!("{i:4}:{offset:04x}->[0x{head:08x}][{kl:3}] {key:?} -> {val:?}"))
+        });
+        s.field("records", &format_args!("\n{}", records_fmt));
+        s.finish()
+    }
+}
+
+impl<'bm, BM: BufferManager<'bm>, V: NodeKind> NodeStatic<'bm, BM> for BasicNode<V> {
+    const TAG: u8 = if V::IS_LEAF { 251 } else { 250 };
+}
+
+impl<'bm, BM: BufferManager<'bm>, V: NodeKind> NodeDynamic<'bm, BM> for BasicNode<V> {
+    fn validate(&self) {
+        if !cfg!(feature = "validate_node") {
+            return;
+        }
+        let count = self.common.count as usize;
+        if count >= MIN_HINT_COUNT {
+            let spacing = count / (HINT_COUNT + 1);
+            for i in 0..HINT_COUNT {
+                assert_eq!(self.hints()[i], self.heads()[(i + 1) * spacing]);
+            }
+        }
+        let record_size_sum: usize = self
+            .slots()
+            .iter()
+            .copied()
+            .map(|offset| {
+                let offset = offset as usize;
+                self.u16(offset).saturating_sub(4) + self.record_val_len(offset) + Self::RECORD_TO_KEY_OFFSET
+            })
+            .sum();
+        let calculated = (size_of::<Self>() - self.common.lower_fence_len as usize
+            + self.common.upper_fence_len as usize)
+            - record_size_sum;
+        let tracked = self.heap_bump as usize + self.heap_freed as usize;
+        assert_eq!(calculated, tracked);
+        let lower_fence =
+            std::iter::once(Supreme::X(self.lower_fence().slice(self.common.prefix_len as usize..).to_vec()));
+        let keys = (0..self.common.count as usize).map(|i| self.key_combined(i)).map(|k| Supreme::X(k.to_vec()));
+        let upper_fence = std::iter::once(if self.upper_fence_len().load() == 0 {
+            Supreme::Sup
+        } else {
+            Supreme::X(self.upper_fence().slice(self.common.prefix_len as usize..).to_vec())
+        });
+        let keys_and_fences = lower_fence.chain(keys).chain(upper_fence);
+        assert!(keys_and_fences.is_sorted(), "not sorted: {:?}", self);
+    }
+
+    fn merge(&mut self, right: &mut Page) {
+        debug_assert!(right.common.tag == Self::TAG);
+        let right = page_cast_mut::<Page, Self>(right);
+        let tmp = &mut BasicNode::<V>::zeroed();
+        let left_count = self.common.count as usize;
+        let right_count = right.common.count as usize;
+        if V::IS_LEAF {
+            tmp.init(self.lower_fence(), right.s().upper_fence(), Zeroable::zeroed());
+            tmp.count_mut().store((left_count + right_count) as u16);
+            self.copy_records(tmp, 0..left_count, 0, right.lower_fence());
+            right.copy_records(tmp, 0..right_count, left_count, right.lower_fence());
+        } else {
+            tmp.init(self.lower_fence(), self.upper_fence(), self.lower());
+            tmp.count_mut().store((left_count + right_count + 1) as u16);
+            self.copy_records(tmp, 0..left_count, 0, right.lower_fence());
+            right.copy_records(tmp, 0..right_count, left_count + 1, right.lower_fence());
+            tmp.heap_write_new(
+                self.as_page().upper_fence_combined().slice_start(tmp.common.prefix_len as usize),
+                right.lower().as_slice(),
+                left_count,
+            );
+        }
+        tmp.update_hints(0, tmp.common.count as usize, 0);
+        *self = *tmp;
+    }
+
+    fn split<'g>(&mut self, bm: BM, parent: &mut dyn NodeDynamic<BM>) -> Result<(), ()> {
+        let left = &mut BasicNode::<V>::zeroed();
+        let count = self.common.count as usize;
+        let (low_count, sep_key) = self.find_separator();
+        let mut right = parent.insert_upper_sibling(sep_key)?;
+        let right = &mut right.b().0.cast::<BasicNode<V>>();
+        self.validate();
+        let (lr, rr) = if V::IS_LEAF {
+            left.init(self.as_page().lower_fence(), sep_key, Zeroable::zeroed());
+            right.init(sep_key, self.as_page().upper_fence(), Zeroable::zeroed());
+            (0..low_count, low_count..count)
+        } else {
+            left.init(self.as_page().lower_fence(), sep_key, self.lower());
+            let mid_child = self.child(low_count);
+            right.init(sep_key, self.as_page().upper_fence(), mid_child);
+            (0..low_count, low_count + 1..count)
+        };
+        debug_assert!(self.key_combined(lr.end - 1).cmp(sep_key.slice(self.common.prefix_len as usize..)).is_lt());
+        debug_assert!(sep_key.slice(self.common.prefix_len as usize..).cmp(self.key_combined(rr.start)).is_le());
+        left.count_mut().store(lr.len() as u16);
+        self.copy_records(left, lr.clone(), 0);
+        left.update_hints(0, lr.count(), 0);
+        right.count_mut().store(rr.len() as u16);
+        self.copy_records(right, rr.clone(), 0);
+        right.update_hints(0, rr.count(), 0);
+        left.validate();
+        right.validate();
+        *self = *left;
+        Ok(())
+    }
+
+    fn to_debug_kv(&self) -> (Vec<Vec<u8>>, Vec<Vec<u8>>) {
+        let range = 0..self.common.count as usize;
+        let keys = range.clone().map(|i| self.key_combined(i).to_vec()).collect();
+        let vals = (0..1)
+            .filter(|_| !V::IS_LEAF)
+            .map(|_| self.lower().cast_slice::<u8>().to_vec())
+            .chain(range.map(|i| self.val(i).to_vec()))
+            .map(V::to_debug)
+            .collect();
+        (keys, vals)
+    }
+
+    fn lookup_inner(&self, key: &[u8], high_on_equal: bool) -> u64 {
+        assert!(!V::IS_LEAF);
+        let index = match self.find(key) {
+            Err(i) => i,
+            Ok(i) => i + high_on_equal as usize,
+        };
+        self.index_child(index)
+    }
+
+    fn index_child(&self, index: usize) -> u64 {
+        assert!(!V::IS_LEAF);
+        if index == 0 {
+            page_id_from_3x16(self.lower().load())
+        } else {
+            page_id_from_3x16(self.val(index - 1).as_array().load())
+        }
+    }
+}
+
+const HEAD_RESERVATION: usize = 16;
+
+const fn lower_head_slots<V: NodeKind>() -> usize {
+    if V::IS_LEAF {
+        0
+    } else {
+        2
+    }
+}
+
+impl<'a> W<Guarded<'a, Exclusive, BasicNode<KindInner>>> {
+    #[allow(clippy::result_unit_err)]
+    pub fn insert_inner(&mut self, key: &[u8], pid: PageId) -> Result<(), ()> {
+        let x = self.insert(key, &page_id_to_3x16(pid));
+        Node::validate(self.s());
+        x.map(|x| debug_assert!(x.is_none()))
+    }
+
+    pub fn validate_inter_node_fences<'bm, 'b>(
+        self,
+        bm: impl BufferManager<'bm, Page = PageTail>,
+        lb: &mut &'b mut [u8; MAX_KEY_SIZE],
+        hb: &mut &'b mut [u8; MAX_KEY_SIZE],
+        mut ll: usize,
+        mut hl: usize,
+    ) {
+        assert!(
+            self.s().lower_fence().mem_cmp(&lb[..ll]).is_eq(),
+            "wrong lf {:?}\n{:?}",
+            BStr::new(&lb[..ll]),
+            self.upcast()
+        );
+        assert!(
+            self.s().upper_fence().mem_cmp(&hb[..hl]).is_eq(),
+            "wrong uf {:?}\n{:?}",
+            BStr::new(&hb[..hl]),
+            self.upcast()
+        );
+        if self.s().tag().load() != node_tag::BASIC_INNER {
+            return;
+        }
+        let prefix = self.prefix_len().load() as usize;
+        let count = self.count().load() as usize;
+        for (i, k) in (0..count)
+            .map(|i| self.s().key_combined(i))
+            .chain(std::iter::once(HeadSourceSlice::empty().join(self.s().upper_fence().slice(prefix..))))
+            .enumerate()
+        {
+            k.write_to(&mut Guarded::wrap_mut(&mut hb[prefix..][..k.len()]));
+            hl = k.len() + prefix;
+            let htmp = hb[..hl].to_vec();
+            bm.lock_exclusive(self.optimistic().index_child(i))
+                .b()
+                .0
+                .cast::<BasicInner>()
+                .validate_inter_node_fences(bm, lb, hb, ll, hl);
+            assert_eq!(&hb[..hl], htmp);
+            swap(hb, lb);
+            ll = hl;
+        }
+        swap(hb, lb);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::basic_node::{BasicNode, NodeKind};
+    use crate::key_source::SourceSlice;
+    use crate::node::{KindInner, KindLeaf, Node, ParentInserter};
+    use crate::page::{page_id_to_3x16, PageTail};
+    use bytemuck::Zeroable;
+    use rand::prelude::SliceRandom;
+    use rand::rngs::SmallRng;
+    use rand::SeedableRng;
+    use seqlock::{BmExt, DefaultBm, Exclusive, Guard, Guarded};
+    use std::collections::HashSet;
+
+    #[test]
+    #[allow(clippy::unused_enumerate_index)]
+    fn leaf() {
+        let rng = &mut SmallRng::seed_from_u64(42);
+        let keys = dev_utils::ascii_bin_generator(10..51);
+        let mut keys: Vec<Vec<u8>> = (0..50).map(|i| keys(rng, i)).collect();
+        keys.sort();
+        keys.dedup();
+        let leaf = &mut BasicNode::<KindLeaf>::zeroed();
+        let mut leaf = Guarded::<Exclusive, _>::wrap_mut(leaf);
+        for (_k, keys) in dev_utils::subslices(&keys, 5).enumerate() {
+            let kc = keys.len();
+            leaf.init(keys[1].as_slice(), keys[kc - 2].as_slice(), [0; 3]);
+            let insert_range = 2..kc - 2;
+            let mut to_insert: Vec<&[u8]> = keys[insert_range.clone()].iter().map(|x| x.as_slice()).collect();
+            let mut inserted = HashSet::new();
+            for p in 0..=3 {
+                to_insert.shuffle(rng);
+                for (_i, &k) in to_insert.iter().enumerate() {
+                    if p != 2 {
+                        if leaf.insert_leaf(k, k).is_ok() {
+                            inserted.insert(k);
+                        }
+                    } else {
+                        let in_leaf = leaf.remove(k).is_some();
+                        let expected = inserted.remove(k);
+                        assert_eq!(in_leaf, expected);
+                    }
+                }
+                for (_i, k) in keys.iter().enumerate() {
+                    let expected = Some(k).filter(|_| inserted.contains(k.as_slice()));
+                    let actual = leaf.s().lookup_leaf(k).map(|v| v.load_slice_to_vec());
+                    assert_eq!(expected, actual.as_ref());
+                }
+            }
+        }
+    }
+
+    fn split_merge<V: NodeKind>(ufb: u8, lower: [V::SliceType; 3], mut val: impl FnMut(u64) -> Vec<V::SliceType>) {
+        let bm = &DefaultBm::new_with_page_count(2);
+        struct FakeParent<'bm>(Option<(Vec<u8>, u64)>, &'bm DefaultBm<PageTail>);
+
+        #[allow(non_local_definitions)]
+        impl<'bm> ParentInserter<'bm, &'bm DefaultBm<PageTail>> for &mut FakeParent<'bm> {
+            fn insert_upper_sibling(
+                self,
+                separator: impl SourceSlice,
+            ) -> Result<Guard<'bm, &'bm DefaultBm<PageTail>, Exclusive, PageTail>, ()> {
+                assert!(self.0.is_none());
+                let (id, g) = self.1.lock_new();
+                self.0 = Some((separator.to_vec(), id));
+                Ok(g)
+            }
+        }
+
+        let (_, mut ne1) = bm.lock_new();
+        let mut fake_parent = FakeParent(None, bm);
+        let mut n1 = ne1.b().0.cast::<BasicNode<V>>();
+        n1.init(&[0][..], &[ufb, 1][..], lower);
+        for i in 0u64.. {
+            if n1.insert(&i.to_be_bytes()[..], &val(i)).is_err() {
+                break;
+            }
+        }
+        let s1 = n1.s().to_debug();
+        Node::split(&mut n1, &mut fake_parent, &[0]).unwrap();
+        let p2 = fake_parent.0.as_ref().unwrap().1;
+        let mut ne2 = bm.lock_exclusive(p2);
+        let mut n2 = ne2.b().0.cast::<BasicNode<V>>();
+        Node::validate(n1.s());
+        Node::validate(n2.s());
+        let sep_key = &fake_parent.0.as_ref().unwrap().0;
+        assert_eq!(&n1.s().upper_fence().load_slice_to_vec(), sep_key);
+        assert_eq!(&n2.s().lower_fence().load_slice_to_vec(), sep_key);
+        Node::merge(&mut n1, &mut n2, &[0]);
+        Node::validate(n1.s());
+        assert_eq!(s1, n1.s().to_debug());
+        ne1.free();
+        ne2.free();
+    }
+
+    #[test]
+    fn split_merge_leaf() {
+        let val = |i: u64| i.to_be_bytes().to_vec();
+        split_merge::<KindLeaf>(1, [0; 3], val);
+        split_merge::<KindLeaf>(0, [0; 3], val);
+    }
+
+    #[test]
+    fn split_merge_inner() {
+        let fake_pid = |i| page_id_to_3x16(i + 1024).to_vec();
+        split_merge::<KindInner>(1, [0; 3], fake_pid);
+        split_merge::<KindInner>(0, [0; 3], fake_pid);
+    }
+}
