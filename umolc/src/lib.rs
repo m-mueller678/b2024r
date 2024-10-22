@@ -9,6 +9,8 @@ pub struct OlcVersion {
     v: u64,
 }
 
+pub struct PageId(pub u64);
+
 pub unsafe trait BufferManager<'bm>: 'bm + Copy + Send + Sync + Sized {
     type Page;
     type GuardO: BufferManagerGuard<'bm, Self>
@@ -19,13 +21,13 @@ pub unsafe trait BufferManager<'bm>: 'bm + Copy + Send + Sync + Sized {
         + Deref<Target = Self::Page>
         + BufferManageGuardUpgrade<'bm, Self, Self::GuardX>;
     type GuardX: BufferManagerGuard<'bm, Self> + Deref<Target = Self::Page> + DerefMut;
-    fn alloc(self) -> Self::GuardX;
+    fn alloc(self) -> (Self::GuardX, PageId);
     fn free(self, g: Self::GuardX);
 }
 
 pub trait BufferManagerGuard<'bm, B: BufferManager<'bm>>: Sized {
-    fn acquire_wait(bm: B, page_id: u64) -> Self;
-    fn acquire_wait_version(bm: B, page_id: u64, v: OlcVersion) -> Option<Self>;
+    fn acquire_wait(bm: B, page_id: PageId) -> Self;
+    fn acquire_wait_version(bm: B, page_id: PageId, v: OlcVersion) -> Option<Self>;
     fn release(self, bm: B) -> OlcVersion;
 }
 

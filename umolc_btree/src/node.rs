@@ -5,7 +5,7 @@ use static_assertions::{assert_impl_all, const_assert_eq};
 use std::fmt::Debug;
 use std::mem::transmute;
 use std::ops::Deref;
-use umolc::BufferManager;
+use umolc::{BufferManager, OPtr, PageId};
 
 pub mod node_tag {
     pub const METADATA_MARKER: u8 = 43;
@@ -54,10 +54,10 @@ pub struct DebugNode<V> {
 #[macro_export]
 macro_rules! impl_to_from_page {
     ($t:ty) => {
-        assert_eq_size!($t, crate::node::Page);
-        assert_eq_align!($t, crate::node::Page);
-        assert_impl_all!($t, bytemuck::Pod);
-        unsafe impl crate::node::ToFromPage for $t {};
+        static_assertions::assert_eq_size!($t, crate::node::Page);
+        static_assertions::assert_eq_align!($t, crate::node::Page);
+        static_assertions::assert_impl_all!($t: bytemuck::Pod);
+        unsafe impl crate::node::ToFromPage for $t {}
     };
 }
 
@@ -114,11 +114,13 @@ pub trait ToFromPageExt: ToFromPage {
     }
 }
 
-pub trait NodeStatic<'bm, BM: BufferManager<'bm>>: NodeDynamic<'bm, BM> {
+impl<T: ToFromPage> ToFromPageExt for T {}
+
+pub trait NodeStatic<'bm, BM: BufferManager<'bm, Page = Page>>: NodeDynamic<'bm, BM> {
     const TAG: u8;
 }
 
-pub trait NodeDynamic<'bm, BM: BufferManager<'bm>>: ToFromPage {
+pub trait NodeDynamic<'bm, BM: BufferManager<'bm, Page = Page>>: ToFromPage {
     /// fails iff parent_insert fails.
     /// if node is near empty, no split is performed and parent_insert is not called.
     fn split<'g>(&mut self, bm: BM, parent: &mut dyn NodeDynamic<BM>) -> Result<(), ()>;
@@ -127,19 +129,35 @@ pub trait NodeDynamic<'bm, BM: BufferManager<'bm>>: ToFromPage {
     fn validate(&self);
     fn lookup_inner(&self, key: &[u8], high_on_equal: bool) -> u64;
     fn index_child(&self, index: usize) -> u64;
+    fn insert_inner(&mut self, key: &[u8], pid: PageId) -> Result<(), ()>;
+    fn validate_inter_node_fences<'b>(
+        self,
+        bm: BM,
+        lb: &mut &'b mut [u8; MAX_KEY_SIZE],
+        hb: &mut &'b mut [u8; MAX_KEY_SIZE],
+        ll: usize,
+        hl: usize,
+    );
 }
 
-pub fn page_id_to_3x16(p: u64) -> [u16; 3] {
-    #[cfg(not(all(target_endian = "little", target_pointer_width = "64")))]
-    compile_error!("only little endian 64-bit is supported");
-    debug_assert!(p < (1 << 48));
-    let a = bytemuck::cast::<[u8; 8], [u16; 4]>(p.to_ne_bytes());
-    [a[0], a[1], a[2]]
+pub const PAGE_ID_LEN: usize = 5;
+
+pub fn page_id_to_bytes(p: PageId) -> [u8; PAGE_ID_LEN] {
+    let b = p.0.to_le_bytes();
+    debug_assert!(p.0 < (1 << (8 * PAGE_ID_LEN)));
+    b[..PAGE_ID_LEN].try_into().unwrap()
 }
 
-pub fn page_id_from_3x16(x: [u16; 3]) -> u64 {
-    let a = bytemuck::cast::<[u16; 4], [u8; 8]>([x[0], x[1], x[2], 0]);
-    u64::from_ne_bytes(a)
+pub fn page_id_from_bytes(x: &[u8; PAGE_ID_LEN]) -> PageId {
+    let mut b = [0; 8];
+    b[..PAGE_ID_LEN].copy_from_slice(&x);
+    PageId(u64::from_ne_bytes(b))
+}
+
+pub fn page_id_from_olc_bytes(x: OPtr<[u8; PAGE_ID_LEN]>) -> PageId {
+    let mut b = [0; 8];
+    b[..PAGE_ID_LEN].copy_from_slice(&x);
+    PageId(u64::from_ne_bytes(b))
 }
 
 #[derive(Clone, Copy)]
@@ -150,7 +168,6 @@ pub struct Page {
 }
 
 assert_impl_all!(CommonNodeHead:Pod,Zeroable);
-const_assert_eq!(size_of::<Page>(), align_of::<Page>());
 const_assert_eq!(size_of::<Page>(), PAGE_SIZE);
 unsafe impl Zeroable for Page {}
 unsafe impl Pod for Page {}
@@ -158,49 +175,14 @@ unsafe impl ToFromPage for Page {}
 
 pub trait NodeKind: Pod {
     const IS_LEAF: bool;
-    type Lower;
-    type SliceType: Pod;
-    type DebugVal: Eq + Debug;
-
-    fn from_lower(x: Self::Lower) -> [Self::SliceType; 3];
-    fn to_lower(x: [Self::SliceType; 3]) -> Self::Lower;
-    fn to_debug(x: Vec<Self::SliceType>) -> Self::DebugVal;
 }
 
 impl NodeKind for KindInner {
     const IS_LEAF: bool = false;
-    type SliceType = u16;
-
-    fn from_lower(x: Self::Lower) -> [Self::SliceType; 3] {
-        page_id_to_3x16(x)
-    }
-
-    fn to_lower(x: [Self::SliceType; 3]) -> Self::Lower {
-        page_id_from_3x16(x)
-    }
-
-    fn to_debug(x: Vec<Self::SliceType>) -> Self::DebugVal {
-        page_id_from_3x16(x.try_into().unwrap())
-    }
 }
 
 impl NodeKind for KindLeaf {
     const IS_LEAF: bool = true;
-    type Lower = ();
-    type SliceType = u8;
-    type DebugVal = Vec<u8>;
-
-    fn from_lower(_: Self::Lower) -> [Self::SliceType; 3] {
-        unimplemented!();
-    }
-
-    fn to_lower(_: [Self::SliceType; 3]) -> Self::Lower {
-        unimplemented!();
-    }
-
-    fn to_debug(x: Vec<Self::SliceType>) -> Self::DebugVal {
-        x
-    }
 }
 
 #[derive(Clone, Copy, Zeroable, Pod)]

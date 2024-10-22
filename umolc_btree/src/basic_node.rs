@@ -1,17 +1,19 @@
 use crate::key_source::{common_prefix, key_head, HeadSourceSlice, SourceSlice, SourceSlicePair};
 use crate::node::{
-    node_tag, page_cast, page_cast_mut, page_id_from_3x16, CommonNodeHead, NodeDynamic, NodeKind, NodeStatic, Page,
-    ToFromPage, NODE_TAIL_SIZE, PAGE_SIZE,
+    node_tag, page_cast, page_cast_mut, CommonNodeHead, NodeDynamic, NodeKind, NodeStatic, Page, ToFromPage,
+    ToFromPageExt, PAGE_ID_LEN, PAGE_SIZE,
 };
-use bstr::BString;
+use crate::{impl_to_from_page, MAX_KEY_SIZE};
+use bstr::{BStr, BString};
 use bytemuck::{Pod, Zeroable};
 use itertools::Itertools;
+use static_assertions::{const_assert, const_assert_eq};
 use std::fmt::{Debug, Formatter};
 use std::marker::PhantomData;
 use std::mem::{align_of, offset_of, size_of, swap};
 use std::ops::Range;
 use std::ptr::addr_of_mut;
-use umolc::BufferManager;
+use umolc::{BufferManager, PageId};
 
 const HINT_COUNT: usize = 16;
 const MIN_HINT_SPACING: usize = 3;
@@ -19,16 +21,42 @@ const MIN_HINT_SPACING: usize = 3;
 // must align with min hint spacing, so hints are updated when min count is reached
 const MIN_HINT_COUNT: usize = MIN_HINT_SPACING * (HINT_COUNT + 1);
 
-#[derive(Copy, Clone, Zeroable, Pod)]
-#[repr(C, align(16), packed)]
-pub struct BasicNode<V: NodeKind> {
+// Pod cannot be automatically implemented for generic structs, so we define a second non-generic version to get automatic checking
+macro_rules! def_basic_node{
+    {$($n:ident:$t:ty,)*}=>{
+        #[derive(Copy, Clone, Zeroable)]
+        #[repr(C, align(16))]
+        pub struct BasicNode<V>{
+            $($n:$t,)*
+            _p:PhantomData<V>,
+        }
+
+        unsafe impl<V:Copy+Zeroable+'static> Pod for BasicNode<V>{}
+        unsafe impl<V> ToFromPage for BasicNode<V>{}
+
+        #[derive(Pod,Copy,Clone,Zeroable)]
+        #[repr(C, align(16))]
+        pub struct AssertBasicNodePod{
+            $($n:$t,)*
+        }
+        impl_to_from_page!{AssertBasicNodePod}
+    }
+}
+
+#[derive(Clone, Copy)]
+#[repr(transparent)]
+struct BasicNodeDataArea([u32; BASIC_NODE_DATA_SIZE]);
+
+unsafe impl Zeroable for BasicNodeDataArea {}
+unsafe impl Pod for BasicNodeDataArea {}
+
+def_basic_node! {
     common: CommonNodeHead,
     heap_bump: u16,
     heap_freed: u16,
     _pad: u16,
     hints: [u32; HINT_COUNT],
-    _data: [u32; BASIC_NODE_DATA_SIZE],
-    _p: PhantomData<V>,
+    _data: BasicNodeDataArea,
 }
 
 const BASIC_NODE_DATA_SIZE: usize = (PAGE_SIZE - size_of::<CommonNodeHead>() - 2 * 2 - 16 * 4) / 4;
@@ -39,10 +67,10 @@ impl<V: NodeKind> BasicNode<V> {
         unsafe { (self as *const Self as *const u8).add(offset).cast::<u16>().read_unaligned() as usize }
     }
 
-    fn lower(&self) -> &[u8; Self::INNER_VAL_LEN] {
+    fn lower(&self) -> &[u8; PAGE_ID_LEN] {
         assert!(!V::IS_LEAF);
         assert_eq!(4 % align_of::<[V::SliceType; 3]>(), 0);
-        self.slice(offset_of!(Self, _data), Self::INNER_VAL_LEN)
+        self.slice(offset_of!(Self, _data), PAGE_ID_LEN)
     }
     fn round_up(x: usize) -> usize {
         x + (x % 2)
@@ -51,10 +79,17 @@ impl<V: NodeKind> BasicNode<V> {
     fn reserved_head_count(count: usize) -> usize {
         count.next_multiple_of(HEAD_RESERVATION)
     }
+    fn slot_offset(count: usize) -> usize {
+        Self::HEAD_OFFSET + 4 * Self::reserved_head_count(count)
+    }
+
+    fn slot_end(count: usize) -> usize {
+        Self::slot_offset(count) + 2 * count
+    }
+
     fn slots(&self) -> &[u16] {
-        let count = self.common.count as usize;
-        let offset = Self::HEAD_OFFSET + 4 * Self::reserved_head_count(count);
-        self.slice(offset, count * 2).slice_cast::<u16>()
+        let offset = Self::slot_offset(self.common.count as usize);
+        self.slice(offset, self.common.count as usize * 2).slice_cast::<u16>()
     }
 
     fn key_combined(&self, index: usize) -> SourceSlicePair<u8, HeadSourceSlice, &[u8]> {
@@ -78,9 +113,14 @@ impl<V: NodeKind> BasicNode<V> {
         if V::IS_LEAF {
             self.u16(offset + 2)
         } else {
-            Self::INNER_VAL_LEN
+            PAGE_ID_LEN
         }
     }
+
+    fn stored_record_size(&self, offset: usize) -> usize {
+        self.u16(offset) + self.record_val_len(offset)
+    }
+
     // fn key_tail_len(self, index: usize) -> (Guarded<'a, M, [u8]>, usize)
     // where
     //     Self: Copy,
@@ -172,7 +212,11 @@ impl<V: NodeKind> BasicNode<V> {
     const HEAD_OFFSET: usize = offset_of!(Self, _data) + lower_head_slots::<V>() * 4;
 
     fn heads(&self) -> &[u32] {
-        &self.as_page().as_slice()[Self::HEAD_OFFSET..][..self.common.count as usize]
+        &bytemuck::cast_slice(std::slice::from_ref(self))[Self::HEAD_OFFSET / 4..][..self.common.count as usize]
+    }
+
+    fn set_head(&mut self, i: usize, head: u32) {
+        bytemuck::cast_slice_mut(std::slice::from_ref(self))[Self::HEAD_OFFSET / 4 + i] = head
     }
     fn copy_records(&self, dst: &mut Self, src_range: Range<usize>, dst_start: usize) {
         let dst_range = dst_start..(src_range.end + dst_start - src_range.start);
@@ -259,31 +303,30 @@ impl<V: NodeKind> BasicNode<V> {
     }
 
     #[allow(clippy::result_unit_err)]
-    fn insert(&mut self, key: &[u8], val: &[V::SliceType]) -> Result<Option<()>, ()> {
-        Node::validate(self.s());
+    fn insert(&mut self, key: &[u8], val: &[u8]) -> Result<Option<()>, ()> {
+        self.validate();
         if !V::IS_LEAF {
-            assert_eq!(val.len(), 3);
+            assert_eq!(val.len(), PAGE_ID_LEN);
         }
-        let key = &key[self.prefix_len().load() as usize..];
-        let index = self.s().find_truncated(key);
-        let count = self.count().load() as usize;
+        let key = &key[self.common.count as usize..];
+        let index = self.find_truncated(key);
+        let count = self.common.count as usize;
         let record_size = Self::record_size(key.len().saturating_sub(4), val.len());
         loop {
             let new_heap_start;
             match index {
                 Ok(existing) => {
-                    new_heap_start = Self::HEAD_OFFSET + Self::reserved_head_count(count) * 4 + count * 2;
+                    new_heap_start = Self::slot_end(count);
                     if record_size <= (self.heap_bump().load() as usize - new_heap_start) {
-                        let old_size = self.s().stored_record_size(self.s().slots().index(existing).load() as usize);
-                        self.heap_freed_mut().update(|x| x + old_size as u16);
+                        self.heap_freed += self.stored_record_size(self.slots()[existing] as usize);
                         self.heap_write_new(key, val, existing);
-                        Node::validate(self.s());
+                        self.validate();
                         return Ok(Some(()));
                     }
                 }
                 Err(insert_at) => {
-                    new_heap_start = Self::HEAD_OFFSET + Self::reserved_head_count(count + 1) * 4 + (count + 1) * 2;
-                    if new_heap_start + record_size <= self.heap_bump().load() as usize {
+                    new_heap_start = Self::slot_end(count + 1);
+                    if new_heap_start + record_size <= self.heap_bump as usize {
                         let orhc = Self::reserved_head_count(count);
                         let nrhc = Self::reserved_head_count(count + 1);
                         if nrhc == orhc {
@@ -305,8 +348,8 @@ impl<V: NodeKind> BasicNode<V> {
                             );
                         }
                         self.relocate_by::<true, u32>(Self::HEAD_OFFSET + 4 * insert_at, count - insert_at, 1);
-                        self.count_mut().store(count as u16 + 1);
-                        self.b().heads().index(insert_at).store(key_head(key));
+                        self.common.count += 1;
+                        self.set_head(insert_at, key_head(key));
                         self.update_hints(count, count + 1, insert_at);
                         self.heap_write_new(key, val, insert_at);
                         Node::validate(self.s());
@@ -355,7 +398,11 @@ impl<V: NodeKind> BasicNode<V> {
         Self::RECORD_TO_KEY_OFFSET + key_tail + val
     }
 
-    pub fn init(&mut self, lf: impl SourceSlice, uf: impl SourceSlice, lower: [V::SliceType; 3]) {
+    pub fn init(&mut self, lf: impl SourceSlice, uf: impl SourceSlice, lower: PageId) {
+        if V::IS_LEAF {
+            assert_eq!(lower.0, 0);
+        } else {
+        }
         self.as_page_mut().common_init(if V::IS_LEAF { node_tag::BASIC_LEAF } else { node_tag::BASIC_INNER }, lf, uf);
         self.heap_freed = 0;
         self.heap_bump = size_of::<Self>() as u16 - self.common.lower_fence_len - self.common.upper_fence_len;
@@ -367,7 +414,7 @@ impl<V: NodeKind> BasicNode<V> {
         let mut dst_offset = heap_end;
         for i in 0..self.common.count as usize {
             let offset = self.slots()[i] as usize;
-            let val_len = if V::IS_LEAF { self.u16(offset + 2) } else { Self::INNER_VAL_LEN };
+            let val_len = if V::IS_LEAF { self.u16(offset + 2) } else { PAGE_ID_LEN };
             let record_len = Self::RECORD_TO_KEY_OFFSET + self.u16(offset) + val_len;
             buffer[dst_offset..][..record_len].copy_from_slice(self.slice(offset, record_len));
             self.b().slots().index(i).store(dst_offset as u16);
@@ -399,7 +446,6 @@ impl<V: NodeKind> BasicNode<V> {
     }
 
     const RECORD_TO_KEY_OFFSET: usize = if V::IS_LEAF { 4 } else { 2 };
-    const INNER_VAL_LEN: usize = 6;
 }
 
 impl<V: NodeKind> Debug for BasicNode<V> {
@@ -429,11 +475,11 @@ impl<V: NodeKind> Debug for BasicNode<V> {
     }
 }
 
-impl<'bm, BM: BufferManager<'bm>, V: NodeKind> NodeStatic<'bm, BM> for BasicNode<V> {
+impl<'bm, BM: BufferManager<'bm, Page = Page>, V: NodeKind> NodeStatic<'bm, BM> for BasicNode<V> {
     const TAG: u8 = if V::IS_LEAF { 251 } else { 250 };
 }
 
-impl<'bm, BM: BufferManager<'bm>, V: NodeKind> NodeDynamic<'bm, BM> for BasicNode<V> {
+impl<'bm, BM: BufferManager<'bm, Page = Page>, V: NodeKind> NodeDynamic<'bm, BM> for BasicNode<V> {
     fn validate(&self) {
         if !cfg!(feature = "validate_node") {
             return;
@@ -469,6 +515,57 @@ impl<'bm, BM: BufferManager<'bm>, V: NodeKind> NodeDynamic<'bm, BM> for BasicNod
         });
         let keys_and_fences = lower_fence.chain(keys).chain(upper_fence);
         assert!(keys_and_fences.is_sorted(), "not sorted: {:?}", self);
+    }
+
+    #[allow(clippy::result_unit_err)]
+    fn insert_inner(&mut self, key: &[u8], pid: PageId) -> Result<(), ()> {
+        let x = self.insert(key, &page_id_to_3x16(pid));
+        Node::validate(self.s());
+        x.map(|x| debug_assert!(x.is_none()))
+    }
+
+    fn validate_inter_node_fences<'b>(
+        self,
+        bm: BM,
+        lb: &mut &'b mut [u8; MAX_KEY_SIZE],
+        hb: &mut &'b mut [u8; MAX_KEY_SIZE],
+        mut ll: usize,
+        mut hl: usize,
+    ) {
+        assert!(
+            self.s().lower_fence().mem_cmp(&lb[..ll]).is_eq(),
+            "wrong lf {:?}\n{:?}",
+            BStr::new(&lb[..ll]),
+            self.upcast()
+        );
+        assert!(
+            self.s().upper_fence().mem_cmp(&hb[..hl]).is_eq(),
+            "wrong uf {:?}\n{:?}",
+            BStr::new(&hb[..hl]),
+            self.upcast()
+        );
+        if self.s().tag().load() != node_tag::BASIC_INNER {
+            return;
+        }
+        let prefix = self.prefix_len().load() as usize;
+        let count = self.count().load() as usize;
+        for (i, k) in (0..count)
+            .map(|i| self.s().key_combined(i))
+            .chain(std::iter::once(HeadSourceSlice::empty().join(self.s().upper_fence().slice(prefix..))))
+            .enumerate()
+        {
+            k.write_to(&mut Guarded::wrap_mut(&mut hb[prefix..][..k.len()]));
+            hl = k.len() + prefix;
+            let htmp = hb[..hl].to_vec();
+            bm.lock_exclusive(self.optimistic().index_child(i))
+                .as_page()
+                .as_dyn_node()
+                .validate_inter_node_fences(bm, lb, hb, ll, hl);
+            assert_eq!(&hb[..hl], htmp);
+            swap(hb, lb);
+            ll = hl;
+        }
+        swap(hb, lb);
     }
 
     fn merge(&mut self, right: &mut Page) {
@@ -560,68 +657,6 @@ impl<'bm, BM: BufferManager<'bm>, V: NodeKind> NodeDynamic<'bm, BM> for BasicNod
 }
 
 const HEAD_RESERVATION: usize = 16;
-
-const fn lower_head_slots<V: NodeKind>() -> usize {
-    if V::IS_LEAF {
-        0
-    } else {
-        2
-    }
-}
-
-impl<'a> W<Guarded<'a, Exclusive, BasicNode<KindInner>>> {
-    #[allow(clippy::result_unit_err)]
-    pub fn insert_inner(&mut self, key: &[u8], pid: PageId) -> Result<(), ()> {
-        let x = self.insert(key, &page_id_to_3x16(pid));
-        Node::validate(self.s());
-        x.map(|x| debug_assert!(x.is_none()))
-    }
-
-    pub fn validate_inter_node_fences<'bm, 'b>(
-        self,
-        bm: impl BufferManager<'bm, Page = PageTail>,
-        lb: &mut &'b mut [u8; MAX_KEY_SIZE],
-        hb: &mut &'b mut [u8; MAX_KEY_SIZE],
-        mut ll: usize,
-        mut hl: usize,
-    ) {
-        assert!(
-            self.s().lower_fence().mem_cmp(&lb[..ll]).is_eq(),
-            "wrong lf {:?}\n{:?}",
-            BStr::new(&lb[..ll]),
-            self.upcast()
-        );
-        assert!(
-            self.s().upper_fence().mem_cmp(&hb[..hl]).is_eq(),
-            "wrong uf {:?}\n{:?}",
-            BStr::new(&hb[..hl]),
-            self.upcast()
-        );
-        if self.s().tag().load() != node_tag::BASIC_INNER {
-            return;
-        }
-        let prefix = self.prefix_len().load() as usize;
-        let count = self.count().load() as usize;
-        for (i, k) in (0..count)
-            .map(|i| self.s().key_combined(i))
-            .chain(std::iter::once(HeadSourceSlice::empty().join(self.s().upper_fence().slice(prefix..))))
-            .enumerate()
-        {
-            k.write_to(&mut Guarded::wrap_mut(&mut hb[prefix..][..k.len()]));
-            hl = k.len() + prefix;
-            let htmp = hb[..hl].to_vec();
-            bm.lock_exclusive(self.optimistic().index_child(i))
-                .b()
-                .0
-                .cast::<BasicInner>()
-                .validate_inter_node_fences(bm, lb, hb, ll, hl);
-            assert_eq!(&hb[..hl], htmp);
-            swap(hb, lb);
-            ll = hl;
-        }
-        swap(hb, lb);
-    }
-}
 
 #[cfg(test)]
 mod tests {
