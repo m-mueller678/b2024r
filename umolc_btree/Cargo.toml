@@ -11,6 +11,7 @@ extend = "1.2.0"
 static_assertions = "1.1.0"
 bstr = "1.10.0"
 itertools = "0.13.0"
+indxvec = "1.9.6"
 
 [features]
 default = ["page_4k"]

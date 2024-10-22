@@ -5,7 +5,7 @@ use static_assertions::{assert_impl_all, const_assert_eq};
 use std::fmt::Debug;
 use std::mem::transmute;
 use std::ops::Deref;
-use umolc::{BufferManager, OPtr, PageId};
+use umolc::{BufferManager, OPtr, OlcErrorHandler, PageId};
 
 pub mod node_tag {
     pub const METADATA_MARKER: u8 = 43;
@@ -154,7 +154,7 @@ pub fn page_id_from_bytes(x: &[u8; PAGE_ID_LEN]) -> PageId {
     PageId(u64::from_ne_bytes(b))
 }
 
-pub fn page_id_from_olc_bytes(x: OPtr<[u8; PAGE_ID_LEN]>) -> PageId {
+pub fn page_id_from_olc_bytes<O: OlcErrorHandler>(x: OPtr<[u8; PAGE_ID_LEN], O>) -> PageId {
     let mut b = [0; 8];
     b[..PAGE_ID_LEN].copy_from_slice(&x);
     PageId(u64::from_ne_bytes(b))

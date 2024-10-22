@@ -6,6 +6,7 @@ use crate::node::{
 use crate::{impl_to_from_page, MAX_KEY_SIZE};
 use bstr::{BStr, BString};
 use bytemuck::{Pod, Zeroable};
+use indxvec::Search;
 use itertools::Itertools;
 use static_assertions::{const_assert, const_assert_eq};
 use std::fmt::{Debug, Formatter};
@@ -13,7 +14,7 @@ use std::marker::PhantomData;
 use std::mem::{align_of, offset_of, size_of, swap};
 use std::ops::Range;
 use std::ptr::addr_of_mut;
-use umolc::{BufferManager, PageId};
+use umolc::{o_project, BufferManager, OPtr, OlcErrorHandler, PageId};
 
 const HINT_COUNT: usize = 16;
 const MIN_HINT_SPACING: usize = 3;
@@ -69,8 +70,7 @@ impl<V: NodeKind> BasicNode<V> {
 
     fn lower(&self) -> &[u8; PAGE_ID_LEN] {
         assert!(!V::IS_LEAF);
-        assert_eq!(4 % align_of::<[V::SliceType; 3]>(), 0);
-        self.slice(offset_of!(Self, _data), PAGE_ID_LEN)
+        self.cast_slice::<u8>()[Self::LOWER_OFFSET..][..PAGE_ID_LEN].try_into().unwrap()
     }
     fn round_up(x: usize) -> usize {
         x + (x % 2)
@@ -88,8 +88,7 @@ impl<V: NodeKind> BasicNode<V> {
     }
 
     fn slots(&self) -> &[u16] {
-        let offset = Self::slot_offset(self.common.count as usize);
-        self.slice(offset, self.common.count as usize * 2).slice_cast::<u16>()
+        &self.cast_slice::<u16>()[Self::slot_offset(self.common.count as usize) / 2..][..self.common.count as usize]
     }
 
     fn key_combined(&self, index: usize) -> SourceSlicePair<u8, HeadSourceSlice, &[u8]> {
@@ -102,13 +101,6 @@ impl<V: NodeKind> BasicNode<V> {
         head.join(tail)
     }
 
-    fn key_tail_len_with_slots(&self, index: usize, slots: &[u16]) -> (&[u8], usize) {
-        let offset = slots[index];
-        let len = self.s().u16(offset).load() as usize;
-        let tail_len = len.saturating_sub(4);
-        (self.slice(offset + record_to_key_offset::<V>(), tail_len), len)
-    }
-
     fn record_val_len(&self, offset: usize) -> usize {
         if V::IS_LEAF {
             self.u16(offset + 2)
@@ -118,7 +110,7 @@ impl<V: NodeKind> BasicNode<V> {
     }
 
     fn stored_record_size(&self, offset: usize) -> usize {
-        self.u16(offset) + self.record_val_len(offset)
+        self.u16(offset).saturating_sub(4) + self.record_val_len(offset)
     }
 
     // fn key_tail_len(self, index: usize) -> (Guarded<'a, M, [u8]>, usize)
@@ -140,34 +132,38 @@ impl<V: NodeKind> BasicNode<V> {
         self.slice(offset + Self::RECORD_TO_KEY_OFFSET + self.u16(offset), self.record_val_len(offset))
     }
 
-    fn find(self, key: &[u8]) -> Result<usize, usize>
+    fn find<O: OlcErrorHandler>(this: OPtr<Self, O>, key: &[u8]) -> Result<usize, usize>
     where
         Self: Copy,
     {
-        let prefix_len = self.prefix_len().load() as usize;
+        let prefix_len = o_project!(this.common.prefix_len).r() as usize;
         if prefix_len > key.len() {
-            M::release_error();
+            O::optimistic_fail()
         }
         let truncated = &key[prefix_len..];
-        self.find_truncated(truncated)
+        Self::find_truncated::<O>(this, truncated)
     }
 
-    fn find_truncated(self, truncated: &[u8]) -> Result<usize, usize>
+    fn find_truncated<O: OlcErrorHandler>(this: OPtr<Self, O>, truncated: &[u8]) -> Result<usize, usize>
     where
         Self: Copy,
     {
         let needle_head = key_head(truncated);
-        let heads = self.heads();
-        if heads.is_empty() {
+        let count = o_project!(this.common.count).r() as usize;
+        let slot_start_index = Self::slot_offset(count) / 2;
+        let slots = this.as_slice::<u16>().i(slot_start_index..slot_start_index + count);
+        let heads = this.as_slice::<u32>().i(Self::HEAD_OFFSET / 4..Self::HEAD_OFFSET / 4 + count);
+        let hints = o_project!(this.hints).unsize();
+        if heads.len() == 0 {
             return Err(0);
         }
         let mut head_range_start = 0;
         let mut head_range_end = heads.len();
-        if heads.len() >= MIN_HINT_COUNT {
-            let spacing = heads.len() / (HINT_COUNT + 1);
+        if count >= MIN_HINT_COUNT {
+            let spacing = count / (HINT_COUNT + 1);
             let mut hint_index = 0;
             while hint_index < HINT_COUNT {
-                let hint = self.hints().as_slice().index(hint_index).load();
+                let hint = hints.i(hint_index).r();
                 if hint < needle_head {
                     head_range_start = (hint_index + 1) * spacing + 1;
                 } else {
@@ -176,7 +172,7 @@ impl<V: NodeKind> BasicNode<V> {
                 hint_index += 1;
             }
             while hint_index < HINT_COUNT {
-                let hint = self.hints().as_slice().index(hint_index).load();
+                let hint = hints.i(hint_index).r();
                 if hint > needle_head {
                     head_range_end = (hint_index + 1) * spacing;
                     break;
@@ -189,18 +185,15 @@ impl<V: NodeKind> BasicNode<V> {
         };
 
         let matching_head_range =
-            (head_range_start..=head_range_end - 1).binary_all(|i| heads.s().index(i).load().cmp(&needle_head));
+            (head_range_start..=head_range_end - 1).binary_all(|i| heads.i(i).r().cmp(&needle_head));
         if matching_head_range.is_empty() {
             return Err(matching_head_range.start);
         }
-        let slots = self.slots();
-        if slots.len() != heads.len() {
-            M::release_error()
-        }
         let key_position = (matching_head_range.start..=matching_head_range.end - 1).binary_by(move |i| {
-            let (tail, len) = self.s().key_tail_len_with_slots(i, slots.s());
-            let tail = tail.optimistic();
-            if tail.is_empty() || truncated.len() <= 4 {
+            let offset = slots.i(i).r() as usize;
+            let len = this.read_unaligned_nonatomic_u16(offset) as usize;
+            let tail = this.as_slice::<u8>().sub(offset + Self::RECORD_TO_KEY_OFFSET, len.saturating_sub(4));
+            if len <= 4 || truncated.len() <= 4 {
                 len.cmp(&truncated.len())
             } else {
                 tail.mem_cmp(&truncated[4..])
@@ -209,14 +202,15 @@ impl<V: NodeKind> BasicNode<V> {
         key_position
     }
 
-    const HEAD_OFFSET: usize = offset_of!(Self, _data) + lower_head_slots::<V>() * 4;
+    const LOWER_OFFSET: usize = offset_of!(Self, _data);
+    const HEAD_OFFSET: usize = offset_of!(Self, _data) + if V::IS_LEAF { 0 } else { 8 };
 
     fn heads(&self) -> &[u32] {
         &bytemuck::cast_slice(std::slice::from_ref(self))[Self::HEAD_OFFSET / 4..][..self.common.count as usize]
     }
 
     fn set_head(&mut self, i: usize, head: u32) {
-        bytemuck::cast_slice_mut(std::slice::from_ref(self))[Self::HEAD_OFFSET / 4 + i] = head
+        bytemuck::cast_slice_mut(std::slice::from_mut(self))[Self::HEAD_OFFSET / 4 + i] = head
     }
     fn copy_records(&self, dst: &mut Self, src_range: Range<usize>, dst_start: usize) {
         let dst_range = dst_start..(src_range.end + dst_start - src_range.start);
