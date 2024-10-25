@@ -79,8 +79,8 @@ pub trait ToFromPageExt: ToFromPage {
         page_cast_mut::<Self, Page>(self)
     }
 
-    fn cast_slice_mut<T: Pod>(&self) -> &[T] {
-        bytemuck::cast_slice(std::slice::from_ref(self))
+    fn cast_slice_mut<T: Pod>(&mut self) -> &[T] {
+        bytemuck::cast_slice_mut(std::slice::from_mut(self))
     }
     fn cast_slice<T: Pod>(&self) -> &[T] {
         bytemuck::cast_slice(std::slice::from_ref(self))
@@ -111,6 +111,11 @@ pub trait ToFromPageExt: ToFromPage {
 
     fn upper_fence_combined(&self) -> SourceSlicePair<u8, &[u8], &[u8]> {
         self.prefix().join(self.upper_fence_tail())
+    }
+
+    fn fences_start(&self) -> usize {
+        let head = self.as_page().common;
+        size_of::<Self>() - head.lower_fence_len as usize - head.upper_fence_len as usize
     }
 }
 

@@ -12,6 +12,7 @@ pub struct OlcVersion {
     v: u64,
 }
 
+#[derive(Debug)]
 pub struct PageId(pub u64);
 
 pub unsafe trait BufferManager<'bm>: 'bm + Copy + Send + Sync + Sized + OlcErrorHandler {

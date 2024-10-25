@@ -25,6 +25,10 @@ pub struct OPtr<'a, T: ?Sized, O: OlcErrorHandler> {
 }
 
 impl<'a, T: Pod, O: OlcErrorHandler> OPtr<'a, T, O> {
+    pub fn from_mut(x: &'a mut T) -> Self {
+        OPtr { p: x as *const T, _p: PhantomData, _bm: PhantomData }
+    }
+
     pub fn r(self) -> T
     where
         T: Atomic,
