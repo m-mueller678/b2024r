@@ -1,7 +1,8 @@
 use crate::key_source::{common_prefix, key_head, HeadSourceSlice, SourceSlice, SourceSlicePair};
 use crate::node::{
-    node_tag, page_cast, page_cast_mut, page_id_from_bytes, page_id_to_bytes, CommonNodeHead, NodeDynamic, NodeKind,
-    NodeStatic, Page, ToFromPage, ToFromPageExt, PAGE_ID_LEN, PAGE_SIZE,
+    insert_upper_sibling, node_tag, page_cast, page_cast_mut, page_id_from_bytes, page_id_from_olc_bytes,
+    page_id_to_bytes, CommonNodeHead, NodeDynamic, NodeKind, NodeStatic, Page, ToFromPage, ToFromPageExt, PAGE_ID_LEN,
+    PAGE_SIZE,
 };
 use crate::util::Supreme;
 use crate::{impl_to_from_page, MAX_KEY_SIZE};
@@ -15,7 +16,7 @@ use std::marker::PhantomData;
 use std::mem::{align_of, offset_of, size_of, swap};
 use std::ops::Range;
 use std::ptr::addr_of_mut;
-use umolc::{o_project, BufferManager, OPtr, OlcErrorHandler, PageId};
+use umolc::{o_project, BufferManager, BufferManagerGuard, OPtr, OlcErrorHandler, PageId};
 
 const HINT_COUNT: usize = 16;
 const MIN_HINT_SPACING: usize = 3;
@@ -24,7 +25,7 @@ const MIN_HINT_SPACING: usize = 3;
 const MIN_HINT_COUNT: usize = MIN_HINT_SPACING * (HINT_COUNT + 1);
 
 // Pod cannot be automatically implemented for generic structs, so we define a second non-generic version to get automatic checking
-macro_rules! def_basic_node{
+macro_rules! def_basic_node {
     {$($n:ident:$t:ty,)*}=>{
         #[derive(Copy, Clone, Zeroable)]
         #[repr(C, align(16))]
@@ -308,10 +309,11 @@ impl<V: NodeKind> BasicNode<V> {
         Self::RECORD_TO_KEY_OFFSET + key_tail + val
     }
 
-    pub fn init(&mut self, lf: impl SourceSlice, uf: impl SourceSlice, lower: PageId) {
+    pub fn init(&mut self, lf: impl SourceSlice, uf: impl SourceSlice, lower: Option<&[u8; 5]>) {
         if V::IS_LEAF {
-            assert_eq!(lower.0, 0);
+            assert!(lower.is_none());
         } else {
+            self.slice_mut(Self::LOWER_OFFSET, 5).copy_from_slice(lower.unwrap());
         }
         self.as_page_mut().common_init(if V::IS_LEAF { node_tag::BASIC_LEAF } else { node_tag::BASIC_INNER }, lf, uf);
         self.heap_freed = 0;
@@ -462,6 +464,38 @@ impl<V: NodeKind> BasicNode<V> {
         }
     }
 
+    // fn olc_val<O:OlcErrorHandler>(this:OPtr<Self,O>,slot_index:usize)->OPtr<[u8],O>{
+    //     assert!(!V::IS_LEAF);
+    //     let slot_offset=Self::slot_offset(o_project!(this.common.count).r() as usize);
+    //     let offset = this.as_slice::<u16>()[slot_offset/2+index-1];
+    //     this.read_unaligned_nonatomic_u16(offset) + Self::RECORD_TO_KEY_OFFSET
+    //     let lower_offset =
+    //         if index == 0 {
+    //             Self::LOWER_OFFSET
+    //         } else {
+    //
+    //
+    //         };
+    //     page_id_from_olc_bytes(this.as_slice::<u8>().i(lower_offset..lower_offset+PAGE_ID_LEN))
+    // }
+
+    fn lookup_inner<O: OlcErrorHandler>(this: OPtr<Self, O>, key: &[u8], high_on_equal: bool) -> PageId {
+        assert!(!V::IS_LEAF);
+        let index = match Self::find(this, key) {
+            Err(i) => i,
+            Ok(i) => i + high_on_equal as usize,
+        };
+        let lower_offset = if index == 0 {
+            Self::LOWER_OFFSET
+        } else {
+            let slot_offset = Self::slot_offset(o_project!(this.common.count).r() as usize);
+            let offset = this.as_slice::<u16>().i(slot_offset / 2 + index - 1).r() as usize;
+            this.read_unaligned_nonatomic_u16(offset) + Self::RECORD_TO_KEY_OFFSET
+        };
+        page_id_from_olc_bytes(this.array_slice(lower_offset))
+    }
+
+    const TAG: u8 = if V::IS_LEAF { node_tag::BASIC_LEAF } else { node_tag::BASIC_INNER };
     const RECORD_TO_KEY_OFFSET: usize = if V::IS_LEAF { 4 } else { 2 };
 }
 
@@ -505,7 +539,7 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>, V: NodeKind> NodeDynamic<'bm, BM>
     }
 
     fn validate_inter_node_fences<'b>(
-        self,
+        &self,
         bm: BM,
         lb: &mut &'b mut [u8; MAX_KEY_SIZE],
         hb: &mut &'b mut [u8; MAX_KEY_SIZE],
@@ -520,26 +554,28 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>, V: NodeKind> NodeDynamic<'bm, BM>
         let pf = self.prefix() == &hb[..pl];
         assert!(
             pl_limit && lf && uf && pf,
-            "inter node validation failed.\nprefix limit:{pl},\nprefix:{pf},\nlower fence:{lf}\nupper fence:{uf},\nnode:\n{:?}",
+            "inter node validation failed.\n\
+            prefix limit:{pl},\nprefix:{pf},\nlower fence:{lf},\nupper fence:{uf},\n\
+            expected upper: {:?},\nexpected lower: {:?},\nnode:\n{:?}",
+            BStr::new(&lb[..ll]),
+            BStr::new(&hb[..hl]),
             self
         );
         if self.common.tag != node_tag::BASIC_INNER {
             return;
         }
-        let prefix = self.prefix_len().load() as usize;
-        let count = self.count().load() as usize;
+        let prefix = self.common.prefix_len as usize;
+        let count = self.common.count as usize;
         for (i, k) in (0..count)
-            .map(|i| self.s().key_combined(i))
-            .chain(std::iter::once(HeadSourceSlice::empty().join(self.s().upper_fence().slice(prefix..))))
+            .map(|i| self.key_combined(i))
+            .chain(std::iter::once(HeadSourceSlice::empty().join(self.upper_fence_tail())))
             .enumerate()
         {
-            k.write_to(&mut Guarded::wrap_mut(&mut hb[prefix..][..k.len()]));
+            k.write_to(&mut hb[prefix..][..k.len()]);
             hl = k.len() + prefix;
             let htmp = hb[..hl].to_vec();
-            bm.lock_exclusive(self.optimistic().index_child(i))
-                .as_page()
-                .as_dyn_node()
-                .validate_inter_node_fences(bm, lb, hb, ll, hl);
+            let child = BM::GuardS::acquire_wait(bm, todo!());
+            child.as_dyn_node().validate_inter_node_fences(bm, lb, hb, ll, hl);
             assert_eq!(&hb[..hl], htmp);
             swap(hb, lb);
             ll = hl;
@@ -554,15 +590,15 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>, V: NodeKind> NodeDynamic<'bm, BM>
         let left_count = self.common.count as usize;
         let right_count = right.common.count as usize;
         if V::IS_LEAF {
-            tmp.init(self.lower_fence(), right.s().upper_fence(), Zeroable::zeroed());
-            tmp.count_mut().store((left_count + right_count) as u16);
-            self.copy_records(tmp, 0..left_count, 0, right.lower_fence());
-            right.copy_records(tmp, 0..right_count, left_count, right.lower_fence());
+            tmp.init(self.lower_fence(), right.upper_fence_combined(), None);
+            tmp.common.count = (left_count + right_count) as u16;
+            self.copy_records(tmp, 0..left_count, 0);
+            right.copy_records(tmp, 0..right_count, left_count);
         } else {
-            tmp.init(self.lower_fence(), self.upper_fence(), self.lower());
-            tmp.count_mut().store((left_count + right_count + 1) as u16);
-            self.copy_records(tmp, 0..left_count, 0, right.lower_fence());
-            right.copy_records(tmp, 0..right_count, left_count + 1, right.lower_fence());
+            tmp.init(self.lower_fence(), self.upper_fence_combined(), Some(self.lower()));
+            tmp.common.count = (left_count + right_count + 1) as u16;
+            self.copy_records(tmp, 0..left_count, 0);
+            right.copy_records(tmp, 0..right_count, left_count + 1);
             tmp.heap_write_new(
                 self.as_page().upper_fence_combined().slice_start(tmp.common.prefix_len as usize),
                 right.lower().as_slice(),
@@ -573,29 +609,29 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>, V: NodeKind> NodeDynamic<'bm, BM>
         *self = *tmp;
     }
 
-    fn split<'g>(&mut self, bm: BM, parent: &mut dyn NodeDynamic<BM>) -> Result<(), ()> {
+    fn split<'g>(&mut self, bm: BM, parent: &mut dyn NodeDynamic<'bm, BM>) -> Result<(), ()> {
         let left = &mut BasicNode::<V>::zeroed();
         let count = self.common.count as usize;
         let (low_count, sep_key) = self.find_separator();
-        let mut right = parent.insert_upper_sibling(sep_key)?;
-        let right = &mut right.b().0.cast::<BasicNode<V>>();
+        let mut right = insert_upper_sibling(parent, bm, sep_key)?;
+        let right = page_cast_mut::<_, BasicNode<V>>(&mut *right);
         self.validate();
         let (lr, rr) = if V::IS_LEAF {
-            left.init(self.as_page().lower_fence(), sep_key, Zeroable::zeroed());
-            right.init(sep_key, self.as_page().upper_fence(), Zeroable::zeroed());
+            left.init(self.lower_fence(), sep_key, None);
+            right.init(sep_key, self.upper_fence_combined(), None);
             (0..low_count, low_count..count)
         } else {
-            left.init(self.as_page().lower_fence(), sep_key, self.lower());
-            let mid_child = self.child(low_count);
-            right.init(sep_key, self.as_page().upper_fence(), mid_child);
+            left.init(self.as_page().lower_fence(), sep_key, Some(self.lower()));
+            let mid_child = self.val(low_count).try_into().unwrap();
+            right.init(sep_key, self.as_page().upper_fence_combined(), Some(mid_child));
             (0..low_count, low_count + 1..count)
         };
         debug_assert!(self.key_combined(lr.end - 1).cmp(sep_key.slice(self.common.prefix_len as usize..)).is_lt());
         debug_assert!(sep_key.slice(self.common.prefix_len as usize..).cmp(self.key_combined(rr.start)).is_le());
-        left.count_mut().store(lr.len() as u16);
+        left.common.count = lr.len() as u16;
         self.copy_records(left, lr.clone(), 0);
         left.update_hints(0, lr.count(), 0);
-        right.count_mut().store(rr.len() as u16);
+        right.common.count = rr.len() as u16;
         self.copy_records(right, rr.clone(), 0);
         right.update_hints(0, rr.count(), 0);
         left.validate();
@@ -609,29 +645,10 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>, V: NodeKind> NodeDynamic<'bm, BM>
         let keys = range.clone().map(|i| self.key_combined(i).to_vec()).collect();
         let vals = (0..1)
             .filter(|_| !V::IS_LEAF)
-            .map(|_| self.lower().cast_slice::<u8>().to_vec())
+            .map(|_| self.lower().to_vec())
             .chain(range.map(|i| self.val(i).to_vec()))
-            .map(V::to_debug)
             .collect();
         (keys, vals)
-    }
-
-    fn lookup_inner(&self, key: &[u8], high_on_equal: bool) -> u64 {
-        assert!(!V::IS_LEAF);
-        let index = match self.find(key) {
-            Err(i) => i,
-            Ok(i) => i + high_on_equal as usize,
-        };
-        self.index_child(index)
-    }
-
-    fn index_child(&self, index: usize) -> u64 {
-        assert!(!V::IS_LEAF);
-        if index == 0 {
-            page_id_from_3x16(self.lower().load())
-        } else {
-            page_id_from_3x16(self.val(index - 1).as_array().load())
-        }
     }
 }
 

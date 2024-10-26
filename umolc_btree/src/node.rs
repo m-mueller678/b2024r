@@ -70,16 +70,16 @@ pub fn page_cast_mut<A: ToFromPage, B: ToFromPage>(a: &mut A) -> &mut B {
 
 pub unsafe trait ToFromPage {}
 
-pub trait ToFromPageExt: ToFromPage {
+pub trait ToFromPageExt: ToFromPage + Pod {
     fn as_page(&self) -> &Page {
         page_cast::<Self, Page>(self)
     }
 
-    fn as_page_mut(&mut self) -> &Page {
+    fn as_page_mut(&mut self) -> &mut Page {
         page_cast_mut::<Self, Page>(self)
     }
 
-    fn cast_slice_mut<T: Pod>(&mut self) -> &[T] {
+    fn cast_slice_mut<T: Pod>(&mut self) -> &mut [T] {
         bytemuck::cast_slice_mut(std::slice::from_mut(self))
     }
     fn cast_slice<T: Pod>(&self) -> &[T] {
@@ -119,7 +119,7 @@ pub trait ToFromPageExt: ToFromPage {
     }
 }
 
-impl<T: ToFromPage> ToFromPageExt for T {}
+impl<T: ToFromPage + Pod> ToFromPageExt for T {}
 
 pub trait NodeStatic<'bm, BM: BufferManager<'bm, Page = Page>>: NodeDynamic<'bm, BM> {
     const TAG: u8;
@@ -128,15 +128,13 @@ pub trait NodeStatic<'bm, BM: BufferManager<'bm, Page = Page>>: NodeDynamic<'bm,
 pub trait NodeDynamic<'bm, BM: BufferManager<'bm, Page = Page>>: ToFromPage {
     /// fails iff parent_insert fails.
     /// if node is near empty, no split is performed and parent_insert is not called.
-    fn split<'g>(&mut self, bm: BM, parent: &mut dyn NodeDynamic<BM>) -> Result<(), ()>;
+    fn split<'g>(&mut self, bm: BM, parent: &mut dyn NodeDynamic<'bm, BM>) -> Result<(), ()>;
     fn to_debug_kv(&self) -> (Vec<Vec<u8>>, Vec<Vec<u8>>);
     fn merge(&mut self, right: &mut Page);
     fn validate(&self);
-    fn lookup_inner(&self, key: &[u8], high_on_equal: bool) -> u64;
-    fn index_child(&self, index: usize) -> u64;
     fn insert_inner(&mut self, key: &[u8], pid: PageId) -> Result<(), ()>;
     fn validate_inter_node_fences<'b>(
-        self,
+        &self,
         bm: BM,
         lb: &mut &'b mut [u8; MAX_KEY_SIZE],
         hb: &mut &'b mut [u8; MAX_KEY_SIZE],
@@ -155,13 +153,15 @@ pub fn page_id_to_bytes(p: PageId) -> [u8; PAGE_ID_LEN] {
 
 pub fn page_id_from_bytes(x: &[u8; PAGE_ID_LEN]) -> PageId {
     let mut b = [0; 8];
-    b[..PAGE_ID_LEN].copy_from_slice(&x);
+    b[..PAGE_ID_LEN].copy_from_slice(&x[..]);
     PageId(u64::from_ne_bytes(b))
 }
 
 pub fn page_id_from_olc_bytes<O: OlcErrorHandler>(x: OPtr<[u8; PAGE_ID_LEN], O>) -> PageId {
     let mut b = [0; 8];
-    b[..PAGE_ID_LEN].copy_from_slice(&x);
+    unsafe {
+        std::ptr::copy(x.to_raw() as *const u8, b.as_mut_ptr(), PAGE_ID_LEN);
+    }
     PageId(u64::from_ne_bytes(b))
 }
 
@@ -197,17 +197,17 @@ pub struct KindInner;
 #[repr(C)]
 pub struct KindLeaf;
 
-fn insert_upper_sibling<'bm, BM: BufferManager<'bm>>(
-    parent: &mut dyn NodeDynamic<BM>,
+pub fn insert_upper_sibling<'bm, BM: BufferManager<'bm, Page = Page>>(
+    parent: &mut dyn NodeDynamic<'bm, BM>,
     bm: BM,
     separator: impl SourceSlice,
 ) -> Result<BM::GuardX, ()> {
-    let (new_page, new_guard) = bm.lock_new();
+    let (new_guard, new_page) = bm.alloc();
     separator.to_stack_buffer::<MAX_KEY_SIZE, _>(|sep| {
         if let Ok(()) = parent.insert_inner(sep, new_page) {
             Ok(new_guard)
         } else {
-            new_guard.free();
+            bm.free(new_guard);
             Err(())
         }
     })
@@ -225,5 +225,9 @@ impl Page {
         self.common.upper_fence_len = ul as u16;
         lf.write_to(&mut self.cast_slice_mut()[size_of::<Self>() - ll..]);
         uf.slice_start(self.common.prefix_len as usize).write_to(&mut self.slice_mut(size_of::<Self>() - ll - ul, ul));
+    }
+
+    pub fn as_dyn_node<'bm, BM: BufferManager<'bm>>(&self) -> &dyn NodeDynamic<'bm, BM> {
+        todo!()
     }
 }

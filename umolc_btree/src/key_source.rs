@@ -6,9 +6,11 @@ pub struct TransferSourceSlice<'a> {
 }
 
 use bytemuck::{Pod, Zeroable};
+use static_assertions::assert_impl_all;
 use std::cmp::Ordering;
 use std::collections::Bound;
 use std::marker::PhantomData;
+use std::mem::MaybeUninit;
 use std::ops::RangeBounds;
 
 pub fn common_prefix(a: impl SourceSlice, b: impl SourceSlice) -> usize {
@@ -35,7 +37,8 @@ pub trait SourceSlice<T: Pod = u8>: Copy {
         SourceSlicePair(self, b, PhantomData)
     }
     fn to_stack_buffer<const SIZE: usize, R>(self, f: impl FnOnce(&mut [T]) -> R) -> R {
-        let mut buffer = <[T; SIZE]>::zeroed();
+        // SAFETY: T is pod, so it can be initialized to zeros
+        let mut buffer: [T; SIZE] = unsafe { MaybeUninit::zeroed().assume_init() };
         self.write_to(&mut buffer[..self.len()]);
         f(&mut buffer[..self.len()])
     }
@@ -44,7 +47,7 @@ pub trait SourceSlice<T: Pod = u8>: Copy {
         self.iter().collect()
     }
     fn write_suffix_to_offset(self, dst: &mut [T], offset: usize) {
-        self.slice(offset..).write_to(&mut dst.slice(offset..));
+        self.slice(offset..).write_to(&mut dst[offset..]);
     }
     fn write_to(self, dst: &mut [T]) {
         assert_eq!(self.len(), dst.len());
@@ -91,7 +94,7 @@ pub trait SourceSlice<T: Pod = u8>: Copy {
 
 impl<T: Pod> SourceSlice<T> for &'_ [T] {
     fn write_to(self, dst: &mut [T]) {
-        dst.store_slice(self)
+        dst.copy_from_slice(self)
     }
 
     fn slice_start(self, start: usize) -> Self {
@@ -117,8 +120,8 @@ pub struct SourceSlicePair<T: Pod, A: SourceSlice<T>, B: SourceSlice<T>>(A, B, P
 impl<T: Pod, A: SourceSlice<T>, B: SourceSlice<T>> SourceSlice<T> for SourceSlicePair<T, A, B> {
     fn write_to(self, dst: &mut [T]) {
         let a_len = self.0.len();
-        self.0.write_to(&mut dst.b().slice(..a_len));
-        self.1.write_to(&mut dst.b().slice(a_len..));
+        self.0.write_to(&mut dst[..a_len]);
+        self.1.write_to(&mut dst[a_len..]);
     }
 
     fn slice_start(mut self, start: usize) -> Self {
@@ -170,7 +173,7 @@ impl HeadSourceSlice {
 
 impl SourceSlice<u8> for HeadSourceSlice {
     fn write_to(self, dst: &mut [u8]) {
-        dst.store_slice(&self.array.to_be_bytes()[self.start..self.end])
+        dst.copy_from_slice(&self.array.to_be_bytes()[self.start..self.end])
     }
 
     fn slice_start(mut self, start: usize) -> Self {

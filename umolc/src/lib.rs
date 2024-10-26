@@ -1,6 +1,7 @@
 #![feature(slice_index_methods)]
 #![feature(array_ptr_get)]
 
+use bytemuck::Zeroable;
 use std::ops::{Deref, DerefMut};
 
 mod o_ptr;
@@ -12,7 +13,7 @@ pub struct OlcVersion {
     v: u64,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Zeroable)]
 pub struct PageId(pub u64);
 
 pub unsafe trait BufferManager<'bm>: 'bm + Copy + Send + Sync + Sized + OlcErrorHandler {

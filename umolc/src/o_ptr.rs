@@ -6,7 +6,6 @@ use std::cell::UnsafeCell;
 use std::cmp::Ordering;
 use std::ffi::c_void;
 use std::marker::PhantomData;
-use std::mem::transmute;
 use std::ptr::slice_from_raw_parts;
 use std::slice::SliceIndex;
 use std::sync::atomic::Ordering::Relaxed;
@@ -25,8 +24,15 @@ pub struct OPtr<'a, T: ?Sized, O: OlcErrorHandler> {
 }
 
 impl<'a, T: Pod, O: OlcErrorHandler> OPtr<'a, T, O> {
+    pub fn to_raw(self) -> *const T {
+        self.p
+    }
     pub fn from_mut(x: &'a mut T) -> Self {
         OPtr { p: x as *const T, _p: PhantomData, _bm: PhantomData }
+    }
+
+    pub unsafe fn from_raw(p: *const T) -> Self {
+        OPtr { p, _p: PhantomData, _bm: PhantomData }
     }
 
     pub fn r(self) -> T
@@ -36,23 +42,29 @@ impl<'a, T: Pod, O: OlcErrorHandler> OPtr<'a, T, O> {
         unsafe { (*(self.p as *const T::Atom)).load(Relaxed) }
     }
 
-    pub fn read_unaligned_nonatomic_u16(self, offset: usize) -> u16 {
+    pub fn read_unaligned_nonatomic_u16(self, offset: usize) -> usize {
         if offset + 2 <= size_of::<Self>() {
-            unsafe { ((self.p as *const u8).add(offset) as *const u16).read_unaligned() }
+            unsafe { ((self.p as *const u8).add(offset) as *const u16).read_unaligned() as usize }
         } else {
             O::optimistic_fail()
         }
     }
 
+    pub fn array_slice<const L: usize>(self, offset: usize) -> OPtr<'a, [u8; L], O> {
+        assert!(L <= size_of::<Self>());
+        if offset > size_of::<Self>() - L {
+            O::optimistic_fail()
+        }
+        unsafe { OPtr { p: (self.p as *const u8).add(offset) as *const [u8; L], _bm: PhantomData, _p: PhantomData } }
+    }
+
     pub fn as_slice<U: Pod>(self) -> OPtr<'a, [U], O> {
         assert_eq!(size_of::<T>() % size_of::<U>(), 0);
         assert!(align_of::<T>() >= align_of::<U>());
-        unsafe {
-            OPtr {
-                p: slice_from_raw_parts(self.p as *const U, size_of::<T>() / size_of::<U>()),
-                _p: PhantomData,
-                _bm: PhantomData,
-            }
+        OPtr {
+            p: slice_from_raw_parts(self.p as *const U, size_of::<T>() / size_of::<U>()),
+            _p: PhantomData,
+            _bm: PhantomData,
         }
     }
 
@@ -114,9 +126,9 @@ macro_rules! o_project {
     ($this:ident$(.$member:ident)+) => {
         {
             let ptr:OPtr<_,_> = $this;
-            ptr.project(|p|{
+            unsafe{ptr.project(|p|{
                 &raw const (*p)$(.$member)+
-            })
+            })}
         }
     };
 }
