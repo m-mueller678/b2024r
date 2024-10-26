@@ -461,20 +461,15 @@ impl<V: NodeKind> BasicNode<V> {
         }
     }
 
-    // fn olc_val<O:OlcErrorHandler>(this:OPtr<Self,O>,slot_index:usize)->OPtr<[u8],O>{
-    //     assert!(!V::IS_LEAF);
-    //     let slot_offset=Self::slot_offset(o_project!(this.common.count).r() as usize);
-    //     let offset = this.as_slice::<u16>()[slot_offset/2+index-1];
-    //     this.read_unaligned_nonatomic_u16(offset) + Self::RECORD_TO_KEY_OFFSET
-    //     let lower_offset =
-    //         if index == 0 {
-    //             Self::LOWER_OFFSET
-    //         } else {
-    //
-    //
-    //         };
-    //     page_id_from_olc_bytes(this.as_slice::<u8>().i(lower_offset..lower_offset+PAGE_ID_LEN))
-    // }
+    fn lookup_leaf<'a, O: OlcErrorHandler>(this: OPtr<'a, Self, O>, key: &[u8]) -> Option<OPtr<'a, [u8], O>> {
+        assert!(V::IS_LEAF);
+        let index = Self::find(this, key).ok()?;
+        let slot_offset = Self::slot_offset(o_project!(this.common.count).r() as usize);
+        let offset = this.as_slice::<u16>().i(slot_offset / 2 + index - 1).r() as usize;
+        let k_len = this.read_unaligned_nonatomic_u16(offset);
+        let v_len = this.read_unaligned_nonatomic_u16(offset + 2);
+        Some(this.as_slice().sub(offset + Self::RECORD_TO_KEY_OFFSET + k_len, v_len))
+    }
 
     fn lookup_inner<O: OlcErrorHandler>(this: OPtr<Self, O>, key: &[u8], high_on_equal: bool) -> PageId {
         assert!(!V::IS_LEAF);
@@ -655,14 +650,13 @@ const HEAD_RESERVATION: usize = 16;
 mod tests {
     use crate::basic_node::{BasicNode, NodeKind};
     use crate::key_source::SourceSlice;
-    use crate::node::{KindInner, KindLeaf, Node, ParentInserter};
-    use crate::page::{page_id_to_3x16, PageTail};
+    use crate::node::{page_id_to_bytes, KindInner, KindLeaf, PAGE_ID_LEN};
     use bytemuck::Zeroable;
     use rand::prelude::SliceRandom;
     use rand::rngs::SmallRng;
     use rand::SeedableRng;
-    use seqlock::{BmExt, DefaultBm, Exclusive, Guard, Guarded};
     use std::collections::HashSet;
+    use umolc::{OPtr, PageId};
 
     #[test]
     #[allow(clippy::unused_enumerate_index)]
@@ -673,10 +667,9 @@ mod tests {
         keys.sort();
         keys.dedup();
         let leaf = &mut BasicNode::<KindLeaf>::zeroed();
-        let mut leaf = Guarded::<Exclusive, _>::wrap_mut(leaf);
         for (_k, keys) in dev_utils::subslices(&keys, 5).enumerate() {
             let kc = keys.len();
-            leaf.init(keys[1].as_slice(), keys[kc - 2].as_slice(), [0; 3]);
+            leaf.init(keys[1].as_slice(), keys[kc - 2].as_slice(), None);
             let insert_range = 2..kc - 2;
             let mut to_insert: Vec<&[u8]> = keys[insert_range.clone()].iter().map(|x| x.as_slice()).collect();
             let mut inserted = HashSet::new();
@@ -684,7 +677,7 @@ mod tests {
                 to_insert.shuffle(rng);
                 for (_i, &k) in to_insert.iter().enumerate() {
                     if p != 2 {
-                        if leaf.insert_leaf(k, k).is_ok() {
+                        if leaf.insert(k, k).is_ok() {
                             inserted.insert(k);
                         }
                     } else {
@@ -695,67 +688,29 @@ mod tests {
                 }
                 for (_i, k) in keys.iter().enumerate() {
                     let expected = Some(k).filter(|_| inserted.contains(k.as_slice()));
-                    let actual = leaf.s().lookup_leaf(k).map(|v| v.load_slice_to_vec());
+                    let actual =
+                        BasicNode::<KindLeaf>::lookup_leaf(OPtr::from_mut(leaf), &k[..]).map(|v| v.load_slice_to_vec());
                     assert_eq!(expected, actual.as_ref());
                 }
             }
         }
     }
 
-    fn split_merge<V: NodeKind>(ufb: u8, lower: [V::SliceType; 3], mut val: impl FnMut(u64) -> Vec<V::SliceType>) {
-        let bm = &DefaultBm::new_with_page_count(2);
-        struct FakeParent<'bm>(Option<(Vec<u8>, u64)>, &'bm DefaultBm<PageTail>);
-
-        #[allow(non_local_definitions)]
-        impl<'bm> ParentInserter<'bm, &'bm DefaultBm<PageTail>> for &mut FakeParent<'bm> {
-            fn insert_upper_sibling(
-                self,
-                separator: impl SourceSlice,
-            ) -> Result<Guard<'bm, &'bm DefaultBm<PageTail>, Exclusive, PageTail>, ()> {
-                assert!(self.0.is_none());
-                let (id, g) = self.1.lock_new();
-                self.0 = Some((separator.to_vec(), id));
-                Ok(g)
-            }
-        }
-
-        let (_, mut ne1) = bm.lock_new();
-        let mut fake_parent = FakeParent(None, bm);
-        let mut n1 = ne1.b().0.cast::<BasicNode<V>>();
-        n1.init(&[0][..], &[ufb, 1][..], lower);
-        for i in 0u64.. {
-            if n1.insert(&i.to_be_bytes()[..], &val(i)).is_err() {
-                break;
-            }
-        }
-        let s1 = n1.s().to_debug();
-        Node::split(&mut n1, &mut fake_parent, &[0]).unwrap();
-        let p2 = fake_parent.0.as_ref().unwrap().1;
-        let mut ne2 = bm.lock_exclusive(p2);
-        let mut n2 = ne2.b().0.cast::<BasicNode<V>>();
-        Node::validate(n1.s());
-        Node::validate(n2.s());
-        let sep_key = &fake_parent.0.as_ref().unwrap().0;
-        assert_eq!(&n1.s().upper_fence().load_slice_to_vec(), sep_key);
-        assert_eq!(&n2.s().lower_fence().load_slice_to_vec(), sep_key);
-        Node::merge(&mut n1, &mut n2, &[0]);
-        Node::validate(n1.s());
-        assert_eq!(s1, n1.s().to_debug());
-        ne1.free();
-        ne2.free();
+    fn split_merge<V: NodeKind>(_ufb: u8, _lower: [u8; PAGE_ID_LEN], _val: impl FnMut(u64) -> Vec<u8>) {
+        todo!()
     }
 
     #[test]
     fn split_merge_leaf() {
         let val = |i: u64| i.to_be_bytes().to_vec();
-        split_merge::<KindLeaf>(1, [0; 3], val);
-        split_merge::<KindLeaf>(0, [0; 3], val);
+        split_merge::<KindLeaf>(1, [0; PAGE_ID_LEN], val);
+        split_merge::<KindLeaf>(0, [0; PAGE_ID_LEN], val);
     }
 
     #[test]
     fn split_merge_inner() {
-        let fake_pid = |i| page_id_to_3x16(i + 1024).to_vec();
-        split_merge::<KindInner>(1, [0; 3], fake_pid);
-        split_merge::<KindInner>(0, [0; 3], fake_pid);
+        let fake_pid = |i| page_id_to_bytes(PageId(i + 1024)).to_vec();
+        split_merge::<KindInner>(1, [0; PAGE_ID_LEN], fake_pid);
+        split_merge::<KindInner>(0, [0; PAGE_ID_LEN], fake_pid);
     }
 }

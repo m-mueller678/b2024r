@@ -91,10 +91,7 @@ impl<'a, T: Pod, O: OlcErrorHandler> OPtr<'a, [T], O> {
     }
 
     pub fn sub(self, offset: usize, len: usize) -> OPtr<'a, [T], O> {
-        if offset + len > self.p.len() {
-            O::optimistic_fail()
-        }
-        Self { p: unsafe { slice_from_raw_parts((self.p as *const T).add(offset), len) }, ..self }
+        self.i(offset..offset + len)
     }
 
     #[allow(clippy::len_without_is_empty)]
@@ -113,6 +110,12 @@ impl<O: OlcErrorHandler> OPtr<'_, [u8], O> {
     pub fn load_bytes(self, dst: &mut [u8]) {
         assert_eq!(self.p.len(), dst.len());
         unsafe { std::ptr::copy(self.p as *const u8, dst.as_mut_ptr(), self.p.len()) }
+    }
+
+    pub fn load_slice_to_vec(self) -> Vec<u8> {
+        let mut dst = vec![0u8; self.p.len()];
+        self.load_bytes(&mut dst);
+        dst
     }
 
     pub fn mem_cmp(self, other: &[u8]) -> Ordering {
