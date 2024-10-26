@@ -1,10 +1,9 @@
-use crate::key_source::{common_prefix, HeadSourceSlice, SourceSlice, SourceSlicePair};
+use crate::key_source::{common_prefix, SourceSlice, SourceSlicePair};
 use crate::MAX_KEY_SIZE;
 use bytemuck::{Pod, Zeroable};
 use static_assertions::{assert_impl_all, const_assert_eq};
 use std::fmt::Debug;
 use std::mem::transmute;
-use std::ops::Deref;
 use umolc::{BufferManager, OPtr, OlcErrorHandler, PageId};
 
 pub mod node_tag {
@@ -54,7 +53,7 @@ pub struct DebugNode<V> {
 #[macro_export]
 macro_rules! impl_to_from_page {
     ($t:ty) => {
-        static_assertions::assert_eq_size!($t, crate::node::Page);
+        static_assertions::assert_eq_size!($t, $crate::node::Page);
         static_assertions::assert_eq_align!($t, crate::node::Page);
         static_assertions::assert_impl_all!($t: bytemuck::Pod);
         unsafe impl crate::node::ToFromPage for $t {}
@@ -224,7 +223,7 @@ impl Page {
         self.common.lower_fence_len = ll as u16;
         self.common.upper_fence_len = ul as u16;
         lf.write_to(&mut self.cast_slice_mut()[size_of::<Self>() - ll..]);
-        uf.slice_start(self.common.prefix_len as usize).write_to(&mut self.slice_mut(size_of::<Self>() - ll - ul, ul));
+        uf.slice_start(self.common.prefix_len as usize).write_to(self.slice_mut(size_of::<Self>() - ll - ul, ul));
     }
 
     pub fn as_dyn_node<'bm, BM: BufferManager<'bm>>(&self) -> &dyn NodeDynamic<'bm, BM> {

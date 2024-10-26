@@ -1,8 +1,7 @@
 use crate::key_source::{common_prefix, key_head, HeadSourceSlice, SourceSlice, SourceSlicePair};
 use crate::node::{
-    insert_upper_sibling, node_tag, page_cast, page_cast_mut, page_id_from_bytes, page_id_from_olc_bytes,
-    page_id_to_bytes, CommonNodeHead, NodeDynamic, NodeKind, NodeStatic, Page, ToFromPage, ToFromPageExt, PAGE_ID_LEN,
-    PAGE_SIZE,
+    insert_upper_sibling, node_tag, page_cast_mut, page_id_from_bytes, page_id_from_olc_bytes, page_id_to_bytes,
+    CommonNodeHead, NodeDynamic, NodeKind, NodeStatic, Page, ToFromPage, ToFromPageExt, PAGE_ID_LEN, PAGE_SIZE,
 };
 use crate::util::Supreme;
 use crate::{impl_to_from_page, MAX_KEY_SIZE};
@@ -10,12 +9,10 @@ use bstr::{BStr, BString};
 use bytemuck::{Pod, Zeroable};
 use indxvec::Search;
 use itertools::Itertools;
-use static_assertions::{const_assert, const_assert_eq};
 use std::fmt::{Debug, Formatter};
 use std::marker::PhantomData;
-use std::mem::{align_of, offset_of, size_of, swap};
+use std::mem::{offset_of, size_of, swap};
 use std::ops::Range;
-use std::ptr::addr_of_mut;
 use umolc::{o_project, BufferManager, BufferManagerGuard, OPtr, OlcErrorHandler, PageId};
 
 const HINT_COUNT: usize = 16;
@@ -201,7 +198,7 @@ impl<V: NodeKind> BasicNode<V> {
         }
         let key_position = (matching_head_range.start..=matching_head_range.end - 1).binary_by(move |i| {
             let offset = slots.i(i).r() as usize;
-            let len = this.read_unaligned_nonatomic_u16(offset) as usize;
+            let len = this.read_unaligned_nonatomic_u16(offset);
             let tail = this.as_slice::<u8>().sub(offset + Self::RECORD_TO_KEY_OFFSET, len.saturating_sub(4));
             if len <= 4 || truncated.len() <= 4 {
                 len.cmp(&truncated.len())
@@ -227,7 +224,7 @@ impl<V: NodeKind> BasicNode<V> {
         let dpl = dst.common.prefix_len as usize;
         let spl = self.common.prefix_len as usize;
         let restore_prefix: &[u8] = if dpl < spl { &self.as_page().prefix()[dpl..] } else { &[][..] };
-        let prefix_grow = if dpl > spl { dpl - spl } else { 0 };
+        let prefix_grow = dpl.saturating_sub(spl);
         for (src_i, dst_i) in src_range.clone().zip(dst_range.clone()) {
             let key = restore_prefix.join(self.key_combined(src_i).slice(prefix_grow..));
             dst.heap_write_new(key, self.val(src_i), dst_i);
@@ -236,7 +233,7 @@ impl<V: NodeKind> BasicNode<V> {
     }
 
     /// returns the number of keys in the low node and the separator
-    fn find_separator<'a>(&'a self) -> (usize, impl SourceSlice<u8> + 'a) {
+    fn find_separator(&self) -> (usize, impl SourceSlice<u8> + '_) {
         let prefix_len = self.common.prefix_len as usize;
         let count = self.common.count as usize;
         if V::IS_LEAF {
@@ -323,7 +320,7 @@ impl<V: NodeKind> BasicNode<V> {
     fn compactify(&mut self) {
         let buffer = &mut [0u8; PAGE_SIZE];
         let heap_end = self.fences_start();
-        let mut dst_offset = heap_end;
+        let dst_offset = heap_end;
         for i in 0..self.common.count as usize {
             let offset = self.slots()[i] as usize;
             let val_len = if V::IS_LEAF { self.u16(offset + 2) } else { PAGE_ID_LEN };
@@ -543,7 +540,7 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>, V: NodeKind> NodeDynamic<'bm, BM>
         bm: BM,
         lb: &mut &'b mut [u8; MAX_KEY_SIZE],
         hb: &mut &'b mut [u8; MAX_KEY_SIZE],
-        mut ll: usize,
+        ll: usize,
         mut hl: usize,
     ) {
         let pl = self.common.prefix_len as usize;

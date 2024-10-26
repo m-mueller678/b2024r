@@ -6,7 +6,6 @@ pub struct TransferSourceSlice<'a> {
 }
 
 use bytemuck::{Pod, Zeroable};
-use static_assertions::assert_impl_all;
 use std::cmp::Ordering;
 use std::collections::Bound;
 use std::marker::PhantomData;

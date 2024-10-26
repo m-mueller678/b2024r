@@ -16,7 +16,7 @@ pub struct OlcVersion {
 #[derive(Debug, Zeroable)]
 pub struct PageId(pub u64);
 
-pub unsafe trait BufferManager<'bm>: 'bm + Copy + Send + Sync + Sized + OlcErrorHandler {
+pub trait BufferManager<'bm>: 'bm + Copy + Send + Sync + Sized + OlcErrorHandler {
     type Page;
     type GuardO: BufferManagerGuard<'bm, Self>
         + OptimisticGuard<Self::Page, Self>

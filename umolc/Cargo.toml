@@ -5,5 +5,5 @@ edition = "2021"
 
 [dependencies]
 radium = "1.1.0"
-bytemuck = "1.19.0"
+bytemuck = { version = "1.19.0",features = ["derive"] }
 libc = "0.2.161"
