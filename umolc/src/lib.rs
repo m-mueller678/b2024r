@@ -5,7 +5,9 @@ use bytemuck::Zeroable;
 use std::ops::{Deref, DerefMut};
 
 mod o_ptr;
+mod unwind;
 
+use self::unwind::{OlcErrorHandler, OptimisticError};
 pub use o_ptr::OPtr;
 
 #[derive(Eq, PartialEq)]
@@ -13,7 +15,7 @@ pub struct OlcVersion {
     v: u64,
 }
 
-#[derive(Debug, Zeroable)]
+#[derive(Debug, Zeroable, Copy, Clone)]
 pub struct PageId(pub u64);
 
 pub trait BufferManager<'bm>: 'bm + Copy + Send + Sync + Sized + OlcErrorHandler {
@@ -30,9 +32,27 @@ pub trait BufferManager<'bm>: 'bm + Copy + Send + Sync + Sized + OlcErrorHandler
     fn free(self, g: Self::GuardX);
 }
 
-pub trait OlcErrorHandler {
-    fn optimistic_fail() -> !;
+pub trait BufferManagerExt<'bm>: BufferManager<'bm> {
+    fn repeat<R>(mut f: impl FnMut() -> R) -> R {
+        loop {
+            if let Ok(x) = Self::catch(&mut f) {
+                return x;
+            }
+        }
+    }
+
+    fn lock_optimistic(self, pid: PageId) -> Self::GuardO {
+        Self::GuardO::acquire_wait(self, pid)
+    }
+    fn lock_shared(self, pid: PageId) -> Self::GuardS {
+        Self::GuardS::acquire_wait(self, pid)
+    }
+    fn lock_exclusive(self, pid: PageId) -> Self::GuardX {
+        Self::GuardX::acquire_wait(self, pid)
+    }
 }
+
+impl<'bm, BM: BufferManager<'bm>> BufferManagerExt<'bm> for BM {}
 
 pub trait BufferManagerGuard<'bm, B: BufferManager<'bm>>: Sized {
     fn acquire_wait(bm: B, page_id: PageId) -> Self;
@@ -45,5 +65,5 @@ pub trait OptimisticGuard<T, O: OlcErrorHandler> {
 }
 
 pub trait BufferManageGuardUpgrade<'bm, B: BufferManager<'bm>, Target>: Sized {
-    fn try_upgrade(self) -> Result<Target, Self>;
+    fn upgrade_wait(self) -> Target;
 }

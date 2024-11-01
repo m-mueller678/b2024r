@@ -1,10 +1,12 @@
-use crate::key_source::{common_prefix, SourceSlice, SourceSlicePair};
+use crate::key_source::{common_prefix, HeadSourceSlice, SourceSlice, SourceSlicePair};
 use crate::MAX_KEY_SIZE;
+use bstr::BStr;
 use bytemuck::{Pod, Zeroable};
 use static_assertions::{assert_impl_all, const_assert_eq};
 use std::fmt::Debug;
-use std::mem::transmute;
-use umolc::{BufferManager, OPtr, OlcErrorHandler, PageId};
+use std::mem::{swap, transmute};
+use umolc::unwind::OlcErrorHandler;
+use umolc::{BufferManager, BufferManagerExt, OPtr, PageId};
 
 pub mod node_tag {
     pub const METADATA_MARKER: u8 = 43;
@@ -78,6 +80,14 @@ pub trait ToFromPageExt: ToFromPage + Pod {
         page_cast_mut::<Self, Page>(self)
     }
 
+    fn cast<T: ToFromPage>(&self) -> &T {
+        page_cast(self)
+    }
+
+    fn cast_mut<T: ToFromPage>(&mut self) -> &mut T {
+        page_cast_mut(self)
+    }
+
     fn cast_slice_mut<T: Pod>(&mut self) -> &mut [T] {
         bytemuck::cast_slice_mut(std::slice::from_mut(self))
     }
@@ -122,9 +132,44 @@ impl<T: ToFromPage + Pod> ToFromPageExt for T {}
 
 pub trait NodeStatic<'bm, BM: BufferManager<'bm, Page = Page>>: NodeDynamic<'bm, BM> {
     const TAG: u8;
+    const IS_INNER: bool;
+    type TruncatedKey<'a>: SourceSlice + 'a;
+    /// first returns lower with empty slice, then pairs
+    /// keys are prefix truncated
+    fn iter_children(&self) -> impl Iterator<Item = (Self::TruncatedKey, PageId)>;
+    fn iter_children_interleave(&self) -> impl Iterator<Item = Result<Self::TruncatedKey, PageId>> {
+        struct InterleaveIter<IT> {
+            iter: IT,
+            next_page: PageId,
+            state: usize,
+        }
+
+        impl<K, IT: Iterator<Item = (K, PageId)>> Iterator for InterleaveIter<IT> {
+            type Item = Result<PageId, K>;
+
+            fn next(&mut self) -> Option<Self::Item> {
+                if self.state == 2 {
+                    let (k, p) = self.iter.next()?;
+                    self.state = 0;
+                    Some(Ok(p))
+                } else if self.state == 0 {
+                    let (k, p) = self.iter.next()?;
+                    self.state = 1;
+                    self.next_page = p;
+                    Some(Err(k))
+                } else {
+                    debug_assert!(self.state == 1);
+                    self.state = 0;
+                    Some(Ok(self.next_page))
+                }
+            }
+        }
+
+        InterleaveIter { iter: self }
+    }
 }
 
-pub trait NodeDynamic<'bm, BM: BufferManager<'bm, Page = Page>>: ToFromPage {
+pub trait NodeDynamic<'bm, BM: BufferManager<'bm, Page = Page>>: ToFromPage + NodeDynamicAuto<'bm, BM> {
     /// fails iff parent_insert fails.
     /// if node is near empty, no split is performed and parent_insert is not called.
     fn split<'g>(&mut self, bm: BM, parent: &mut dyn NodeDynamic<'bm, BM>) -> Result<(), ()>;
@@ -132,6 +177,12 @@ pub trait NodeDynamic<'bm, BM: BufferManager<'bm, Page = Page>>: ToFromPage {
     fn merge(&mut self, right: &mut Page);
     fn validate(&self);
     fn insert_inner(&mut self, key: &[u8], pid: PageId) -> Result<(), ()>;
+    fn leaf_remove(&mut self, k: &[u8]) -> Option<()>;
+    fn is_inner(&self) -> bool;
+}
+
+pub trait NodeDynamicAuto<'bm, BM: BufferManager<'bm, Page = Page>> {
+    fn free_children(&mut self, bm: BM);
     fn validate_inter_node_fences<'b>(
         &self,
         bm: BM,
@@ -139,7 +190,58 @@ pub trait NodeDynamic<'bm, BM: BufferManager<'bm, Page = Page>>: ToFromPage {
         hb: &mut &'b mut [u8; MAX_KEY_SIZE],
         ll: usize,
         hl: usize,
-    );
+    ) {
+        let pl = self.as_page().common.prefix_len as usize;
+        let pl_limit = pl <= ll && pl <= hl;
+        let pl = if pl_limit { pl } else { 0 };
+        let lf = self.lower_fence() == &lb[..ll];
+        let uf = self.upper_fence_tail() == &hb[pl..hl];
+        let pf = self.prefix() == &hb[..pl];
+        assert!(
+            pl_limit && lf && uf && pf,
+            "inter node validation failed.\n\
+            prefix limit:{pl},\nprefix:{pf},\nlower fence:{lf},\nupper fence:{uf},\n\
+            expected upper: {:?},\nexpected lower: {:?},\nnode:\n{:?}",
+            BStr::new(&lb[..ll]),
+            BStr::new(&hb[..hl]),
+            self
+        );
+        if !Self::IS_INNER {
+            return;
+        }
+        let common = &self.as_page().common;
+        let prefix = common.prefix_len as usize;
+        let count = common.count as usize;
+        for (child, key) in self.iter_children() {
+            key.write_to(&mut hb[prefix..][..key.len()]);
+            hl = k.len() + prefix;
+        }
+        for (i, k) in (0..count)
+            .map(|i| self.key_combined(i))
+            .chain(std::iter::once(HeadSourceSlice::empty().join(self.upper_fence_tail())))
+            .enumerate()
+        {
+            let htmp = hb[..hl].to_vec();
+            let child = BM::GuardS::acquire_wait(bm, todo!());
+            child.as_dyn_node().validate_inter_node_fences(bm, lb, hb, ll, hl);
+            assert_eq!(&hb[..hl], htmp);
+            swap(hb, lb);
+            ll = hl;
+        }
+        swap(hb, lb);
+    }
+}
+
+impl<'bm, BM: BufferManager<'bm, Page = Page>, N: NodeStatic<'bm, BM>> NodeDynamicAuto<'bm, BM> for N {
+    fn free_children(&mut self, bm: BM) {
+        if (!Self::IS_INNER) {
+            return;
+        }
+        for (_key, child) in self.iter_children() {
+            let mut child = bm.lock_exclusive(child);
+            child.as_dyn_node_mut().free_children(bm);
+        }
+    }
 }
 
 pub const PAGE_ID_LEN: usize = 5;
@@ -227,6 +329,9 @@ impl Page {
     }
 
     pub fn as_dyn_node<'bm, BM: BufferManager<'bm>>(&self) -> &dyn NodeDynamic<'bm, BM> {
+        todo!()
+    }
+    pub fn as_dyn_node_mut<'bm, BM: BufferManager<'bm>>(&mut self) -> &mut dyn NodeDynamic<'bm, BM> {
         todo!()
     }
 }

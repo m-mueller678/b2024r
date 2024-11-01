@@ -1,53 +1,50 @@
 use crate::basic_node::{BasicInner, BasicLeaf, BasicNode};
 use crate::key_source::SourceSlice;
-use crate::node::{node_tag, CommonNodeHead, KindInner, Node, ParentInserter};
-use crate::page::{page_id_to_3x16, PageId, PageTail, PAGE_TAIL_SIZE};
-use crate::{MAX_KEY_SIZE, W};
+use crate::node::{
+    node_tag, page_cast, page_cast_mut, CommonNodeHead, KindInner, KindLeaf, NodeDynamic, NodeStatic, Page,
+    ToFromPageExt, PAGE_SIZE,
+};
+use crate::util::PodPad;
+use crate::{impl_to_from_page, MAX_KEY_SIZE};
 use bytemuck::{Pod, Zeroable};
-use seqlock::{BmExt, BufferManager, Exclusive, Guard, Guarded, Optimistic, SeqlockAccessors};
 use std::marker::PhantomData;
 use std::mem::size_of;
+use umolc::{BufferManageGuardUpgrade, BufferManager, BufferManagerExt, BufferManagerGuard, OPtr, PageId};
 
-pub struct Tree<'bm, BM: BufferManager<'bm, Page = PageTail>> {
-    meta: u64,
+pub struct Tree<'bm, BM: BufferManager<'bm, Page = Page>> {
+    meta: PageId,
     bm: BM,
     _p: PhantomData<&'bm BM>,
 }
 
-impl<'bm, BM: BufferManager<'bm, Page = PageTail>> Tree<'bm, BM> {
+impl<'bm, BM: BufferManager<'bm, Page = Page>> Tree<'bm, BM> {
     pub fn new(bm: BM) -> Self {
-        let (meta_id, mut meta_guard) = bm.lock_new();
-        let (root_id, mut root_guard) = bm.lock_new();
+        let (mut meta_guard, meta_id) = bm.alloc();
+        let (mut root_guard, root_id) = bm.lock_new();
         {
-            let mut meta = meta_guard.b().0.cast::<MetadataPage>();
-            meta.b().root_mut().store(root_id);
-            meta.node_head_mut().tag_mut().store(node_tag::METADATA_MARKER);
+            let mut meta = page_cast_mut::<_, MetadataPage>(&mut *meta_guard);
+            meta.root = root_id;
+            meta.node_head.tag = node_tag::METADATA_MARKER;
         }
-        root_guard.b().0.cast::<BasicLeaf>().init(&[][..], &[][..], [0u8; 3]);
+        page_cast_mut::<_, BasicNode<KindLeaf>>(&mut *root_guard).init(&[], &[], None);
         Tree { meta: meta_id, bm, _p: PhantomData }
     }
 
-    fn validate_fences_exclusive(&self) {
+    fn validate_fences(&self) {
         if !cfg!(feature = "validate_tree") {
             return;
         }
         let mut low_buffer = [0u8; MAX_KEY_SIZE];
         let mut high_buffer = [0u8; MAX_KEY_SIZE];
-        let meta = self.bm.lock_exclusive(self.meta);
-        let mut root = self.bm.lock_exclusive(meta.s().cast::<MetadataPage>().root().load());
+        let meta = self.bm.lock_shared(self.meta);
+        let root = self.bm.lock_shared(page_cast::<_, MetadataPage>(&*meta).root);
         drop(meta);
-        root.b().0.cast::<BasicInner>().validate_inter_node_fences(
-            self.bm,
-            &mut &mut low_buffer,
-            &mut &mut high_buffer,
-            0,
-            0,
-        );
+        root.as_dyn_node().validate_inter_node_fences(self.bm, &mut &mut low_buffer, &mut &mut high_buffer, 0, 0)
     }
 
     pub fn remove(&self, k: &[u8]) -> Option<()> {
         let mut removed = false;
-        seqlock::unwind::repeat(|| {
+        BM::repeat(|| {
             self.try_remove(k, &mut removed);
         });
         if removed {
@@ -59,8 +56,8 @@ impl<'bm, BM: BufferManager<'bm, Page = PageTail>> Tree<'bm, BM> {
 
     fn try_remove(&self, k: &[u8], removed: &mut bool) {
         let [parent, node] = self.descend(k, None);
-        let mut node = node.upgrade();
-        if node.b().node_cast::<BasicLeaf>().remove(k).is_some() {
+        let mut node = node.upgrade_wait();
+        if node.as_dyn_node_mut() > ().leaf_remove(k).is_some() {
             *removed = true;
         }
         parent.release_unchecked();
@@ -68,12 +65,12 @@ impl<'bm, BM: BufferManager<'bm, Page = PageTail>> Tree<'bm, BM> {
     }
 
     pub fn insert(&self, k: &[u8], val: &[u8]) -> Option<()> {
-        let x = seqlock::unwind::repeat(|| self.try_insert(k, val));
+        let x = BM::repeat(|| self.try_insert(k, val));
         self.validate_fences_exclusive();
         x
     }
 
-    fn descend(&self, k: &[u8], stop_at: Option<PageId>) -> [Guard<'bm, BM, Optimistic, PageTail>; 2] {
+    fn descend(&self, k: &[u8], stop_at: Option<PageId>) -> [BM::GuardO; 2] {
         let mut parent = self.bm.lock_optimistic(self.meta);
         let mut node_pid = parent.s().cast::<MetadataPage>().root().load();
         parent.check(); // check here so we do not attempt to lock wrong page id
@@ -82,7 +79,7 @@ impl<'bm, BM: BufferManager<'bm, Page = PageTail>> Tree<'bm, BM> {
         while node.s().common().tag().load() == node_tag::BASIC_INNER && Some(node_pid) != stop_at {
             parent.release_unchecked();
             parent = node;
-            node_pid = parent.node_cast::<BasicInner>().lookup_inner(k, true);
+            node_pid = BasicNode::<KindInner>::lookup_inner(parent.cast::<BasicNode<KindInner>>(), k, true);
             parent.check(); // check here so we do not attempt to lock wrong page id
             node = self.bm.lock_optimistic(node_pid);
             parent.check(); // check here again to ensure node is still the same child
@@ -123,7 +120,7 @@ impl<'bm, BM: BufferManager<'bm, Page = PageTail>> Tree<'bm, BM> {
         }
     }
 
-    fn ensure_parent_not_root(&self, parent: &mut Guard<'bm, BM, Exclusive, PageTail>) {
+    fn ensure_parent_not_root(&self, parent: &mut BM::GuardX) {
         if self.bm.page_id(parent.page_address()) == self.meta {
             let mut meta = parent.b().0.cast::<MetadataPage>();
             let (new_root_id, mut new_root_guard) = self.bm.lock_new();
@@ -167,39 +164,40 @@ impl<'bm, BM: BufferManager<'bm, Page = PageTail>> Tree<'bm, BM> {
     }
 
     pub fn lookup_to_vec(&self, k: &[u8]) -> Option<Vec<u8>> {
-        seqlock::unwind::repeat(|| self.try_lookup(k).map(|v| v.load_slice_to_vec()))
+        BM::repeat(|| self.try_lookup(k).map(|v| v.load_slice_to_vec()))
     }
 
-    pub fn lookup_inspect<R>(&self, k: &[u8], mut f: impl FnMut(Option<Guard<'bm, BM, Optimistic, [u8]>>) -> R) -> R {
-        seqlock::unwind::repeat(move || f(self.try_lookup(k)))
+    pub fn lookup_inspect<R>(&self, k: &[u8], mut f: impl FnMut(OPtr<[u8], BM>) -> R) -> R {
+        BM::repeat(move || f(self.try_lookup(k)))
     }
 
-    pub fn try_lookup(&self, k: &[u8]) -> Option<Guard<'bm, BM, Optimistic, [u8]>> {
+    pub fn try_lookup(&self, k: &[u8]) -> Option<(BM::GuardO, OPtr<[u8], BM>)> {
         let [parent, node] = self.descend(k, None);
         drop(parent);
-        let key: Guarded<'bm, _, _> = node.node_cast::<BasicLeaf>().lookup_leaf(k)?;
-        Some(unsafe { node.map(|_| key) })
+        let val = BasicLeaf::lookup_leaf(node, k)?;
+        Some((node, val))
     }
 
-    fn split_locked_node<N: Node>(
+    fn split_locked_node(
+        &self,
         k: &[u8],
-        leaf: &mut W<Guarded<'_, Exclusive, N>>,
-        parent: W<Guarded<Exclusive, BasicNode<KindInner>>>,
-        bm: BM,
+        node: &mut dyn NodeDynamic<'bm, BM>,
+        parent: &mut dyn NodeDynamic<'bm, BM>,
     ) -> Result<(), ()> {
-        N::split(leaf, (parent, bm), k)
+        //TODO inline
+        node.split(self.bm, parent)
     }
 
-    pub fn lock_path(&self, key: &[u8]) -> Vec<Guard<'bm, BM, Exclusive, PageTail>> {
+    pub fn lock_path(&self, key: &[u8]) -> Vec<BM::GuardS> {
         let mut path = Vec::new();
         let mut node = {
-            let parent = self.bm.lock_exclusive(self.meta);
-            let node_pid = parent.s().cast::<MetadataPage>().root().load();
+            let parent = self.bm.lock_shared(self.meta);
+            let node_pid = parent.cast::<MetadataPage>().root;
             path.push(parent);
-            self.bm.lock_exclusive(node_pid)
+            self.bm.lock_shared(node_pid)
         };
-        while node.s().common().tag().load() == node_tag::BASIC_INNER {
-            let node_pid = node.s().node_cast::<BasicInner>().optimistic().lookup_inner(key, true);
+        while node.is_inner() {
+            let node_pid = BasicInner::lookup_inner(OPtr::node, key, true);
             path.push(node);
             node = self.bm.lock_exclusive(node_pid);
         }
@@ -208,13 +206,13 @@ impl<'bm, BM: BufferManager<'bm, Page = PageTail>> Tree<'bm, BM> {
     }
 }
 
-impl<'bm, BM: BufferManager<'bm, Page = PageTail>> Drop for Tree<'bm, BM> {
+impl<'bm, BM: BufferManager<'bm, Page = Page>> Drop for Tree<'bm, BM> {
     fn drop(&mut self) {
-        fn free_recursive<'bm, BM: BufferManager<'bm, Page = PageTail>>(bm: BM, p: PageId) {
+        fn free_recursive<'bm, BM: BufferManager<'bm, Page = Page>>(bm: BM, p: PageId) {
             let node = bm.lock_exclusive(p);
-            if node.tag().load() == BasicInner::TAG {
+            if node.as_dyn_node().is_inner() {
                 let node = node.optimistic().node_cast::<BasicInner>();
-                for i in 0..node.count().load() as usize {
+                for i in 0..node.common.count as usize {
                     free_recursive(bm, node.index_child(i))
                 }
             }
@@ -226,16 +224,53 @@ impl<'bm, BM: BufferManager<'bm, Page = PageTail>> Drop for Tree<'bm, BM> {
     }
 }
 
-#[derive(SeqlockAccessors, Pod, Zeroable, Copy, Clone)]
+#[derive(Pod, Zeroable, Copy, Clone)]
 #[repr(C)]
-#[seq_lock_wrapper(crate::W)]
 struct MetadataPage {
-    // for debugging
     node_head: CommonNodeHead,
-    #[seq_lock_skip_accessor]
-    _pad: [u8; PAGE_TAIL_SIZE - 8 - size_of::<CommonNodeHead>()],
+    _pad1: [u8; (8 - size_of::<CommonNodeHead>() % 8) % 8],
     root: PageId,
+    _pad2: PodPad<{ PAGE_SIZE - size_of::<CommonNodeHead>() - 8 - (8 - size_of::<CommonNodeHead>() % 8) % 8 }>,
 }
+
+impl<'bm, BM: BufferManager<'bm>> NodeStatic<'bm, BM> for MetadataPage {
+    const TAG: u8 = node_tag::METADATA_MARKER;
+    const IS_INNER: bool = true;
+
+    fn iter_children(&self) -> impl Iterator<Item = (&[u8], PageId)> {
+        std::iter::once((&[], self.root))
+    }
+}
+
+impl<'bm, BM: BufferManager<'bm>> NodeDynamic<'bm, BM> for MetadataPage {
+    fn split<'g>(&mut self, bm: BM, parent: &mut dyn NodeDynamic<'bm, BM>) -> Result<(), ()> {
+        unimplemented!()
+    }
+
+    fn to_debug_kv(&self) -> (Vec<Vec<u8>>, Vec<Vec<u8>>) {
+        todo!()
+    }
+
+    fn merge(&mut self, right: &mut Page) {
+        unimplemented!()
+    }
+
+    fn validate(&self) {}
+
+    fn insert_inner(&mut self, key: &[u8], pid: PageId) -> Result<(), ()> {
+        unimplemented!()
+    }
+
+    fn leaf_remove(&mut self, k: &[u8]) -> Option<()> {
+        todo!()
+    }
+
+    fn is_inner(&self) -> bool {
+        todo!()
+    }
+}
+
+impl_to_from_page!(MetadataPage);
 
 #[derive(Ord, PartialOrd, Eq, PartialEq)]
 pub enum Supreme<T> {

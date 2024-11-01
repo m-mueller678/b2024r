@@ -1,7 +1,8 @@
 use crate::key_source::{common_prefix, key_head, HeadSourceSlice, SourceSlice, SourceSlicePair};
 use crate::node::{
     insert_upper_sibling, node_tag, page_cast_mut, page_id_from_bytes, page_id_from_olc_bytes, page_id_to_bytes,
-    CommonNodeHead, NodeDynamic, NodeKind, NodeStatic, Page, ToFromPage, ToFromPageExt, PAGE_ID_LEN, PAGE_SIZE,
+    CommonNodeHead, KindInner, KindLeaf, NodeDynamic, NodeKind, NodeStatic, Page, ToFromPage, ToFromPageExt,
+    PAGE_ID_LEN, PAGE_SIZE,
 };
 use crate::util::Supreme;
 use crate::{impl_to_from_page, MAX_KEY_SIZE};
@@ -13,7 +14,8 @@ use std::fmt::{Debug, Formatter};
 use std::marker::PhantomData;
 use std::mem::{offset_of, size_of, swap};
 use std::ops::Range;
-use umolc::{o_project, BufferManager, BufferManagerGuard, OPtr, OlcErrorHandler, PageId};
+use umolc::unwind::OlcErrorHandler;
+use umolc::{o_project, BufferManager, BufferManagerGuard, OPtr, PageId};
 
 const HINT_COUNT: usize = 16;
 const MIN_HINT_SPACING: usize = 3;
@@ -58,6 +60,9 @@ def_basic_node! {
     hints: [u32; HINT_COUNT],
     _data: BasicNodeDataArea,
 }
+
+pub type BasicLeaf = BasicNode<KindLeaf>;
+pub type BasicInner = BasicNode<KindInner>;
 
 const BASIC_NODE_DATA_SIZE: usize = (PAGE_SIZE - size_of::<CommonNodeHead>() - 2 * 2 - 16 * 4) / 4;
 
@@ -461,7 +466,7 @@ impl<V: NodeKind> BasicNode<V> {
         }
     }
 
-    fn lookup_leaf<'a, O: OlcErrorHandler>(this: OPtr<'a, Self, O>, key: &[u8]) -> Option<OPtr<'a, [u8], O>> {
+    pub fn lookup_leaf<'a, O: OlcErrorHandler>(this: OPtr<'a, Self, O>, key: &[u8]) -> Option<OPtr<'a, [u8], O>> {
         assert!(V::IS_LEAF);
         let index = Self::find(this, key).ok()?;
         let slot_offset = Self::slot_offset(o_project!(this.common.count).r() as usize);
@@ -471,7 +476,7 @@ impl<V: NodeKind> BasicNode<V> {
         Some(this.as_slice().sub(offset + Self::RECORD_TO_KEY_OFFSET + k_len, v_len))
     }
 
-    fn lookup_inner<O: OlcErrorHandler>(this: OPtr<Self, O>, key: &[u8], high_on_equal: bool) -> PageId {
+    pub fn lookup_inner<O: OlcErrorHandler>(this: OPtr<Self, O>, key: &[u8], high_on_equal: bool) -> PageId {
         assert!(!V::IS_LEAF);
         let index = match Self::find(this, key) {
             Err(i) => i,
