@@ -28,7 +28,7 @@ pub fn key_head(k: impl SourceSlice) -> u32 {
     u32::from_be_bytes(buffer)
 }
 
-pub trait SourceSlice<T: Pod = u8>: Copy {
+pub trait SourceSlice<T: Pod = u8>: Default + Copy {
     fn index_ss(self, i: usize) -> T {
         self.slice_start(i).iter().next().unwrap()
     }
@@ -113,10 +113,10 @@ impl<T: Pod> SourceSlice<T> for &'_ [T] {
     }
 }
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Default)]
 pub struct SourceSlicePair<T: Pod, A: SourceSlice<T>, B: SourceSlice<T>>(A, B, PhantomData<[T]>);
 
-impl<T: Pod, A: SourceSlice<T>, B: SourceSlice<T>> SourceSlice<T> for SourceSlicePair<T, A, B> {
+impl<T: Pod + Default, A: SourceSlice<T>, B: SourceSlice<T>> SourceSlice<T> for SourceSlicePair<T, A, B> {
     fn write_to(self, dst: &mut [T]) {
         let a_len = self.0.len();
         self.0.write_to(&mut dst[..a_len]);
@@ -154,7 +154,7 @@ impl<T: Pod, A: SourceSlice<T>, B: SourceSlice<T>> SourceSlice<T> for SourceSlic
     }
 }
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Default)]
 pub struct HeadSourceSlice {
     array: u32,
     start: usize,
@@ -162,9 +162,6 @@ pub struct HeadSourceSlice {
 }
 
 impl HeadSourceSlice {
-    pub fn empty() -> Self {
-        HeadSourceSlice { array: 0, start: 0, end: 0 }
-    }
     pub fn from_head_len(head: u32, len: usize) -> Self {
         HeadSourceSlice { array: head, start: 0, end: len.min(4) }
     }

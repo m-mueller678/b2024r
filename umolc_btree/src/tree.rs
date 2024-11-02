@@ -1,15 +1,18 @@
 use crate::basic_node::{BasicInner, BasicLeaf, BasicNode};
 use crate::key_source::SourceSlice;
 use crate::node::{
-    node_tag, page_cast, page_cast_mut, CommonNodeHead, KindInner, KindLeaf, NodeDynamic, NodeStatic, Page,
-    ToFromPageExt, PAGE_SIZE,
+    node_tag, page_cast, page_cast_mut, page_id_from_bytes, page_id_to_bytes, CommonNodeHead, KindInner, KindLeaf,
+    NodeDynamic, NodeDynamicAuto, NodeStatic, OPtrPageExt, Page, ToFromPageExt, PAGE_SIZE,
 };
 use crate::util::PodPad;
 use crate::{impl_to_from_page, MAX_KEY_SIZE};
 use bytemuck::{Pod, Zeroable};
 use std::marker::PhantomData;
 use std::mem::size_of;
-use umolc::{BufferManageGuardUpgrade, BufferManager, BufferManagerExt, BufferManagerGuard, OPtr, PageId};
+use umolc::{
+    o_project, BufferManageGuardUpgrade, BufferManager, BufferManagerExt, BufferManagerGuard, ExclusiveGuard, OPtr,
+    OlcErrorHandler, OptimisticGuard, PageId,
+};
 
 pub struct Tree<'bm, BM: BufferManager<'bm, Page = Page>> {
     meta: PageId,
@@ -19,15 +22,15 @@ pub struct Tree<'bm, BM: BufferManager<'bm, Page = Page>> {
 
 impl<'bm, BM: BufferManager<'bm, Page = Page>> Tree<'bm, BM> {
     pub fn new(bm: BM) -> Self {
-        let (mut meta_guard, meta_id) = bm.alloc();
-        let (mut root_guard, root_id) = bm.lock_new();
+        let mut meta_guard = bm.alloc();
+        let mut root_guard = bm.alloc();
         {
             let mut meta = page_cast_mut::<_, MetadataPage>(&mut *meta_guard);
-            meta.root = root_id;
+            meta.root = root_guard.page_id();
             meta.node_head.tag = node_tag::METADATA_MARKER;
         }
-        page_cast_mut::<_, BasicNode<KindLeaf>>(&mut *root_guard).init(&[], &[], None);
-        Tree { meta: meta_id, bm, _p: PhantomData }
+        page_cast_mut::<_, BasicNode<KindLeaf>>(&mut *root_guard).init(&[][..], &[][..], None);
+        Tree { meta: meta_guard.page_id(), bm, _p: PhantomData }
     }
 
     fn validate_fences(&self) {
@@ -56,8 +59,8 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> Tree<'bm, BM> {
 
     fn try_remove(&self, k: &[u8], removed: &mut bool) {
         let [parent, node] = self.descend(k, None);
-        let mut node = node.upgrade_wait();
-        if node.as_dyn_node_mut() > ().leaf_remove(k).is_some() {
+        let mut node: BM::GuardX = node.upgrade();
+        if node.as_dyn_node_mut::<BM>().leaf_remove(k).is_some() {
             *removed = true;
         }
         parent.release_unchecked();
@@ -66,25 +69,20 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> Tree<'bm, BM> {
 
     pub fn insert(&self, k: &[u8], val: &[u8]) -> Option<()> {
         let x = BM::repeat(|| self.try_insert(k, val));
-        self.validate_fences_exclusive();
+        self.validate_fences();
         x
     }
 
     fn descend(&self, k: &[u8], stop_at: Option<PageId>) -> [BM::GuardO; 2] {
         let mut parent = self.bm.lock_optimistic(self.meta);
-        let mut node_pid = parent.s().cast::<MetadataPage>().root().load();
-        parent.check(); // check here so we do not attempt to lock wrong page id
-        let mut node = self.bm.lock_optimistic(node_pid);
-        parent.check(); // check here again to ensure node is still the same child
-        while node.s().common().tag().load() == node_tag::BASIC_INNER && Some(node_pid) != stop_at {
+        let mut node_pid = self.meta;
+        let mut node = self.bm.lock_optimistic(self.meta);
+        while node.o_ptr().o_ptr_is_inner() && Some(node_pid) != stop_at {
+            node_pid = node.o_ptr().lookup_inner(k, true);
+            node.check(); // check here so we do not attempt to lock wrong page id
             parent.release_unchecked();
             parent = node;
-            node_pid = BasicNode::<KindInner>::lookup_inner(parent.cast::<BasicNode<KindInner>>(), k, true);
-            parent.check(); // check here so we do not attempt to lock wrong page id
             node = self.bm.lock_optimistic(node_pid);
-            parent.check(); // check here again to ensure node is still the same child
-                            // We check here instead of the loop start to ensure the returned child guard always points to the right node.
-                            // Otherwise, a caller may acquire an exclusive lock on the wrong page before dropping the parent guard
         }
         [parent, node]
     }
@@ -92,22 +90,14 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> Tree<'bm, BM> {
     fn split_and_insert(&self, split_target: PageId, k: &[u8], val: &[u8]) -> Option<()> {
         let parent_id = {
             let [parent, node] = self.descend(k, Some(split_target));
-            if self.bm.page_id(node.page_address()) == split_target {
-                let mut node = node.upgrade();
-                let mut parent = parent.upgrade();
-                self.ensure_parent_not_root(&mut parent);
-                debug_assert!(node.common().tag().load() == node_tag::BASIC_INNER);
-                if Self::split_locked_node(
-                    k,
-                    &mut node.b().node_cast::<BasicInner>(),
-                    parent.b().node_cast::<BasicInner>(),
-                    self.bm,
-                )
-                .is_ok()
-                {
+            if node.page_id() == split_target {
+                let mut node: BM::GuardX = node.upgrade();
+                let mut parent: BM::GuardX = parent.upgrade();
+                self.ensure_parent_not_meta(&mut parent);
+                if self.split_locked_node(k, node.as_dyn_node_mut(), parent.as_dyn_node_mut()).is_ok() {
                     None
                 } else {
-                    Some(self.bm.page_id(parent.page_address()))
+                    Some(parent.page_id())
                 }
             } else {
                 None
@@ -120,20 +110,20 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> Tree<'bm, BM> {
         }
     }
 
-    fn ensure_parent_not_root(&self, parent: &mut BM::GuardX) {
-        if self.bm.page_id(parent.page_address()) == self.meta {
-            let mut meta = parent.b().0.cast::<MetadataPage>();
-            let (new_root_id, mut new_root_guard) = self.bm.lock_new();
-            new_root_guard.b().0.cast::<BasicInner>().init(&[][..], &[][..], page_id_to_3x16(meta.root().load()));
-            meta.root_mut().store(new_root_id);
-            *parent = new_root_guard
+    fn ensure_parent_not_meta(&self, parent: &mut BM::GuardX) {
+        if parent.common.tag == node_tag::METADATA_MARKER {
+            let mut meta = parent.cast_mut::<MetadataPage>();
+            let new_root = self.bm.alloc();
+            new_root.cast::<BasicInner>().init(&[][..], &[][..], Some(&page_id_to_bytes(meta.root)));
+            meta.root = new_root.page_id();
+            *parent = new_root
         }
     }
 
     fn try_insert(&self, k: &[u8], val: &[u8]) -> Option<()> {
         let [parent, node] = self.descend(k, None);
-        let mut node = node.upgrade();
-        match node.b().node_cast::<BasicLeaf>().insert_leaf(k, val) {
+        let mut node: BM::GuardX = node.upgrade();
+        match node.as_dyn_node_mut::<BM>().insert_leaf(k, val) {
             Ok(x) => {
                 parent.release_unchecked();
                 x
@@ -141,16 +131,9 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> Tree<'bm, BM> {
             Err(()) => {
                 node.reset_written();
                 let mut parent = parent.upgrade();
-                self.ensure_parent_not_root(&mut parent);
-                if Self::split_locked_node(
-                    k,
-                    &mut node.b().node_cast::<BasicLeaf>(),
-                    parent.b().node_cast::<BasicInner>(),
-                    self.bm,
-                )
-                .is_err()
-                {
-                    let parent_id = self.bm.page_id(parent.page_address());
+                self.ensure_parent_not_meta(&mut parent);
+                if self.split_locked_node(k, node.as_dyn_node_mut(), parent.as_dyn_node_mut()).is_err() {
+                    let parent_id = parent.page_id();
                     drop(parent);
                     drop(node);
                     return self.split_and_insert(parent_id, k, val);
@@ -164,17 +147,13 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> Tree<'bm, BM> {
     }
 
     pub fn lookup_to_vec(&self, k: &[u8]) -> Option<Vec<u8>> {
-        BM::repeat(|| self.try_lookup(k).map(|v| v.load_slice_to_vec()))
-    }
-
-    pub fn lookup_inspect<R>(&self, k: &[u8], mut f: impl FnMut(OPtr<[u8], BM>) -> R) -> R {
-        BM::repeat(move || f(self.try_lookup(k)))
+        BM::repeat(|| self.try_lookup(k).map(|v| v.1.load_slice_to_vec()))
     }
 
     pub fn try_lookup(&self, k: &[u8]) -> Option<(BM::GuardO, OPtr<[u8], BM>)> {
         let [parent, node] = self.descend(k, None);
         drop(parent);
-        let val = BasicLeaf::lookup_leaf(node, k)?;
+        let val = node.o_ptr().lookup_leaf(k)?;
         Some((node, val))
     }
 
@@ -196,10 +175,10 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> Tree<'bm, BM> {
             path.push(parent);
             self.bm.lock_shared(node_pid)
         };
-        while node.is_inner() {
-            let node_pid = BasicInner::lookup_inner(OPtr::node, key, true);
+        while node.as_dyn_node::<BM>().is_inner() {
+            let node_pid = node.o_ptr().lookup_inner(key, true);
             path.push(node);
-            node = self.bm.lock_exclusive(node_pid);
+            node = self.bm.lock_shared(node_pid);
         }
         path.push(node);
         path
@@ -208,41 +187,45 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> Tree<'bm, BM> {
 
 impl<'bm, BM: BufferManager<'bm, Page = Page>> Drop for Tree<'bm, BM> {
     fn drop(&mut self) {
-        fn free_recursive<'bm, BM: BufferManager<'bm, Page = Page>>(bm: BM, p: PageId) {
-            let node = bm.lock_exclusive(p);
-            if node.as_dyn_node().is_inner() {
-                let node = node.optimistic().node_cast::<BasicInner>();
-                for i in 0..node.common.count as usize {
-                    free_recursive(bm, node.index_child(i))
-                }
-            }
-            node.free()
-        }
         let mut meta_lock = self.bm.lock_exclusive(self.meta);
-        free_recursive(self.bm, meta_lock.b().0.cast::<MetadataPage>().root().load());
-        meta_lock.free();
+        meta_lock.cast::<MetadataPage>().free_children(self.bm);
+        self.bm.free(meta_lock);
     }
 }
 
-#[derive(Pod, Zeroable, Copy, Clone)]
-#[repr(C)]
-struct MetadataPage {
+#[derive(Pod, Zeroable, Copy, Clone, Debug)]
+#[repr(C, align(16))]
+pub struct MetadataPage {
     node_head: CommonNodeHead,
     _pad1: [u8; (8 - size_of::<CommonNodeHead>() % 8) % 8],
     root: PageId,
     _pad2: PodPad<{ PAGE_SIZE - size_of::<CommonNodeHead>() - 8 - (8 - size_of::<CommonNodeHead>() % 8) % 8 }>,
 }
 
-impl<'bm, BM: BufferManager<'bm>> NodeStatic<'bm, BM> for MetadataPage {
+impl_to_from_page!(MetadataPage);
+
+impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeStatic<'bm, BM> for MetadataPage {
     const TAG: u8 = node_tag::METADATA_MARKER;
     const IS_INNER: bool = true;
+    type TruncatedKey<'a>
+    where
+        Self: 'a,
+    = &'a [u8];
 
     fn iter_children(&self) -> impl Iterator<Item = (&[u8], PageId)> {
-        std::iter::once((&[], self.root))
+        std::iter::once((&[][..], self.root))
+    }
+
+    fn lookup_leaf(this: OPtr<'bm, Self, BM>, key: &[u8]) -> Option<OPtr<'bm, [u8], BM>> {
+        BM::optimistic_fail()
+    }
+
+    fn lookup_inner(this: OPtr<Self, BM>, key: &[u8], high_on_equal: bool) -> PageId {
+        PageId { x: o_project!(this.root.x).r() }
     }
 }
 
-impl<'bm, BM: BufferManager<'bm>> NodeDynamic<'bm, BM> for MetadataPage {
+impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeDynamic<'bm, BM> for MetadataPage {
     fn split<'g>(&mut self, bm: BM, parent: &mut dyn NodeDynamic<'bm, BM>) -> Result<(), ()> {
         unimplemented!()
     }
@@ -261,36 +244,17 @@ impl<'bm, BM: BufferManager<'bm>> NodeDynamic<'bm, BM> for MetadataPage {
         unimplemented!()
     }
 
+    fn insert_leaf(&mut self, key: &[u8], val: &[u8]) -> Result<Option<()>, ()> {
+        unimplemented!()
+    }
+
     fn leaf_remove(&mut self, k: &[u8]) -> Option<()> {
         todo!()
     }
-
-    fn is_inner(&self) -> bool {
-        todo!()
-    }
 }
-
-impl_to_from_page!(MetadataPage);
 
 #[derive(Ord, PartialOrd, Eq, PartialEq)]
 pub enum Supreme<T> {
     X(T),
     Sup,
-}
-
-impl<'g, 'bm, BM: BufferManager<'bm, Page = PageTail>> ParentInserter<'bm, BM>
-    for (W<Guarded<'g, Exclusive, BasicNode<KindInner>>>, BM)
-{
-    fn insert_upper_sibling(self, separator: impl SourceSlice) -> Result<Guard<'bm, BM, Exclusive, PageTail>, ()> {
-        let (mut guard, bm) = self;
-        let (new_page, new_guard) = bm.lock_new();
-        separator.to_stack_buffer::<MAX_KEY_SIZE, _>(|sep| {
-            if let Ok(()) = guard.insert_inner(sep, new_page) {
-                Ok(new_guard)
-            } else {
-                new_guard.free();
-                Err(())
-            }
-        })
-    }
 }

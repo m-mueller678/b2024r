@@ -1,5 +1,4 @@
 use crate::unwind::OlcErrorHandler;
-use crate::BufferManager;
 use bytemuck::Pod;
 use radium::marker::Atomic;
 use radium::Radium;
@@ -50,6 +49,12 @@ impl<'a, T: Pod, O: OlcErrorHandler> OPtr<'a, T, O> {
         } else {
             O::optimistic_fail()
         }
+    }
+
+    pub fn cast<U: Pod>(self) -> OPtr<'a, U, O> {
+        assert_eq!(size_of::<T>(), size_of::<U>());
+        assert!(align_of::<T>() >= align_of::<U>());
+        OPtr { p: self.p as *const U, _p: PhantomData, _bm: PhantomData }
     }
 
     pub fn array_slice<const L: usize>(self, offset: usize) -> OPtr<'a, [u8; L], O> {
