@@ -65,7 +65,7 @@ pub trait OptimisticGuard<'bm, BM: BufferManager<'bm>>: BufferManagerGuard<'bm, 
     fn release_unchecked(self) {
         std::mem::forget(self)
     }
-    fn check(self) -> OlcVersion {
+    fn check(&self) -> OlcVersion {
         self.clone().release()
     }
 }

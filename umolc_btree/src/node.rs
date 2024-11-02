@@ -326,7 +326,7 @@ impl Page {
 }
 
 #[ext(name = OPtrPageExt)]
-pub impl<'bm, BM: BufferManager<'bm, Page = Page>> OPtr<'_, Page, BM> {
+pub impl<'bm, BM: BufferManager<'bm, Page = Page>> OPtr<'bm, Page, BM> {
     fn lookup_inner(self, key: &[u8], high_on_equal: bool) -> PageId {
         let tag = o_project!(self.common.tag).r();
         macro_rules! impl_case {

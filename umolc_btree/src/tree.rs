@@ -113,8 +113,8 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> Tree<'bm, BM> {
     fn ensure_parent_not_meta(&self, parent: &mut BM::GuardX) {
         if parent.common.tag == node_tag::METADATA_MARKER {
             let mut meta = parent.cast_mut::<MetadataPage>();
-            let new_root = self.bm.alloc();
-            new_root.cast::<BasicInner>().init(&[][..], &[][..], Some(&page_id_to_bytes(meta.root)));
+            let mut new_root = self.bm.alloc();
+            new_root.cast_mut::<BasicInner>().init(&[][..], &[][..], Some(&page_id_to_bytes(meta.root)));
             meta.root = new_root.page_id();
             *parent = new_root
         }
@@ -188,7 +188,7 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> Tree<'bm, BM> {
 impl<'bm, BM: BufferManager<'bm, Page = Page>> Drop for Tree<'bm, BM> {
     fn drop(&mut self) {
         let mut meta_lock = self.bm.lock_exclusive(self.meta);
-        meta_lock.cast::<MetadataPage>().free_children(self.bm);
+        meta_lock.cast_mut::<MetadataPage>().free_children(self.bm);
         self.bm.free(meta_lock);
     }
 }
