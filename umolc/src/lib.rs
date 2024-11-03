@@ -7,6 +7,7 @@ use std::ops::{Deref, DerefMut};
 pub use unwind::{OlcErrorHandler, OptimisticError};
 
 mod o_ptr;
+mod seqlock;
 mod unwind;
 
 #[derive(Eq, PartialEq)]

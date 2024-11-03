@@ -26,7 +26,7 @@ pub struct OptimisticError {
 }
 
 impl OptimisticError {
-    fn new() -> Self {
+    pub(crate) fn new() -> Self {
         OptimisticError { _private: () }
     }
 }
