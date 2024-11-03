@@ -32,6 +32,15 @@ impl OptimisticError {
 }
 
 pub trait OlcErrorHandler {
+    fn optmistic_fail_check(r: Result<(), OptimisticError>) {
+        if let Err(e) = r {
+            Self::optmistic_fail_with(e)
+        }
+    }
+    fn optimistic_fail_with(e: OptimisticError) -> ! {
+        Self::optimistic_fail()
+    }
+
     fn optimistic_fail() -> !;
     // TODO consider adding a marker type that is returned by functions that may unwind and marked must_use
     fn catch<R>(f: impl FnOnce() -> R) -> Result<R, OptimisticError>;
