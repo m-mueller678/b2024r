@@ -633,7 +633,6 @@ mod tests {
     #[test]
     #[allow(clippy::unused_enumerate_index)]
     fn leaf() {
-        let bm: BM = &SimpleBm::new(1);
         let rng = &mut SmallRng::seed_from_u64(42);
         let keys = dev_utils::ascii_bin_generator(10..51);
         let mut keys: Vec<Vec<u8>> = (0..50).map(|i| keys(rng, i)).collect();
@@ -642,23 +641,28 @@ mod tests {
         let leaf = &mut BasicNode::<KindLeaf>::zeroed();
         for (_k, keys) in dev_utils::subslices(&keys, 5).enumerate() {
             let kc = keys.len();
-            leaf.init(keys[1].as_slice(), keys[kc - 2].as_slice(), None);
-            let insert_range = 2..kc - 2;
+            leaf.init(keys[0].as_slice(), keys[kc - 1].as_slice(), None);
+            // skip last key, equal to upper fence
+            let insert_range = 0..kc - 1;
             let mut to_insert: Vec<&[u8]> = keys[insert_range.clone()].iter().map(|x| x.as_slice()).collect();
             let mut inserted = HashSet::new();
-            for p in 0..=3 {
+            for insert_phase in [true, false, true, true, false] {
                 to_insert.shuffle(rng);
+                // insert/remove
                 for (_i, &k) in to_insert.iter().enumerate() {
-                    if p != 2 {
-                        if leaf.insert::<PanicOlcEh>(k, k).is_ok() {
-                            inserted.insert(k);
-                        }
+                    if insert_phase {
+                        match leaf.insert::<PanicOlcEh>(k, k) {
+                            Ok(None) => assert!(inserted.insert(k)),
+                            Ok(Some(())) => assert!(!inserted.insert(k)),
+                            Err(()) => assert!(!inserted.contains(k)),
+                        };
                     } else {
                         let in_leaf = leaf.remove::<PanicOlcEh>(k).is_some();
                         let expected = inserted.remove(k);
                         assert_eq!(in_leaf, expected);
                     }
                 }
+                // lookup
                 for (_i, k) in keys.iter().enumerate() {
                     let expected = Some(k).filter(|_| inserted.contains(k.as_slice()));
                     let actual = <BasicNode<KindLeaf> as NodeStatic<BM>>::lookup_leaf(OPtr::from_mut(leaf), &k[..])
