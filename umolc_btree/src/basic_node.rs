@@ -538,6 +538,10 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>, V: NodeKind> NodeDynamic<'bm, BM>
 
     fn merge(&mut self, right: &mut Page) {
         debug_assert!(right.common.tag == Self::TAG);
+        if cfg!(feature = "validate_node") {
+            self.validate();
+            right.as_dyn_node::<BM>().validate();
+        }
         let right = page_cast_mut::<Page, Self>(right);
         let tmp = &mut BasicNode::<V>::zeroed();
         let left_count = self.common.count as usize;
@@ -559,6 +563,7 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>, V: NodeKind> NodeDynamic<'bm, BM>
             );
         }
         tmp.update_hints(0, tmp.common.count as usize, 0);
+        tmp.validate();
         *self = *tmp;
     }
 
@@ -577,6 +582,7 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>, V: NodeKind> NodeDynamic<'bm, BM>
             left.init(self.as_page().lower_fence(), sep_key, Some(self.lower()));
             let mid_child = self.val(low_count).try_into().unwrap();
             right.init(sep_key, self.as_page().upper_fence_combined(), Some(mid_child));
+            dbg!(&right);
             (0..low_count, low_count + 1..count)
         };
         debug_assert!(self.key_combined(lr.end - 1).cmp(sep_key.slice(self.common.prefix_len as usize..)).is_lt());
@@ -675,7 +681,7 @@ mod tests {
     }
 
     fn split_merge<V: NodeKind>(ufb: u8, lower: Option<&[u8; 5]>, mut val: impl FnMut(u64) -> Vec<u8>) {
-        let bm: BM = &SimpleBm::new(2);
+        let bm: BM = &SimpleBm::new(3);
         let mut g1 = bm.alloc();
         let mut g2 = bm.alloc();
         g2.cast_mut::<BasicNode<KindInner>>().init(&[][..], &[][..], Some(&page_id_to_bytes(g1.page_id())));
@@ -688,18 +694,16 @@ mod tests {
         }
         let s1 = NodeDynamic::<BM>::to_debug_kv(n1);
         n1.split(bm, g2.as_dyn_node_mut()).unwrap();
-        n1.validate();
         g2.as_dyn_node_mut::<BM>().validate();
         let (g2_keys, g2_values) = g2.as_dyn_node_mut::<BM>().to_debug_kv();
         assert_eq!(g2_keys.len(), 1);
         assert_eq!(g2_values.len(), 2);
-        let mut g3 = bm.lock_exclusive(page_id_from_bytes(&g2_values[0][..].try_into().unwrap()));
+        let mut g3 = bm.lock_exclusive(page_id_from_bytes(&g2_values[1][..].try_into().unwrap()));
         let n3 = g3.cast::<BasicNode<V>>();
         assert_eq!(n1.upper_fence_combined().to_vec(), g2_keys[0]);
         assert_eq!(g3.lower_fence().to_vec(), g2_keys[0]);
         assert_eq!([NodeDynamic::<BM>::to_debug_kv(n1).1, NodeDynamic::<BM>::to_debug_kv(n3).1].concat(), s1.1);
         NodeDynamic::<BM>::merge(n1, &mut *g3);
-        n1.validate();
         assert_eq!(s1, NodeDynamic::<BM>::to_debug_kv(n1));
     }
 
