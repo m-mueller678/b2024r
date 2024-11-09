@@ -92,10 +92,12 @@ impl<V: NodeKind> BasicNode<V> {
 
     fn set_slot(&mut self, index: usize, offset: usize) {
         debug_assert!(index < self.common.count as usize);
+        let index = Self::slot_offset(self.common.count as usize) / 2 + index;
         self.cast_slice_mut::<u16>()[index] = offset as u16;
     }
 
     fn slots(&self) -> &[u16] {
+        //TODO maybe replace with getter?
         &self.cast_slice::<u16>()[Self::slot_offset(self.common.count as usize) / 2..][..self.common.count as usize]
     }
 
