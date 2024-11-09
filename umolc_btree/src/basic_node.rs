@@ -640,7 +640,7 @@ mod tests {
     use rand::rngs::SmallRng;
     use rand::SeedableRng;
     use std::collections::HashSet;
-    use umolc::{OPtr, PageId};
+    use umolc::{OPtr, PageId, PanicOlcEh};
 
     #[test]
     #[allow(clippy::unused_enumerate_index)]
@@ -661,19 +661,19 @@ mod tests {
                 to_insert.shuffle(rng);
                 for (_i, &k) in to_insert.iter().enumerate() {
                     if p != 2 {
-                        if leaf.insert(k, k).is_ok() {
+                        if leaf.insert::<PanicOlcEh>(k, k).is_ok() {
                             inserted.insert(k);
                         }
                     } else {
-                        let in_leaf = leaf.remove(k).is_some();
+                        let in_leaf = leaf.remove::<PanicOlcEh>(k).is_some();
                         let expected = inserted.remove(k);
                         assert_eq!(in_leaf, expected);
                     }
                 }
                 for (_i, k) in keys.iter().enumerate() {
                     let expected = Some(k).filter(|_| inserted.contains(k.as_slice()));
-                    let actual =
-                        BasicNode::<KindLeaf>::lookup_leaf(OPtr::from_mut(leaf), &k[..]).map(|v| v.load_slice_to_vec());
+                    let actual = <NodeStatic<BM> as BasicNode<KindLeaf>>::lookup_leaf(OPtr::from_mut(leaf), &k[..])
+                        .map(|v| v.load_slice_to_vec());
                     assert_eq!(expected, actual.as_ref());
                 }
             }

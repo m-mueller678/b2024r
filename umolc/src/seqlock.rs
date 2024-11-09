@@ -1,8 +1,10 @@
 use crate::{OlcVersion, OptimisticError};
+use bytemuck::Zeroable;
 use radium::Radium;
 use std::sync::atomic::Ordering::{Acquire, Relaxed, Release};
 use std::sync::atomic::{fence, AtomicU64};
 
+#[derive(Zeroable)]
 pub struct SeqLock(AtomicU64);
 
 const COUNT_BITS: u32 = 10;
@@ -97,6 +99,12 @@ impl SeqLock {
                 }
             }
         }
+    }
+
+    pub fn force_lock_exclusive<F: VersionFilter>(&self) -> OlcVersion {
+        let mut x = self.0.fetch_or(EXCLUSIVE_MASK, Acquire);
+        debug_assert!(x & (EXCLUSIVE_MASK | COUNT_MASK) == 0);
+        OlcVersion { x: x >> VERSION_SHIFT }
     }
 
     /// returns version after unlocking

@@ -1,4 +1,4 @@
-use crate::unwind::OlcErrorHandler;
+use crate::optimistic_error::OlcErrorHandler;
 use bytemuck::Pod;
 use radium::marker::Atomic;
 use radium::Radium;

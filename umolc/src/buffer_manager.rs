@@ -1,13 +1,66 @@
 use crate::seqlock::SeqLock;
 use crate::{
     BufferManageGuardUpgrade, BufferManager, BufferManagerGuard, ExclusiveGuard, OPtr, OlcErrorHandler, OlcVersion,
-    OptimisticError, OptimisticGuard, PageId,
+    OptimisticError, OptimisticGuard, PageId, UnwindOlcEh,
 };
 use bytemuck::Pod;
 use std::cell::UnsafeCell;
+use std::mem::MaybeUninit;
 use std::ops::{Deref, DerefMut};
+use std::sync::Mutex;
 
-pub struct SimpleBm {}
+pub struct SimpleBm<P> {
+    pages: Box<[UnsafeCell<P>]>,
+    locks: Box<[SeqLock]>,
+    free_list: Mutex<Vec<usize>>,
+}
+
+unsafe impl<P> Sync for SimpleBm<P> {}
+
+impl<P: Pod> SimpleBm<P> {
+    pub fn new(capacity: usize) -> Self {
+        unsafe {
+            SimpleBm {
+                pages: Box::<[MaybeUninit<_>]>::assume_init(Box::new_zeroed_slice(capacity)),
+                locks: Box::<[MaybeUninit<_>]>::assume_init(Box::new_zeroed_slice(capacity)),
+                free_list: Mutex::new(vec![]),
+            }
+        }
+    }
+}
+
+impl<'bm, P: Pod> CommonSeqLockBM<'bm> for &'bm SimpleBm<P> {
+    type Page = P;
+    type OlcEH = UnwindOlcEh;
+
+    fn pid_from_address(self, address: usize) -> PageId {
+        let start = self.pages.as_ptr().addr();
+        debug_assert!(address >= start);
+        debug_assert!(address < start + size_of::<P>() * self.pages.len());
+        let offset = address - start;
+        debug_assert!(offset % size_of::<P>() == 0);
+        PageId { x: (offset / size_of::<P>()) as u64 }
+    }
+
+    fn alloc(self) -> PageId {
+        let pid = self.free_list.lock().unwrap().pop().expect("out of pages");
+        PageId { x: pid as u64 }
+    }
+
+    fn dealloc(self, pid: PageId) {
+        let pid = pid.x as usize;
+        self.locks[pid].unlock_exclusive();
+        self.free_list.lock().unwrap().push(pid)
+    }
+
+    fn page(self, pid: PageId) -> &'bm UnsafeCell<Self::Page> {
+        &self.pages[pid.x as usize]
+    }
+
+    fn lock(self, pid: PageId) -> &'bm SeqLock {
+        &self.locks[pid.x as usize]
+    }
+}
 
 pub trait CommonSeqLockBM<'bm>: Copy + Sync + Send + 'bm {
     type Page: Pod;

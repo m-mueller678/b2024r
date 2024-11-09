@@ -1,8 +1,9 @@
 use crate::basic_node::{BasicInner, BasicLeaf, BasicNode};
 use crate::key_source::SourceSlice;
 use crate::node::{
-    node_tag, page_cast, page_cast_mut, page_id_from_bytes, page_id_to_bytes, CommonNodeHead, KindInner, KindLeaf,
-    NodeDynamic, NodeDynamicAuto, NodeStatic, OPtrPageExt, Page, ToFromPageExt, PAGE_SIZE,
+    node_tag, o_ptr_is_inner, o_ptr_lookup_inner, o_ptr_lookup_leaf, page_cast, page_cast_mut, page_id_from_bytes,
+    page_id_to_bytes, CommonNodeHead, KindInner, KindLeaf, NodeDynamic, NodeDynamicAuto, NodeStatic, Page,
+    ToFromPageExt, PAGE_SIZE,
 };
 use crate::util::PodPad;
 use crate::{impl_to_from_page, MAX_KEY_SIZE};
@@ -77,8 +78,8 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> Tree<'bm, BM> {
         let mut parent = self.bm.lock_optimistic(self.meta);
         let mut node_pid = self.meta;
         let mut node = self.bm.lock_optimistic(self.meta);
-        while node.o_ptr().o_ptr_is_inner() && Some(node_pid) != stop_at {
-            node_pid = node.o_ptr().lookup_inner(k, true);
+        while o_ptr_is_inner::<BM>(node.o_ptr()) && Some(node_pid) != stop_at {
+            node_pid = o_ptr_lookup_inner::<BM>(node.o_ptr(), k, true);
             node.check(); // check here so we do not attempt to lock wrong page id
             parent.release_unchecked();
             parent = node;
@@ -153,7 +154,7 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> Tree<'bm, BM> {
     pub fn try_lookup(&self, k: &[u8]) -> Option<(BM::GuardO, OPtr<[u8], BM::OlcEH>)> {
         let [parent, node] = self.descend(k, None);
         drop(parent);
-        let val = node.o_ptr().lookup_leaf(k)?;
+        let val = o_ptr_lookup_leaf::<BM>(node.o_ptr(), k)?;
         Some((node, val))
     }
 
@@ -176,7 +177,7 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> Tree<'bm, BM> {
             self.bm.lock_shared(node_pid)
         };
         while node.as_dyn_node::<BM>().is_inner() {
-            let node_pid = node.o_ptr().lookup_inner(key, true);
+            let node_pid = o_ptr_lookup_inner::<BM>(node.o_ptr(), key, true);
             path.push(node);
             node = self.bm.lock_shared(node_pid);
         }
@@ -217,7 +218,7 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeStatic<'bm, BM> for MetadataP
     }
 
     fn lookup_leaf(this: OPtr<'bm, Self, BM::OlcEH>, key: &[u8]) -> Option<OPtr<'bm, [u8], BM::OlcEH>> {
-        BM::optimistic_fail()
+        BM::OlcEH::optimistic_fail()
     }
 
     fn lookup_inner(this: OPtr<Self, BM::OlcEH>, key: &[u8], high_on_equal: bool) -> PageId {

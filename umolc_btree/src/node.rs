@@ -325,44 +325,48 @@ impl Page {
     }
 }
 
-#[ext(name = OPtrPageExt)]
-pub impl<'bm, BM: BufferManager<'bm, Page = Page>> OPtr<'bm, Page, BM::OlcEH> {
-    fn lookup_inner(self, key: &[u8], high_on_equal: bool) -> PageId {
-        let tag = o_project!(self.common.tag).r();
-        macro_rules! impl_case {
+pub fn o_ptr_lookup_inner<'bm, BM: BufferManager<'bm, Page = Page>>(
+    this: OPtr<'_, BM::Page, BM::OlcEH>,
+    key: &[u8],
+    high_on_equal: bool,
+) -> PageId {
+    let tag = o_project!(this.common.tag).r();
+    macro_rules! impl_case {
             ($($t:ty),*) => {
                 $(if tag==<$t as NodeStatic<'bm,BM>>::TAG {
-                    return <$t as NodeStatic<'bm,BM>>::lookup_inner(self.cast(),key,high_on_equal)
+                    return <$t as NodeStatic<'bm,BM>>::lookup_inner(this.cast(),key,high_on_equal)
                 })*
             };
         }
-        impl_case!(BasicInner, BasicLeaf, MetadataPage);
-        BM::OlcEH::optimistic_fail()
-    }
+    impl_case!(BasicInner, BasicLeaf, MetadataPage);
+    BM::OlcEH::optimistic_fail()
+}
 
-    fn lookup_leaf(self, key: &[u8]) -> Option<OPtr<'bm, [u8], BM::OlcEH>> {
-        let tag = o_project!(self.common.tag).r();
-        macro_rules! impl_case {
+pub fn o_ptr_lookup_leaf<'bm, BM: BufferManager<'bm, Page = Page>>(
+    this: OPtr<'_, BM::Page, BM::OlcEH>,
+    key: &[u8],
+) -> Option<OPtr<'bm, [u8], BM::OlcEH>> {
+    let tag = o_project!(this.common.tag).r();
+    macro_rules! impl_case {
             ($($t:ty),*) => {
                 $(if tag==<$t as NodeStatic<'bm,BM>>::TAG {
-                    return <$t as NodeStatic<'bm,BM>>::lookup_leaf(self.cast(),key)
+                    return <$t as NodeStatic<'bm,BM>>::lookup_leaf(this.cast(),key)
                 })*
             };
         }
-        impl_case!(BasicInner, BasicLeaf, MetadataPage);
-        BM::OlcEH::optimistic_fail()
-    }
+    impl_case!(BasicInner, BasicLeaf, MetadataPage);
+    BM::OlcEH::optimistic_fail()
+}
 
-    fn o_ptr_is_inner(self) -> bool {
-        let tag = o_project!(self.common.tag).r();
-        macro_rules! impl_case {
+pub fn o_ptr_is_inner<'bm, BM: BufferManager<'bm, Page = Page>>(this: OPtr<'_, BM::Page, BM::OlcEH>) -> bool {
+    let tag = o_project!(this.common.tag).r();
+    macro_rules! impl_case {
             ($($t:ty),*) => {
                 $(if tag==<$t as NodeStatic<'bm,BM>>::TAG {
                     return <$t as NodeStatic<'bm,BM>>::IS_INNER
                 })*
             };
         }
-        impl_case!(BasicInner, BasicLeaf, MetadataPage);
-        BM::OlcEH::optimistic_fail()
-    }
+    impl_case!(BasicInner, BasicLeaf, MetadataPage);
+    BM::OlcEH::optimistic_fail()
 }

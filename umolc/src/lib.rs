@@ -1,16 +1,19 @@
 #![feature(slice_index_methods)]
 #![feature(array_ptr_get)]
 #![feature(never_type)]
+#![feature(new_zeroed_alloc)]
 
 use bytemuck::{Pod, Zeroable};
 pub use o_ptr::OPtr;
+pub use optimistic_error::{OlcErrorHandler, OptimisticError};
 use std::ops::{Deref, DerefMut};
-pub use unwind::{OlcErrorHandler, OptimisticError};
 
 mod buffer_manager;
 mod o_ptr;
+mod optimistic_error;
 mod seqlock;
-mod unwind;
+
+pub use optimistic_error::{PanicOlcEh, UnwindOlcEh};
 
 #[derive(Eq, PartialEq, Clone, Copy)]
 pub struct OlcVersion {
