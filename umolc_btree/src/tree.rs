@@ -250,9 +250,3 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeDynamic<'bm, BM> for Metadata
         todo!()
     }
 }
-
-#[derive(Ord, PartialOrd, Eq, PartialEq)]
-pub enum Supreme<T> {
-    X(T),
-    Sup,
-}

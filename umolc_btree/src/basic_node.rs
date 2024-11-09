@@ -37,6 +37,7 @@ macro_rules! def_basic_node {
 
         #[derive(Pod,Copy,Clone,Zeroable)]
         #[repr(C, align(16))]
+        #[allow(dead_code)]
         pub struct AssertBasicNodePod{
             $($n:$t,)*
         }
@@ -76,10 +77,6 @@ impl<V: NodeKind> BasicNode<V> {
     fn page_id_bytes(&self, offset: usize) -> &[u8; PAGE_ID_LEN] {
         assert!(!V::IS_LEAF);
         self.cast_slice::<u8>()[offset..][..PAGE_ID_LEN].try_into().unwrap()
-    }
-
-    fn round_up(x: usize) -> usize {
-        x + (x % 2)
     }
 
     fn reserved_head_count(count: usize) -> usize {
@@ -614,8 +611,8 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>, V: NodeKind> NodeDynamic<'bm, BM>
         (keys, vals)
     }
 
-    fn leaf_remove(&mut self, _k: &[u8]) -> Option<()> {
-        todo!()
+    fn leaf_remove(&mut self, k: &[u8]) -> Option<()> {
+        self.remove::<BM::OlcEH>(k)
     }
 }
 
@@ -624,7 +621,6 @@ const HEAD_RESERVATION: usize = 16;
 #[cfg(test)]
 mod tests {
     use crate::basic_node::{BasicNode, NodeKind};
-    use crate::key_source::SourceSlice;
     use crate::node::{page_id_to_bytes, KindInner, KindLeaf, NodeStatic, Page, PAGE_ID_LEN};
     use bytemuck::Zeroable;
     use rand::prelude::SliceRandom;
