@@ -1,9 +1,7 @@
-use crate::basic_node::{BasicInner, BasicLeaf, BasicNode};
-use crate::key_source::SourceSlice;
+use crate::basic_node::{BasicInner, BasicNode};
 use crate::node::{
-    node_tag, o_ptr_is_inner, o_ptr_lookup_inner, o_ptr_lookup_leaf, page_cast, page_cast_mut, page_id_from_bytes,
-    page_id_to_bytes, CommonNodeHead, KindInner, KindLeaf, NodeDynamic, NodeDynamicAuto, NodeStatic, Page,
-    ToFromPageExt, PAGE_SIZE,
+    node_tag, o_ptr_is_inner, o_ptr_lookup_inner, o_ptr_lookup_leaf, page_cast, page_cast_mut, page_id_to_bytes,
+    CommonNodeHead, KindLeaf, NodeDynamic, NodeDynamicAuto, NodeStatic, Page, ToFromPageExt, PAGE_SIZE,
 };
 use crate::util::PodPad;
 use crate::{impl_to_from_page, MAX_KEY_SIZE};
@@ -26,7 +24,7 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> Tree<'bm, BM> {
         let mut meta_guard = bm.alloc();
         let mut root_guard = bm.alloc();
         {
-            let mut meta = page_cast_mut::<_, MetadataPage>(&mut *meta_guard);
+            let meta = page_cast_mut::<_, MetadataPage>(&mut *meta_guard);
             meta.root = root_guard.page_id();
             meta.node_head.tag = node_tag::METADATA_MARKER;
         }
@@ -113,7 +111,7 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> Tree<'bm, BM> {
 
     fn ensure_parent_not_meta(&self, parent: &mut BM::GuardX) {
         if parent.common.tag == node_tag::METADATA_MARKER {
-            let mut meta = parent.cast_mut::<MetadataPage>();
+            let meta = parent.cast_mut::<MetadataPage>();
             let mut new_root = self.bm.alloc();
             new_root.cast_mut::<BasicInner>().init(&[][..], &[][..], Some(&page_id_to_bytes(meta.root)));
             meta.root = new_root.page_id();
@@ -152,7 +150,7 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> Tree<'bm, BM> {
     }
 
     pub fn try_lookup(&self, k: &[u8]) -> Option<(BM::GuardO, OPtr<[u8], BM::OlcEH>)> {
-        let [parent, mut node] = self.descend(k, None);
+        let [parent, node] = self.descend(k, None);
         drop(parent);
         let val = o_ptr_lookup_leaf::<BM>(node.o_ptr_bm(), k)?;
         Some((node, val))
@@ -209,9 +207,9 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeStatic<'bm, BM> for MetadataP
     const TAG: u8 = node_tag::METADATA_MARKER;
     const IS_INNER: bool = true;
     type TruncatedKey<'a>
+        = &'a [u8]
     where
-        Self: 'a,
-    = &'a [u8];
+        Self: 'a;
 
     fn iter_children(&self) -> impl Iterator<Item = (&[u8], PageId)> {
         std::iter::once((&[][..], self.root))

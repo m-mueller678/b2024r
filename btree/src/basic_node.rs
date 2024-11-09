@@ -69,7 +69,7 @@ fn copy_records<V: NodeKind>(
     let dpl = dst.prefix_len().load() as usize;
     let spl = src.prefix_len().load() as usize;
     let restore_prefix = if dpl < spl { &ref_key[dpl..spl] } else { &[][..] };
-    let prefix_grow = if dpl > spl { dpl - spl } else { 0 };
+    let prefix_grow = dpl.saturating_sub(spl);
     for (src_i, dst_i) in src_range.clone().zip(dst_range.clone()) {
         let key = restore_prefix.join(src.key_combined(src_i).slice(prefix_grow..));
         dst.heap_write_new(key, src.val(src_i), dst_i);
@@ -259,7 +259,7 @@ fn record_to_key_offset<V: NodeKind>() -> usize {
     }
 }
 
-impl<'a, V: NodeKind> W<Guarded<'a, Exclusive, BasicNode<V>>> {
+impl<V: NodeKind> W<Guarded<'_, Exclusive, BasicNode<V>>> {
     /// offset is in units of bytes, others in units of T
     fn relocate_by<const UP: bool, T: SeqLockWrappable + Pod>(&mut self, offset: usize, count: usize, dist: usize) {
         assert_eq!(offset % size_of::<T>(), 0);
@@ -625,7 +625,7 @@ impl<'a, M: SeqLockMode> W<Guarded<'a, M, BasicNode<KindLeaf>>> {
     }
 }
 
-impl<'a> W<Guarded<'a, Exclusive, BasicNode<KindLeaf>>> {
+impl W<Guarded<'_, Exclusive, BasicNode<KindLeaf>>> {
     #[allow(clippy::result_unit_err)]
     pub fn insert_leaf(&mut self, key: &[u8], val: &[u8]) -> Result<Option<()>, ()> {
         Node::validate(self.s());
@@ -635,7 +635,7 @@ impl<'a> W<Guarded<'a, Exclusive, BasicNode<KindLeaf>>> {
     }
 }
 
-impl<'a> W<Guarded<'a, Optimistic, BasicNode<KindInner>>> {
+impl W<Guarded<'_, Optimistic, BasicNode<KindInner>>> {
     pub fn lookup_inner(&self, key: &[u8], high_on_equal: bool) -> u64 {
         let index = match self.find(key) {
             Err(i) => i,
@@ -653,7 +653,7 @@ impl<'a> W<Guarded<'a, Optimistic, BasicNode<KindInner>>> {
     }
 }
 
-impl<'a> W<Guarded<'a, Exclusive, BasicNode<KindInner>>> {
+impl W<Guarded<'_, Exclusive, BasicNode<KindInner>>> {
     #[allow(clippy::result_unit_err)]
     pub fn insert_inner(&mut self, key: &[u8], pid: PageId) -> Result<(), ()> {
         let x = self.insert(key, &page_id_to_3x16(pid));

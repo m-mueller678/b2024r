@@ -243,8 +243,8 @@ pub enum Supreme<T> {
     Sup,
 }
 
-impl<'g, 'bm, BM: BufferManager<'bm, Page = PageTail>> ParentInserter<'bm, BM>
-    for (W<Guarded<'g, Exclusive, BasicNode<KindInner>>>, BM)
+impl<'bm, BM: BufferManager<'bm, Page = PageTail>> ParentInserter<'bm, BM>
+    for (W<Guarded<'_, Exclusive, BasicNode<KindInner>>>, BM)
 {
     fn insert_upper_sibling(self, separator: impl SourceSlice) -> Result<Guard<'bm, BM, Exclusive, PageTail>, ()> {
         let (mut guard, bm) = self;

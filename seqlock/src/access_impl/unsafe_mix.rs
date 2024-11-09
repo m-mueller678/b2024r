@@ -17,10 +17,8 @@ mod ref_impl;
 impl LockState {
     pub fn release_optimistic(&self, expected: u64) {
         fence(Acquire);
-        if self.version.load(Relaxed) != expected {
-            if !std::thread::panicking() {
-                Optimistic::release_error()
-            }
+        if self.version.load(Relaxed) != expected && !std::thread::panicking() {
+            Optimistic::release_error()
         }
     }
 }

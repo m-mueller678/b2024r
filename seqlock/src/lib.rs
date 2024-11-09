@@ -170,11 +170,11 @@ impl SeqLockMode for Shared {
     }
 }
 
-impl<'a, T: ?Sized> Copy for Guarded<'a, Optimistic, T> {}
+impl<T: ?Sized> Copy for Guarded<'_, Optimistic, T> {}
 
-impl<'a, T: ?Sized> Copy for Guarded<'a, Shared, T> {}
+impl<T: ?Sized> Copy for Guarded<'_, Shared, T> {}
 
-impl<'a, T: ?Sized, M: SeqLockMode> Clone for Guarded<'a, M, T>
+impl<T: ?Sized, M: SeqLockMode> Clone for Guarded<'_, M, T>
 where
     Self: Copy,
 {

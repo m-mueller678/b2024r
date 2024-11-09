@@ -159,7 +159,7 @@ pub fn node_guard_cast<'bm, N: Node, BM: BufferManager<'bm, Page = PageTail>, M:
     unsafe { guard.map(|x| x.node_cast::<N>()) }
 }
 
-impl<'a, N: Node> W<Guarded<'a, Shared, N>> {
+impl<N: Node> W<Guarded<'_, Shared, N>> {
     pub fn to_debug(self) -> DebugNode<N::DebugVal> {
         let (keys, values) = N::to_debug_kv(self);
         let as_basic = self.cast::<BasicLeaf>();

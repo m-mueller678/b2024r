@@ -1,7 +1,7 @@
 use crate::seqlock::SeqLock;
 use crate::{
     BufferManageGuardUpgrade, BufferManager, BufferManagerGuard, ExclusiveGuard, OPtr, OlcErrorHandler, OlcVersion,
-    OptimisticError, OptimisticGuard, PageId, UnwindOlcEh,
+    OptimisticGuard, PageId, UnwindOlcEh,
 };
 use bytemuck::Pod;
 use std::cell::UnsafeCell;
@@ -110,7 +110,7 @@ impl<'bm, BM: CommonSeqLockBM<'bm>> BufferManagerGuard<'bm, BM> for SimpleGuardS
         self.bm.pid_from_address((self.ptr as *const BM::Page).addr())
     }
 
-    fn o_ptr<'a>(&'a mut self) -> OPtr<'a, BM::Page, BM::OlcEH> {
+    fn o_ptr(&mut self) -> OPtr<'_, BM::Page, BM::OlcEH> {
         unsafe { OPtr::from_ref(self.ptr) }
     }
 }
@@ -147,7 +147,7 @@ impl<'bm, BM: CommonSeqLockBM<'bm>> BufferManagerGuard<'bm, BM> for SimpleGuardX
         self.bm.pid_from_address((self.ptr as *const BM::Page).addr())
     }
 
-    fn o_ptr<'a>(&'a mut self) -> OPtr<'a, BM::Page, BM::OlcEH> {
+    fn o_ptr(&mut self) -> OPtr<'_, BM::Page, BM::OlcEH> {
         OPtr::from_mut(self.ptr)
     }
 }
@@ -246,7 +246,7 @@ impl<'bm, BM: CommonSeqLockBM<'bm>> BufferManagerGuard<'bm, BM> for SimpleGuardO
         self.bm.pid_from_address(self.ptr.to_raw() as usize)
     }
 
-    fn o_ptr<'a>(&'a mut self) -> OPtr<'a, BM::Page, BM::OlcEH> {
+    fn o_ptr(&mut self) -> OPtr<'_, BM::Page, BM::OlcEH> {
         self.ptr
     }
 }

@@ -53,7 +53,7 @@ fn main() {
     let cargo_cfg = env::vars()
         .filter_map(|(k, v)| (k.strip_prefix("CARGO_CFG_").map(|k| (k.to_string(), v))))
         .map(|(k, v)| {
-            let vs: Vec<Value> = v.split(',').filter(|vv| !vv.is_empty()).map(|x| Value::from(x)).collect();
+            let vs: Vec<Value> = v.split(',').filter(|vv| !vv.is_empty()).map(Value::from).collect();
             (k, Value::from(vs))
         })
         .collect();

@@ -1,3 +1,4 @@
+use crate::impl_to_from_page;
 use crate::key_source::{common_prefix, key_head, HeadSourceSlice, SourceSlice, SourceSlicePair};
 use crate::node::{
     insert_upper_sibling, node_tag, page_cast_mut, page_id_from_bytes, page_id_from_olc_bytes, page_id_to_bytes,
@@ -5,7 +6,6 @@ use crate::node::{
     PAGE_ID_LEN, PAGE_SIZE,
 };
 use crate::util::Supreme;
-use crate::{impl_to_from_page, MAX_KEY_SIZE};
 use bstr::{BStr, BString};
 use bytemuck::{Pod, Zeroable};
 use indxvec::Search;
@@ -13,9 +13,9 @@ use itertools::Itertools;
 use std::fmt::{Debug, Formatter};
 use std::io::Read;
 use std::marker::PhantomData;
-use std::mem::{offset_of, size_of, swap};
+use std::mem::{offset_of, size_of};
 use std::ops::Range;
-use umolc::{o_project, BufferManager, BufferManagerGuard, OPtr, OlcErrorHandler, PageId};
+use umolc::{o_project, BufferManager, OPtr, OlcErrorHandler, PageId};
 
 const HINT_COUNT: usize = 16;
 const MIN_HINT_SPACING: usize = 3;

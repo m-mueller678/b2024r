@@ -69,7 +69,7 @@ pub trait BufferManagerGuard<'bm, B: BufferManager<'bm>>: Sized {
     fn acquire_wait_version(bm: B, page_id: PageId, v: OlcVersion) -> Option<Self>;
     fn release(self) -> OlcVersion;
     fn page_id(&self) -> PageId;
-    fn o_ptr<'a>(&'a mut self) -> OPtr<'a, B::Page, B::OlcEH>;
+    fn o_ptr(&mut self) -> OPtr<'_, B::Page, B::OlcEH>;
 }
 
 pub trait OptimisticGuard<'bm, BM: BufferManager<'bm>>: BufferManagerGuard<'bm, BM> + Clone {

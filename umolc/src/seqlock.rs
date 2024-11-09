@@ -48,6 +48,12 @@ impl VersionFilter for OlcVersion {
     }
 }
 
+impl Default for SeqLock {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl SeqLock {
     pub fn new() -> Self {
         SeqLock(AtomicU64::new(0))
@@ -102,7 +108,7 @@ impl SeqLock {
     }
 
     pub fn force_lock_exclusive<F: VersionFilter>(&self) -> OlcVersion {
-        let mut x = self.0.fetch_or(EXCLUSIVE_MASK, Acquire);
+        let x = self.0.fetch_or(EXCLUSIVE_MASK, Acquire);
         debug_assert!(x & (EXCLUSIVE_MASK | COUNT_MASK) == 0);
         OlcVersion { x: x >> VERSION_SHIFT }
     }

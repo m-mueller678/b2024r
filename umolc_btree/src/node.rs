@@ -1,10 +1,9 @@
 use crate::basic_node::{BasicInner, BasicLeaf};
-use crate::key_source::{common_prefix, HeadSourceSlice, SourceSlice, SourceSlicePair};
+use crate::key_source::{common_prefix, SourceSlice, SourceSlicePair};
 use crate::tree::MetadataPage;
 use crate::MAX_KEY_SIZE;
 use bstr::BStr;
 use bytemuck::{Pod, Zeroable};
-use extend::ext;
 use static_assertions::{assert_impl_all, const_assert_eq};
 use std::fmt::Debug;
 use std::mem::{swap, transmute};
@@ -58,7 +57,7 @@ pub struct DebugNode<V> {
 macro_rules! impl_to_from_page {
     ($t:ty) => {
         static_assertions::assert_eq_size!($t, $crate::node::Page);
-        static_assertions::assert_eq_align!($t, crate::node::Page);
+        static_assertions::assert_eq_align!($t, $crate::node::Page);
         static_assertions::assert_impl_all!($t: bytemuck::Pod);
         unsafe impl crate::node::ToFromPage for $t {}
     };
@@ -174,7 +173,7 @@ pub trait NodeDynamicAuto<'bm, BM: BufferManager<'bm, Page = Page>> {
 
 impl<'bm, BM: BufferManager<'bm, Page = Page>, N: NodeStatic<'bm, BM>> NodeDynamicAuto<'bm, BM> for N {
     fn free_children(&mut self, bm: BM) {
-        if (!Self::IS_INNER) {
+        if !Self::IS_INNER {
             return;
         }
         for (_key, child) in self.iter_children() {
