@@ -145,13 +145,6 @@ impl<V: NodeKind> BasicNode<V> {
             O::optimistic_fail()
         }
         let truncated = &key[prefix_len..];
-        Self::find_truncated::<O>(this, truncated)
-    }
-
-    fn find_truncated<O: OlcErrorHandler>(this: OPtr<Self, O>, truncated: &[u8]) -> Result<usize, usize>
-    where
-        Self: Copy,
-    {
         let needle_head = key_head(truncated);
         let count = o_project!(this.common.count).r() as usize;
         let slot_start_index = Self::slot_offset(count) / 2;
@@ -369,7 +362,7 @@ impl<V: NodeKind> BasicNode<V> {
     }
 
     fn remove<O: OlcErrorHandler>(&mut self, key: &[u8]) -> Option<()> {
-        let Ok(index) = Self::find_truncated::<O>(OPtr::from_mut(self), key) else {
+        let Ok(index) = Self::find::<O>(OPtr::from_mut(self), key) else {
             return None;
         };
         self.heap_freed += self.stored_record_size(self.slots()[index] as usize) as u16;
@@ -401,8 +394,8 @@ impl<V: NodeKind> BasicNode<V> {
         if !V::IS_LEAF {
             assert_eq!(val.len(), PAGE_ID_LEN);
         }
+        let index = Self::find::<O>(OPtr::from_mut(self), key);
         let key = &key[self.common.prefix_len as usize..];
-        let index = Self::find_truncated::<O>(OPtr::from_mut(self), key);
         let count = self.common.count as usize;
         let record_size = Self::record_size(key.len().saturating_sub(4), val.len());
         loop {
@@ -656,8 +649,11 @@ mod tests {
                         };
                     } else {
                         let in_leaf = leaf.remove::<PanicOlcEh>(k).is_some();
-                        let expected = inserted.remove(k);
-                        assert_eq!(in_leaf, expected);
+                        if inserted.remove(k) {
+                            assert!(in_leaf);
+                        } else {
+                            assert!(!in_leaf);
+                        }
                     }
                 }
                 // lookup
