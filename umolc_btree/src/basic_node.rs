@@ -511,7 +511,7 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>, V: NodeKind> NodeStatic<'bm, BM> 
         lower.chain(rest).map(|(k, o)| (k, page_id_from_bytes(self.page_id_bytes(o))))
     }
 
-    fn lookup_leaf(this: OPtr<'bm, Self, BM::OlcEH>, key: &[u8]) -> Option<OPtr<'bm, [u8], BM::OlcEH>> {
+    fn lookup_leaf<'a>(this: OPtr<'a, Self, BM::OlcEH>, key: &[u8]) -> Option<OPtr<'a, [u8], BM::OlcEH>> {
         assert!(V::IS_LEAF);
         let index = Self::find(this, key).ok()?;
         let slot_offset = Self::slot_offset(o_project!(this.common.count).r() as usize);
@@ -521,7 +521,7 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>, V: NodeKind> NodeStatic<'bm, BM> 
         Some(this.as_slice().sub(offset + Self::RECORD_TO_KEY_OFFSET + k_len, v_len))
     }
 
-    fn lookup_inner(this: OPtr<Self, BM::OlcEH>, key: &[u8], high_on_equal: bool) -> PageId {
+    fn lookup_inner(this: OPtr<'_, Self, BM::OlcEH>, key: &[u8], high_on_equal: bool) -> PageId {
         assert!(!V::IS_LEAF);
         let index = match Self::find(this, key) {
             Err(i) => i,
@@ -634,17 +634,19 @@ const HEAD_RESERVATION: usize = 16;
 mod tests {
     use crate::basic_node::{BasicNode, NodeKind};
     use crate::key_source::SourceSlice;
-    use crate::node::{page_id_to_bytes, KindInner, KindLeaf, NodeStatic, PAGE_ID_LEN};
+    use crate::node::{page_id_to_bytes, KindInner, KindLeaf, NodeStatic, Page, PAGE_ID_LEN};
     use bytemuck::Zeroable;
     use rand::prelude::SliceRandom;
     use rand::rngs::SmallRng;
     use rand::SeedableRng;
     use std::collections::HashSet;
-    use umolc::{OPtr, PageId, PanicOlcEh};
+    use umolc::{OPtr, PageId, PanicOlcEh, SimpleBm};
+    type BM<'a> = &'a SimpleBm<Page>;
 
     #[test]
     #[allow(clippy::unused_enumerate_index)]
     fn leaf() {
+        let bm: BM = &SimpleBm::new(1);
         let rng = &mut SmallRng::seed_from_u64(42);
         let keys = dev_utils::ascii_bin_generator(10..51);
         let mut keys: Vec<Vec<u8>> = (0..50).map(|i| keys(rng, i)).collect();
@@ -672,7 +674,7 @@ mod tests {
                 }
                 for (_i, k) in keys.iter().enumerate() {
                     let expected = Some(k).filter(|_| inserted.contains(k.as_slice()));
-                    let actual = <NodeStatic<BM> as BasicNode<KindLeaf>>::lookup_leaf(OPtr::from_mut(leaf), &k[..])
+                    let actual = <BasicNode<KindLeaf> as NodeStatic<BM>>::lookup_leaf(OPtr::from_mut(leaf), &k[..])
                         .map(|v| v.load_slice_to_vec());
                     assert_eq!(expected, actual.as_ref());
                 }
@@ -693,7 +695,7 @@ mod tests {
 
     #[test]
     fn split_merge_inner() {
-        let fake_pid = |i| page_id_to_bytes(PageId(i + 1024)).to_vec();
+        let fake_pid = |i| page_id_to_bytes(PageId { x: i + 1024 }).to_vec();
         split_merge::<KindInner>(1, [0; PAGE_ID_LEN], fake_pid);
         split_merge::<KindInner>(0, [0; PAGE_ID_LEN], fake_pid);
     }

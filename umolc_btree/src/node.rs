@@ -142,8 +142,8 @@ pub trait NodeStatic<'bm, BM: BufferManager<'bm, Page = Page>>: NodeDynamic<'bm,
     /// keys are prefix truncated
     fn iter_children(&self) -> impl Iterator<Item = (Self::TruncatedKey<'_>, PageId)>;
 
-    fn lookup_leaf(this: OPtr<'bm, Self, BM::OlcEH>, key: &[u8]) -> Option<OPtr<'bm, [u8], BM::OlcEH>>;
-    fn lookup_inner(this: OPtr<Self, BM::OlcEH>, key: &[u8], high_on_equal: bool) -> PageId;
+    fn lookup_leaf<'a>(this: OPtr<'a, Self, BM::OlcEH>, key: &[u8]) -> Option<OPtr<'a, [u8], BM::OlcEH>>;
+    fn lookup_inner(this: OPtr<'_, Self, BM::OlcEH>, key: &[u8], high_on_equal: bool) -> PageId;
 }
 
 pub trait NodeDynamic<'bm, BM: BufferManager<'bm, Page = Page>>: ToFromPage + NodeDynamicAuto<'bm, BM> + Debug {
@@ -342,10 +342,10 @@ pub fn o_ptr_lookup_inner<'bm, BM: BufferManager<'bm, Page = Page>>(
     BM::OlcEH::optimistic_fail()
 }
 
-pub fn o_ptr_lookup_leaf<'bm, BM: BufferManager<'bm, Page = Page>>(
-    this: OPtr<'_, BM::Page, BM::OlcEH>,
+pub fn o_ptr_lookup_leaf<'a, 'bm, BM: BufferManager<'bm, Page = Page>>(
+    this: OPtr<'a, BM::Page, BM::OlcEH>,
     key: &[u8],
-) -> Option<OPtr<'bm, [u8], BM::OlcEH>> {
+) -> Option<OPtr<'a, [u8], BM::OlcEH>> {
     let tag = o_project!(this.common.tag).r();
     macro_rules! impl_case {
             ($($t:ty),*) => {

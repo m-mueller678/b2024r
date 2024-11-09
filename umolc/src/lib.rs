@@ -13,6 +13,7 @@ mod o_ptr;
 mod optimistic_error;
 mod seqlock;
 
+pub use buffer_manager::*;
 pub use optimistic_error::{PanicOlcEh, UnwindOlcEh};
 
 #[derive(Eq, PartialEq, Clone, Copy)]
@@ -78,6 +79,7 @@ pub trait OptimisticGuard<'bm, BM: BufferManager<'bm>>: BufferManagerGuard<'bm, 
     fn check(&self) -> OlcVersion {
         self.clone().release()
     }
+    fn o_ptr_bm(&self) -> OPtr<'bm, BM::Page, BM::OlcEH>;
 }
 
 pub trait ExclusiveGuard<'bm, BM: BufferManager<'bm>>: BufferManagerGuard<'bm, BM> {

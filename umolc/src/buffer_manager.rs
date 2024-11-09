@@ -23,7 +23,7 @@ impl<P: Pod> SimpleBm<P> {
             SimpleBm {
                 pages: Box::<[MaybeUninit<_>]>::assume_init(Box::new_zeroed_slice(capacity)),
                 locks: Box::<[MaybeUninit<_>]>::assume_init(Box::new_zeroed_slice(capacity)),
-                free_list: Mutex::new(vec![]),
+                free_list: Mutex::new((0..capacity).collect()),
             }
         }
     }
@@ -213,6 +213,10 @@ impl<'bm, BM: CommonSeqLockBM<'bm>> OptimisticGuard<'bm, BM> for SimpleGuardO<'b
             self.bm.lock(self.bm.pid_from_address(self.ptr.to_raw().addr())).try_unlock_optimistic(self.version),
         );
         self.version
+    }
+
+    fn o_ptr_bm(&self) -> OPtr<'bm, BM::Page, BM::OlcEH> {
+        self.ptr
     }
 }
 

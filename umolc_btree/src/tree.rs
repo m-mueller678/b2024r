@@ -152,9 +152,9 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> Tree<'bm, BM> {
     }
 
     pub fn try_lookup(&self, k: &[u8]) -> Option<(BM::GuardO, OPtr<[u8], BM::OlcEH>)> {
-        let [parent, node] = self.descend(k, None);
+        let [parent, mut node] = self.descend(k, None);
         drop(parent);
-        let val = o_ptr_lookup_leaf::<BM>(node.o_ptr(), k)?;
+        let val = o_ptr_lookup_leaf::<BM>(node.o_ptr_bm(), k)?;
         Some((node, val))
     }
 
@@ -217,11 +217,11 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeStatic<'bm, BM> for MetadataP
         std::iter::once((&[][..], self.root))
     }
 
-    fn lookup_leaf(this: OPtr<'bm, Self, BM::OlcEH>, key: &[u8]) -> Option<OPtr<'bm, [u8], BM::OlcEH>> {
+    fn lookup_leaf<'a>(this: OPtr<'a, Self, BM::OlcEH>, key: &[u8]) -> Option<OPtr<'a, [u8], BM::OlcEH>> {
         BM::OlcEH::optimistic_fail()
     }
 
-    fn lookup_inner(this: OPtr<Self, BM::OlcEH>, key: &[u8], high_on_equal: bool) -> PageId {
+    fn lookup_inner(this: OPtr<'_, Self, BM::OlcEH>, key: &[u8], high_on_equal: bool) -> PageId {
         PageId { x: o_project!(this.root.x).r() }
     }
 }
