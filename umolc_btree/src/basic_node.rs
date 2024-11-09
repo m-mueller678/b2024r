@@ -120,7 +120,7 @@ impl<V: NodeKind> BasicNode<V> {
     }
 
     fn stored_record_size(&self, offset: usize) -> usize {
-        self.u16(offset).saturating_sub(4) + self.record_val_len(offset)
+        Self::RECORD_TO_KEY_OFFSET + self.u16(offset).saturating_sub(4) + self.record_val_len(offset)
     }
 
     fn key_tail(&self, index: usize) -> &[u8] {
@@ -309,11 +309,12 @@ impl<V: NodeKind> BasicNode<V> {
     fn compactify(&mut self) {
         let buffer = &mut [0u8; PAGE_SIZE];
         let heap_end = self.fences_start();
-        let dst_offset = heap_end;
+        let mut dst_offset = heap_end;
         for i in 0..self.common.count as usize {
             let offset = self.slots()[i] as usize;
             let val_len = if V::IS_LEAF { self.u16(offset + 2) } else { PAGE_ID_LEN };
-            let record_len = Self::RECORD_TO_KEY_OFFSET + self.u16(offset) + val_len;
+            let record_len = Self::RECORD_TO_KEY_OFFSET + self.u16(offset).saturating_sub(4) + val_len;
+            dst_offset -= record_len;
             buffer[dst_offset..][..record_len].copy_from_slice(self.slice(offset, record_len));
             self.set_slot(i, dst_offset);
         }
@@ -407,6 +408,7 @@ impl<V: NodeKind> BasicNode<V> {
                         self.heap_freed += self.stored_record_size(self.slots()[existing] as usize) as u16;
                         self.heap_write_new(key, val, existing);
                         self.validate();
+                        return Ok(Some(()));
                     }
                 }
                 Err(insert_at) => {
