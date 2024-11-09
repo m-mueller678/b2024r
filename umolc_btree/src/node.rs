@@ -142,8 +142,8 @@ pub trait NodeStatic<'bm, BM: BufferManager<'bm, Page = Page>>: NodeDynamic<'bm,
     /// keys are prefix truncated
     fn iter_children(&self) -> impl Iterator<Item = (Self::TruncatedKey<'_>, PageId)>;
 
-    fn lookup_leaf(this: OPtr<'bm, Self, BM>, key: &[u8]) -> Option<OPtr<'bm, [u8], BM>>;
-    fn lookup_inner(this: OPtr<Self, BM>, key: &[u8], high_on_equal: bool) -> PageId;
+    fn lookup_leaf(this: OPtr<'bm, Self, BM::OlcEH>, key: &[u8]) -> Option<OPtr<'bm, [u8], BM::OlcEH>>;
+    fn lookup_inner(this: OPtr<Self, BM::OlcEH>, key: &[u8], high_on_equal: bool) -> PageId;
 }
 
 pub trait NodeDynamic<'bm, BM: BufferManager<'bm, Page = Page>>: ToFromPage + NodeDynamicAuto<'bm, BM> + Debug {
@@ -326,7 +326,7 @@ impl Page {
 }
 
 #[ext(name = OPtrPageExt)]
-pub impl<'bm, BM: BufferManager<'bm, Page = Page>> OPtr<'bm, Page, BM> {
+pub impl<'bm, BM: BufferManager<'bm, Page = Page>> OPtr<'bm, Page, BM::OlcEH> {
     fn lookup_inner(self, key: &[u8], high_on_equal: bool) -> PageId {
         let tag = o_project!(self.common.tag).r();
         macro_rules! impl_case {
@@ -337,10 +337,10 @@ pub impl<'bm, BM: BufferManager<'bm, Page = Page>> OPtr<'bm, Page, BM> {
             };
         }
         impl_case!(BasicInner, BasicLeaf, MetadataPage);
-        BM::optimistic_fail()
+        BM::OlcEH::optimistic_fail()
     }
 
-    fn lookup_leaf(self, key: &[u8]) -> Option<OPtr<'bm, [u8], BM>> {
+    fn lookup_leaf(self, key: &[u8]) -> Option<OPtr<'bm, [u8], BM::OlcEH>> {
         let tag = o_project!(self.common.tag).r();
         macro_rules! impl_case {
             ($($t:ty),*) => {
@@ -350,7 +350,7 @@ pub impl<'bm, BM: BufferManager<'bm, Page = Page>> OPtr<'bm, Page, BM> {
             };
         }
         impl_case!(BasicInner, BasicLeaf, MetadataPage);
-        BM::optimistic_fail()
+        BM::OlcEH::optimistic_fail()
     }
 
     fn o_ptr_is_inner(self) -> bool {
@@ -363,6 +363,6 @@ pub impl<'bm, BM: BufferManager<'bm, Page = Page>> OPtr<'bm, Page, BM> {
             };
         }
         impl_case!(BasicInner, BasicLeaf, MetadataPage);
-        BM::optimistic_fail()
+        BM::OlcEH::optimistic_fail()
     }
 }

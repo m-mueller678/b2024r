@@ -34,7 +34,7 @@ impl OptimisticError {
 pub trait OlcErrorHandler {
     fn optmistic_fail_check(r: Result<(), OptimisticError>) {
         if let Err(e) = r {
-            Self::optmistic_fail_with(e)
+            Self::optimistic_fail_with(e)
         }
     }
     fn optimistic_fail_with(e: OptimisticError) -> ! {

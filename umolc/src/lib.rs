@@ -12,7 +12,7 @@ mod o_ptr;
 mod seqlock;
 mod unwind;
 
-#[derive(Eq, PartialEq)]
+#[derive(Eq, PartialEq, Clone, Copy)]
 pub struct OlcVersion {
     pub x: u64,
 }
@@ -41,7 +41,7 @@ pub trait BufferManager<'bm>: 'bm + Copy + Send + Sync + Sized {
 pub trait BufferManagerExt<'bm>: BufferManager<'bm> {
     fn repeat<R>(mut f: impl FnMut() -> R) -> R {
         loop {
-            if let Ok(x) = Self::catch(&mut f) {
+            if let Ok(x) = Self::OlcEH::catch(&mut f) {
                 return x;
             }
         }
@@ -65,7 +65,7 @@ pub trait BufferManagerGuard<'bm, B: BufferManager<'bm>>: Sized {
     fn acquire_wait_version(bm: B, page_id: PageId, v: OlcVersion) -> Option<Self>;
     fn release(self) -> OlcVersion;
     fn page_id(&self) -> PageId;
-    fn o_ptr(&self) -> OPtr<'bm, B::Page, B::OlcEH>;
+    fn o_ptr<'a>(&'a mut self) -> OPtr<'a, B::Page, B::OlcEH>;
 }
 
 pub trait OptimisticGuard<'bm, BM: BufferManager<'bm>>: BufferManagerGuard<'bm, BM> + Clone {

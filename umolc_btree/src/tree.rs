@@ -150,7 +150,7 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> Tree<'bm, BM> {
         BM::repeat(|| self.try_lookup(k).map(|v| v.1.load_slice_to_vec()))
     }
 
-    pub fn try_lookup(&self, k: &[u8]) -> Option<(BM::GuardO, OPtr<[u8], BM>)> {
+    pub fn try_lookup(&self, k: &[u8]) -> Option<(BM::GuardO, OPtr<[u8], BM::OlcEH>)> {
         let [parent, node] = self.descend(k, None);
         drop(parent);
         let val = node.o_ptr().lookup_leaf(k)?;
@@ -216,11 +216,11 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeStatic<'bm, BM> for MetadataP
         std::iter::once((&[][..], self.root))
     }
 
-    fn lookup_leaf(this: OPtr<'bm, Self, BM>, key: &[u8]) -> Option<OPtr<'bm, [u8], BM>> {
+    fn lookup_leaf(this: OPtr<'bm, Self, BM::OlcEH>, key: &[u8]) -> Option<OPtr<'bm, [u8], BM::OlcEH>> {
         BM::optimistic_fail()
     }
 
-    fn lookup_inner(this: OPtr<Self, BM>, key: &[u8], high_on_equal: bool) -> PageId {
+    fn lookup_inner(this: OPtr<Self, BM::OlcEH>, key: &[u8], high_on_equal: bool) -> PageId {
         PageId { x: o_project!(this.root.x).r() }
     }
 }

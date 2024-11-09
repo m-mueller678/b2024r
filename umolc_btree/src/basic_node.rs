@@ -511,7 +511,7 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>, V: NodeKind> NodeStatic<'bm, BM> 
         lower.chain(rest).map(|(k, o)| (k, page_id_from_bytes(self.page_id_bytes(o))))
     }
 
-    fn lookup_leaf(this: OPtr<'bm, Self, BM>, key: &[u8]) -> Option<OPtr<'bm, [u8], BM>> {
+    fn lookup_leaf(this: OPtr<'bm, Self, BM::OlcEH>, key: &[u8]) -> Option<OPtr<'bm, [u8], BM::OlcEH>> {
         assert!(V::IS_LEAF);
         let index = Self::find(this, key).ok()?;
         let slot_offset = Self::slot_offset(o_project!(this.common.count).r() as usize);
@@ -521,7 +521,7 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>, V: NodeKind> NodeStatic<'bm, BM> 
         Some(this.as_slice().sub(offset + Self::RECORD_TO_KEY_OFFSET + k_len, v_len))
     }
 
-    fn lookup_inner(this: OPtr<Self, BM>, key: &[u8], high_on_equal: bool) -> PageId {
+    fn lookup_inner(this: OPtr<Self, BM::OlcEH>, key: &[u8], high_on_equal: bool) -> PageId {
         assert!(!V::IS_LEAF);
         let index = match Self::find(this, key) {
             Err(i) => i,
@@ -544,13 +544,13 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>, V: NodeKind> NodeDynamic<'bm, BM>
     }
     #[allow(clippy::result_unit_err)]
     fn insert_inner(&mut self, key: &[u8], pid: PageId) -> Result<(), ()> {
-        let x = self.insert::<BM>(key, &page_id_to_bytes(pid));
+        let x = self.insert::<BM::OlcEH>(key, &page_id_to_bytes(pid));
         self.validate();
         x.map(|x| debug_assert!(x.is_none()))
     }
 
     fn insert_leaf(&mut self, key: &[u8], val: &[u8]) -> Result<Option<()>, ()> {
-        let ret = self.insert::<BM>(key, val);
+        let ret = self.insert::<BM::OlcEH>(key, val);
         self.validate();
         ret
     }
@@ -634,7 +634,7 @@ const HEAD_RESERVATION: usize = 16;
 mod tests {
     use crate::basic_node::{BasicNode, NodeKind};
     use crate::key_source::SourceSlice;
-    use crate::node::{page_id_to_bytes, KindInner, KindLeaf, PAGE_ID_LEN};
+    use crate::node::{page_id_to_bytes, KindInner, KindLeaf, NodeStatic, PAGE_ID_LEN};
     use bytemuck::Zeroable;
     use rand::prelude::SliceRandom;
     use rand::rngs::SmallRng;

@@ -1,4 +1,4 @@
-use crate::OptimisticError;
+use crate::{OlcVersion, OptimisticError};
 use radium::Radium;
 use std::sync::atomic::Ordering::{Acquire, Relaxed, Release};
 use std::sync::atomic::{fence, AtomicU64};
@@ -19,22 +19,22 @@ pub trait VersionFilter: Copy {
 
 impl VersionFilter for () {
     type E = !;
-    type R = u64;
+    type R = OlcVersion;
     fn check(self, v: u64) -> Result<(), Self::E> {
         Ok(())
     }
 
     fn map_r(self, v: u64) -> Self::R {
-        v
+        OlcVersion { x: v }
     }
 }
 
-impl VersionFilter for u64 {
+impl VersionFilter for OlcVersion {
     type E = OptimisticError;
     type R = ();
 
     fn check(self, v: u64) -> Result<Self::R, Self::E> {
-        if v == self {
+        if v == self.x {
             Ok(())
         } else {
             Err(OptimisticError::new())
@@ -42,7 +42,7 @@ impl VersionFilter for u64 {
     }
 
     fn map_r(self, v: u64) -> Self::R {
-        debug_assert!(v == self);
+        debug_assert!(v == self.x);
     }
 }
 
@@ -65,8 +65,8 @@ impl SeqLock {
         }
     }
 
-    pub fn unlock_shared(&self) -> u64 {
-        self.0.fetch_sub(1, Release) >> VERSION_SHIFT
+    pub fn unlock_shared(&self) -> OlcVersion {
+        OlcVersion { x: self.0.fetch_sub(1, Release) >> VERSION_SHIFT }
     }
 
     fn wait(&self) {
@@ -100,8 +100,8 @@ impl SeqLock {
     }
 
     /// returns version after unlocking
-    pub fn unlock_exclusive(&self) -> u64 {
-        (self.0.fetch_add(EXCLUSIVE_MASK, Release) + EXCLUSIVE_MASK) >> VERSION_SHIFT
+    pub fn unlock_exclusive(&self) -> OlcVersion {
+        OlcVersion { x: (self.0.fetch_add(EXCLUSIVE_MASK, Release) + EXCLUSIVE_MASK) >> VERSION_SHIFT }
     }
 
     pub fn lock_optimistic<F: VersionFilter>(&self, f: F) -> Result<F::R, F::E> {
@@ -116,10 +116,10 @@ impl SeqLock {
         }
     }
 
-    pub fn try_unlock_optimistic(&self, v: u64) -> Result<(), OptimisticError> {
+    pub fn try_unlock_optimistic(&self, v: OlcVersion) -> Result<(), OptimisticError> {
         fence(Acquire);
         let x = self.0.load(Relaxed);
-        if (x & !COUNT_MASK) == v << VERSION_SHIFT {
+        if (x & !COUNT_MASK) == v.x << VERSION_SHIFT {
             Ok(())
         } else {
             Err(OptimisticError::new())

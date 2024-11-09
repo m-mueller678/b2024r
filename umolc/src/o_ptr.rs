@@ -32,6 +32,11 @@ impl<'a, T: Pod, O: OlcErrorHandler> OPtr<'a, T, O> {
     }
 
     #[allow(clippy::missing_safety_doc)]
+    pub unsafe fn from_ref(x: &'a T) -> Self {
+        OPtr { p: x as *const T, _p: PhantomData, _bm: PhantomData }
+    }
+
+    #[allow(clippy::missing_safety_doc)]
     pub unsafe fn from_raw(p: *const T) -> Self {
         OPtr { p, _p: PhantomData, _bm: PhantomData }
     }
