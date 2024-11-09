@@ -614,13 +614,18 @@ const HEAD_RESERVATION: usize = 16;
 #[cfg(test)]
 mod tests {
     use crate::basic_node::{BasicNode, NodeKind};
-    use crate::node::{page_id_to_bytes, KindInner, KindLeaf, NodeStatic, Page, PAGE_ID_LEN};
+    use crate::key_source::SourceSlice;
+    use crate::node::{
+        page_id_from_bytes, page_id_to_bytes, KindInner, KindLeaf, NodeDynamic, NodeStatic, Page, ToFromPageExt,
+        PAGE_ID_LEN,
+    };
     use bytemuck::Zeroable;
     use rand::prelude::SliceRandom;
     use rand::rngs::SmallRng;
     use rand::SeedableRng;
     use std::collections::HashSet;
-    use umolc::{OPtr, PageId, PanicOlcEh, SimpleBm};
+    use umolc::{BufferManager, BufferManagerExt, BufferManagerGuard, OPtr, PageId, PanicOlcEh, SimpleBm};
+
     type BM<'a> = &'a SimpleBm<Page>;
 
     #[test]
@@ -669,21 +674,52 @@ mod tests {
         }
     }
 
-    fn split_merge<V: NodeKind>(_ufb: u8, _lower: [u8; PAGE_ID_LEN], _val: impl FnMut(u64) -> Vec<u8>) {
-        todo!()
+    fn split_merge<V: NodeKind>(ufb: u8, lower: Option<&[u8; 5]>, mut val: impl FnMut(u64) -> Vec<u8>) {
+        let bm: BM = &SimpleBm::new(2);
+        let mut g1 = bm.alloc();
+        let mut g2 = bm.alloc();
+        g2.cast_mut::<BasicNode<KindInner>>().init(&[][..], &[][..], Some(&page_id_to_bytes(g1.page_id())));
+        let n1 = g1.cast_mut::<BasicNode<V>>();
+        n1.init(&[0][..], &[ufb, 1][..], lower);
+        for i in 0u64.. {
+            if n1.insert::<PanicOlcEh>(&i.to_be_bytes()[..], &val(i)).is_err() {
+                break;
+            }
+        }
+        let s1 = NodeDynamic::<BM>::to_debug_kv(n1);
+        n1.split(bm, g2.as_dyn_node_mut()).unwrap();
+        n1.validate();
+        g2.as_dyn_node_mut::<BM>().validate();
+        let (g2_keys, g2_values) = g2.as_dyn_node_mut::<BM>().to_debug_kv();
+        assert_eq!(g2_keys.len(), 1);
+        assert_eq!(g2_values.len(), 2);
+        let mut g3 = bm.lock_exclusive(page_id_from_bytes(&g2_values[0][..].try_into().unwrap()));
+        let n3 = g3.cast::<BasicNode<V>>();
+        assert_eq!(n1.upper_fence_combined().to_vec(), g2_keys[0]);
+        assert_eq!(g3.lower_fence().to_vec(), g2_keys[0]);
+        assert_eq!([NodeDynamic::<BM>::to_debug_kv(n1).1, NodeDynamic::<BM>::to_debug_kv(n3).1].concat(), s1.1);
+        NodeDynamic::<BM>::merge(n1, &mut *g3);
+        n1.validate();
+        assert_eq!(s1, NodeDynamic::<BM>::to_debug_kv(n1));
     }
 
     #[test]
     fn split_merge_leaf() {
-        let val = |i: u64| i.to_be_bytes().to_vec();
-        split_merge::<KindLeaf>(1, [0; PAGE_ID_LEN], val);
-        split_merge::<KindLeaf>(0, [0; PAGE_ID_LEN], val);
+        let val = |i: u64| {
+            let mut v = i.to_be_bytes().to_vec();
+            if i % 2 == 0 {
+                v.push(42);
+            }
+            v
+        };
+        split_merge::<KindLeaf>(1, None, val);
+        split_merge::<KindLeaf>(0, None, val);
     }
 
     #[test]
     fn split_merge_inner() {
         let fake_pid = |i| page_id_to_bytes(PageId { x: i + 1024 }).to_vec();
-        split_merge::<KindInner>(1, [0; PAGE_ID_LEN], fake_pid);
-        split_merge::<KindInner>(0, [0; PAGE_ID_LEN], fake_pid);
+        split_merge::<KindInner>(1, Some(&[0; PAGE_ID_LEN]), fake_pid);
+        split_merge::<KindInner>(0, Some(&[0; PAGE_ID_LEN]), fake_pid);
     }
 }
