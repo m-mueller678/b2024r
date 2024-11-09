@@ -49,7 +49,7 @@ impl<'a, T: Pod, O: OlcErrorHandler> OPtr<'a, T, O> {
     }
 
     pub fn read_unaligned_nonatomic_u16(self, offset: usize) -> usize {
-        if offset + 2 <= size_of::<Self>() {
+        if offset + 2 <= size_of::<T>() {
             unsafe { ((self.p as *const u8).add(offset) as *const u16).read_unaligned() as usize }
         } else {
             O::optimistic_fail()
@@ -63,8 +63,8 @@ impl<'a, T: Pod, O: OlcErrorHandler> OPtr<'a, T, O> {
     }
 
     pub fn array_slice<const L: usize>(self, offset: usize) -> OPtr<'a, [u8; L], O> {
-        assert!(L <= size_of::<Self>());
-        if offset > size_of::<Self>() - L {
+        assert!(L <= size_of::<T>());
+        if offset > size_of::<T>() - L {
             O::optimistic_fail()
         }
         unsafe { OPtr { p: (self.p as *const u8).add(offset) as *const [u8; L], _bm: PhantomData, _p: PhantomData } }
