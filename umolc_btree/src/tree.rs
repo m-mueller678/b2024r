@@ -93,7 +93,7 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> Tree<'bm, BM> {
                 let mut node: BM::GuardX = node.upgrade();
                 let mut parent: BM::GuardX = parent.upgrade();
                 self.ensure_parent_not_meta(&mut parent);
-                if self.split_locked_node(k, node.as_dyn_node_mut(), parent.as_dyn_node_mut()).is_ok() {
+                if self.split_locked_node(node.as_dyn_node_mut(), parent.as_dyn_node_mut()).is_ok() {
                     None
                 } else {
                     Some(parent.page_id())
@@ -131,7 +131,7 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> Tree<'bm, BM> {
                 node.reset_written();
                 let mut parent = parent.upgrade();
                 self.ensure_parent_not_meta(&mut parent);
-                if self.split_locked_node(k, node.as_dyn_node_mut(), parent.as_dyn_node_mut()).is_err() {
+                if self.split_locked_node(node.as_dyn_node_mut(), parent.as_dyn_node_mut()).is_err() {
                     let parent_id = parent.page_id();
                     drop(parent);
                     drop(node);
@@ -158,7 +158,6 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> Tree<'bm, BM> {
 
     fn split_locked_node(
         &self,
-        k: &[u8],
         node: &mut dyn NodeDynamic<'bm, BM>,
         parent: &mut dyn NodeDynamic<'bm, BM>,
     ) -> Result<(), ()> {
@@ -188,7 +187,7 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> Drop for Tree<'bm, BM> {
     fn drop(&mut self) {
         let mut meta_lock = self.bm.lock_exclusive(self.meta);
         meta_lock.cast_mut::<MetadataPage>().free_children(self.bm);
-        self.bm.free(meta_lock);
+        meta_lock.dealloc();
     }
 }
 
@@ -215,17 +214,17 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeStatic<'bm, BM> for MetadataP
         std::iter::once((&[][..], self.root))
     }
 
-    fn lookup_leaf<'a>(this: OPtr<'a, Self, BM::OlcEH>, key: &[u8]) -> Option<OPtr<'a, [u8], BM::OlcEH>> {
+    fn lookup_leaf<'a>(_this: OPtr<'a, Self, BM::OlcEH>, _key: &[u8]) -> Option<OPtr<'a, [u8], BM::OlcEH>> {
         BM::OlcEH::optimistic_fail()
     }
 
-    fn lookup_inner(this: OPtr<'_, Self, BM::OlcEH>, key: &[u8], high_on_equal: bool) -> PageId {
+    fn lookup_inner(this: OPtr<'_, Self, BM::OlcEH>, _key: &[u8], _high_on_equal: bool) -> PageId {
         PageId { x: o_project!(this.root.x).r() }
     }
 }
 
 impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeDynamic<'bm, BM> for MetadataPage {
-    fn split<'g>(&mut self, bm: BM, parent: &mut dyn NodeDynamic<'bm, BM>) -> Result<(), ()> {
+    fn split<'g>(&mut self, _bm: BM, _parent: &mut dyn NodeDynamic<'bm, BM>) -> Result<(), ()> {
         unimplemented!()
     }
 
@@ -233,21 +232,21 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeDynamic<'bm, BM> for Metadata
         todo!()
     }
 
-    fn merge(&mut self, right: &mut Page) {
+    fn merge(&mut self, _right: &mut Page) {
         unimplemented!()
     }
 
     fn validate(&self) {}
 
-    fn insert_inner(&mut self, key: &[u8], pid: PageId) -> Result<(), ()> {
+    fn insert_inner(&mut self, _key: &[u8], _pid: PageId) -> Result<(), ()> {
         unimplemented!()
     }
 
-    fn insert_leaf(&mut self, key: &[u8], val: &[u8]) -> Result<Option<()>, ()> {
+    fn insert_leaf(&mut self, _key: &[u8], _val: &[u8]) -> Result<Option<()>, ()> {
         unimplemented!()
     }
 
-    fn leaf_remove(&mut self, k: &[u8]) -> Option<()> {
+    fn leaf_remove(&mut self, _k: &[u8]) -> Option<()> {
         todo!()
     }
 }

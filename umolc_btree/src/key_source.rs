@@ -1,11 +1,4 @@
-pub struct TransferSourceSlice<'a> {
-    prefix: &'a [u8],
-    head: u32,
-    head_len: u32,
-    key: &'a [u8],
-}
-
-use bytemuck::{Pod, Zeroable};
+use bytemuck::Pod;
 use std::cmp::Ordering;
 use std::collections::Bound;
 use std::marker::PhantomData;

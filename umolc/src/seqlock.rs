@@ -1,6 +1,5 @@
 use crate::{OlcVersion, OptimisticError};
 use bytemuck::Zeroable;
-use radium::Radium;
 use std::sync::atomic::Ordering::{Acquire, Relaxed, Release};
 use std::sync::atomic::{fence, AtomicU64};
 
@@ -22,7 +21,7 @@ pub trait VersionFilter: Copy {
 impl VersionFilter for () {
     type E = !;
     type R = OlcVersion;
-    fn check(self, v: u64) -> Result<(), Self::E> {
+    fn check(self, _v: u64) -> Result<(), Self::E> {
         Ok(())
     }
 

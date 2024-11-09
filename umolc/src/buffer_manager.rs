@@ -130,7 +130,7 @@ pub struct SimpleGuardX<'bm, BM: CommonSeqLockBM<'bm>> {
 
 impl<'bm, BM: CommonSeqLockBM<'bm>> BufferManagerGuard<'bm, BM> for SimpleGuardX<'bm, BM> {
     fn acquire_wait(bm: BM, page_id: PageId) -> Self {
-        let Ok(version) = bm.lock(page_id).lock_exclusive(());
+        let Ok(_version) = bm.lock(page_id).lock_exclusive(());
         SimpleGuardX { bm, ptr: unsafe { &mut *bm.page(page_id).get() } }
     }
 

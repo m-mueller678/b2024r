@@ -11,7 +11,6 @@ use bytemuck::{Pod, Zeroable};
 use indxvec::Search;
 use itertools::Itertools;
 use std::fmt::{Debug, Formatter};
-use std::io::Read;
 use std::marker::PhantomData;
 use std::mem::{offset_of, size_of};
 use std::ops::Range;
@@ -242,9 +241,8 @@ impl<V: NodeKind> BasicNode<V> {
         }
     }
 
-    /// returns the number of keys in the low node and the separator
+    /// returns the number of keys in the low node and the separator (including prefix)
     fn find_separator(&self) -> (usize, impl SourceSlice<u8> + '_) {
-        let prefix_len = self.common.prefix_len as usize;
         let count = self.common.count as usize;
         if V::IS_LEAF {
             let range_start = count / 2 - count / 8;
@@ -623,7 +621,7 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>, V: NodeKind> NodeDynamic<'bm, BM>
         (keys, vals)
     }
 
-    fn leaf_remove(&mut self, k: &[u8]) -> Option<()> {
+    fn leaf_remove(&mut self, _k: &[u8]) -> Option<()> {
         todo!()
     }
 }

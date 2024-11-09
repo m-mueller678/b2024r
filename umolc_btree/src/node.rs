@@ -7,7 +7,9 @@ use bytemuck::{Pod, Zeroable};
 use static_assertions::{assert_impl_all, const_assert_eq};
 use std::fmt::Debug;
 use std::mem::{swap, transmute};
-use umolc::{o_project, BufferManager, BufferManagerExt, BufferManagerGuard, OPtr, OlcErrorHandler, PageId};
+use umolc::{
+    o_project, BufferManager, BufferManagerExt, BufferManagerGuard, ExclusiveGuard, OPtr, OlcErrorHandler, PageId,
+};
 
 pub mod node_tag {
     pub const METADATA_MARKER: u8 = 43;
@@ -296,7 +298,7 @@ pub fn insert_upper_sibling<'bm, BM: BufferManager<'bm, Page = Page>>(
         if let Ok(()) = parent.insert_inner(sep, new_guard.page_id()) {
             Ok(new_guard)
         } else {
-            bm.free(new_guard);
+            new_guard.dealloc();
             Err(())
         }
     })

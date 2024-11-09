@@ -64,7 +64,7 @@ impl OlcErrorHandler for PanicOlcEh {
         panic!("{e}")
     }
 
-    fn catch<R>(f: impl FnOnce() -> R) -> Result<R, OptimisticError> {
+    fn catch<R>(_f: impl FnOnce() -> R) -> Result<R, OptimisticError> {
         unimplemented!()
     }
 }
