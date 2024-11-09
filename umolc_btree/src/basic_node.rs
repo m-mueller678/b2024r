@@ -44,20 +44,13 @@ macro_rules! def_basic_node {
     }
 }
 
-#[derive(Clone, Copy)]
-#[repr(transparent)]
-struct BasicNodeDataArea([u32; BASIC_NODE_DATA_SIZE]);
-
-unsafe impl Zeroable for BasicNodeDataArea {}
-unsafe impl Pod for BasicNodeDataArea {}
-
 def_basic_node! {
     common: CommonNodeHead,
     heap_bump: u16,
     heap_freed: u16,
     _pad: u16,
     hints: [u32; HINT_COUNT],
-    _data: BasicNodeDataArea,
+    _data: [u32; BASIC_NODE_DATA_SIZE],
 }
 
 pub type BasicLeaf = BasicNode<KindLeaf>;

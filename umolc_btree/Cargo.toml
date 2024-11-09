@@ -5,7 +5,7 @@ edition = "2021"
 
 [dependencies]
 umolc = {path = "../umolc"}
-bytemuck = { version = "1.19.0",features = ["derive"] }
+bytemuck = { version = "1.19.0",features = ["derive","min_const_generics"] }
 as_base = "0.1.3"
 extend = "1.2.0"
 static_assertions = "1.1.0"
