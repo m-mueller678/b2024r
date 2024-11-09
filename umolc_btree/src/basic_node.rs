@@ -123,21 +123,17 @@ impl<V: NodeKind> BasicNode<V> {
         self.u16(offset).saturating_sub(4) + self.record_val_len(offset)
     }
 
-    // fn key_tail_len(self, index: usize) -> (Guarded<'a, M, [u8]>, usize)
-    // where
-    //     Self: Copy,
-    // {
-    //     self.key_tail_len_with_slots(index, self.slots())
-    // }
-
     fn key_tail(&self, index: usize) -> &[u8] {
         let offset = self.slots()[index] as usize;
-        self.slice(offset + Self::RECORD_TO_KEY_OFFSET, self.u16(offset))
+        self.slice(offset + Self::RECORD_TO_KEY_OFFSET, self.u16(offset).saturating_sub(4))
     }
 
     fn val(&self, index: usize) -> &[u8] {
         let offset = self.slots()[index] as usize;
-        self.slice(offset + Self::RECORD_TO_KEY_OFFSET + self.u16(offset), self.record_val_len(offset))
+        self.slice(
+            offset + Self::RECORD_TO_KEY_OFFSET + self.u16(offset).saturating_sub(4),
+            self.record_val_len(offset),
+        )
     }
 
     fn find<O: OlcErrorHandler>(this: OPtr<Self, O>, key: &[u8]) -> Result<usize, usize>
@@ -405,7 +401,7 @@ impl<V: NodeKind> BasicNode<V> {
         if !V::IS_LEAF {
             assert_eq!(val.len(), PAGE_ID_LEN);
         }
-        let key = &key[self.common.count as usize..];
+        let key = &key[self.common.prefix_len as usize..];
         let index = Self::find_truncated::<O>(OPtr::from_mut(self), key);
         let count = self.common.count as usize;
         let record_size = Self::record_size(key.len().saturating_sub(4), val.len());
@@ -505,10 +501,10 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>, V: NodeKind> NodeStatic<'bm, BM> 
         assert!(V::IS_LEAF);
         let index = Self::find(this, key).ok()?;
         let slot_offset = Self::slot_offset(o_project!(this.common.count).r() as usize);
-        let offset = this.as_slice::<u16>().i(slot_offset / 2 + index - 1).r() as usize;
-        let k_len = this.read_unaligned_nonatomic_u16(offset);
+        let offset = this.as_slice::<u16>().i(slot_offset / 2 + index).r() as usize;
+        let k_tail_len = this.read_unaligned_nonatomic_u16(offset).saturating_sub(4);
         let v_len = this.read_unaligned_nonatomic_u16(offset + 2);
-        Some(this.as_slice().sub(offset + Self::RECORD_TO_KEY_OFFSET + k_len, v_len))
+        Some(this.as_slice().sub(offset + Self::RECORD_TO_KEY_OFFSET + k_tail_len, v_len))
     }
 
     fn lookup_inner(this: OPtr<'_, Self, BM::OlcEH>, key: &[u8], high_on_equal: bool) -> PageId {
