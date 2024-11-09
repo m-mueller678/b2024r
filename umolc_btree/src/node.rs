@@ -318,11 +318,29 @@ impl Page {
         uf.slice_start(self.common.prefix_len as usize).write_to(self.slice_mut(size_of::<Self>() - ll - ul, ul));
     }
 
-    pub fn as_dyn_node<'bm, BM: BufferManager<'bm>>(&self) -> &dyn NodeDynamic<'bm, BM> {
-        todo!()
+    pub fn as_dyn_node<'bm, BM: BufferManager<'bm, Page = Page>>(&self) -> &dyn NodeDynamic<'bm, BM> {
+        let tag = self.common.tag;
+        macro_rules! impl_case {
+            ($($t:ty),*) => {
+                $(if tag==<$t as NodeStatic<'bm,BM>>::TAG {
+                    return self.cast::<$t>()
+                })*
+            };
+        }
+        impl_case!(BasicInner, BasicLeaf, MetadataPage);
+        panic!("unexpected node tag: {tag}");
     }
-    pub fn as_dyn_node_mut<'bm, BM: BufferManager<'bm>>(&mut self) -> &mut dyn NodeDynamic<'bm, BM> {
-        todo!()
+    pub fn as_dyn_node_mut<'bm, BM: BufferManager<'bm, Page = Page>>(&mut self) -> &mut dyn NodeDynamic<'bm, BM> {
+        let tag = self.common.tag;
+        macro_rules! impl_case {
+            ($($t:ty),*) => {
+                $(if tag==<$t as NodeStatic<'bm,BM>>::TAG {
+                    return self.cast_mut::<$t>()
+                })*
+            };
+        }
+        impl_case!(BasicInner, BasicLeaf, MetadataPage);
+        panic!("unexpected node tag: {tag}");
     }
 }
 
