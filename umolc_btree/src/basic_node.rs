@@ -633,7 +633,7 @@ const HEAD_RESERVATION: usize = 16;
 
 #[cfg(test)]
 mod tests {
-    use crate::basic_node::{BasicNode, NodeKind};
+    use crate::basic_node::{BasicInner, BasicNode, NodeKind};
     use crate::key_source::SourceSlice;
     use crate::node::{
         page_id_from_bytes, page_id_to_bytes, KindInner, KindLeaf, NodeDynamic, NodeStatic, Page, ToFromPageExt,
@@ -691,6 +691,31 @@ mod tests {
                     assert_eq!(expected, actual.as_ref());
                 }
             }
+        }
+    }
+
+    #[test]
+    fn inner_iter_debug() {
+        let rng = &mut SmallRng::seed_from_u64(700);
+        let node = &mut BasicInner::zeroed();
+        let keys = dev_utils::alpha_generator(10..20);
+        let mut keys: Vec<Vec<u8>> = (0..30).map(|i| keys(rng, i)).collect();
+        keys.sort();
+        keys.dedup();
+        let leaf = &mut BasicNode::<KindLeaf>::zeroed();
+        for (_k, keys) in dev_utils::subslices(&keys, 5).enumerate() {
+            node.init(&*keys[0], &*keys[keys.len() - 1], Some(&[1; 5]));
+            for (i, k) in keys[1..keys.len() - 1].iter().enumerate() {
+                if NodeDynamic::<BM>::insert_inner(node, k, PageId { x: i as u64 }).is_err() {
+                    break;
+                }
+            }
+            let (mut keys, vals): (Vec<_>, Vec<_>) =
+                NodeStatic::<BM>::iter_children(node).map(|(k, v)| (k.to_vec(), page_id_to_bytes(v).to_vec())).unzip();
+            keys.remove(0);
+            let debug = NodeDynamic::<BM>::to_debug(node);
+            assert_eq!(keys, debug.keys);
+            assert_eq!(vals, debug.values);
         }
     }
 
