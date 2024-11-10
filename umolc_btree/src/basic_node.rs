@@ -467,6 +467,9 @@ impl<V: NodeKind> Debug for BasicNode<V> {
         fields!(self => heap_bump, heap_freed);
         s.field("lf", &BStr::new(self.lower_fence()));
         s.field("uf", &BString::new(self.upper_fence_combined().to_vec()));
+        if !V::IS_LEAF {
+            s.field("lower", &page_id_from_bytes(self.lower()));
+        };
         let records_fmt = (0..self.common.count as usize).format_with(",\n", |i, f| {
             let offset = self.slots()[i] as usize;
             let val: &dyn Debug =
