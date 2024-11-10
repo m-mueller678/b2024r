@@ -517,7 +517,8 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>, V: NodeKind> NodeStatic<'bm, BM> 
         } else {
             let slot_offset = Self::slot_offset(o_project!(this.common.count).r() as usize);
             let offset = this.as_slice::<u16>().i(slot_offset / 2 + index - 1).r() as usize;
-            this.read_unaligned_nonatomic_u16(offset) + Self::RECORD_TO_KEY_OFFSET
+            let tail_len = this.read_unaligned_nonatomic_u16(offset).saturating_sub(4);
+            offset + tail_len + Self::RECORD_TO_KEY_OFFSET
         };
         page_id_from_olc_bytes(this.array_slice(lower_offset))
     }
