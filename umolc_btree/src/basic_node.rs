@@ -552,7 +552,7 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>, V: NodeKind> NodeDynamic<'bm, BM>
             self.copy_records(tmp, 0..left_count, 0);
             right.copy_records(tmp, 0..right_count, left_count);
         } else {
-            tmp.init(self.lower_fence(), self.upper_fence_combined(), Some(self.lower()));
+            tmp.init(self.lower_fence(), right.upper_fence_combined(), Some(self.lower()));
             tmp.common.count = (left_count + right_count + 1) as u16;
             self.copy_records(tmp, 0..left_count, 0);
             right.copy_records(tmp, 0..right_count, left_count + 1);
@@ -582,7 +582,6 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>, V: NodeKind> NodeDynamic<'bm, BM>
             left.init(self.as_page().lower_fence(), sep_key, Some(self.lower()));
             let mid_child = self.val(low_count).try_into().unwrap();
             right.init(sep_key, self.as_page().upper_fence_combined(), Some(mid_child));
-            dbg!(&right);
             (0..low_count, low_count + 1..count)
         };
         debug_assert!(self.key_combined(lr.end - 1).cmp(sep_key.slice(self.common.prefix_len as usize..)).is_lt());
@@ -699,7 +698,6 @@ mod tests {
             }
         }
         let s1 = NodeDynamic::<BM>::to_debug(n1);
-        dbg!(&n1);
         n1.split(bm, g2.as_dyn_node_mut()).unwrap();
         g2.as_dyn_node_mut::<BM>().validate();
         let g2_debug = g2.as_dyn_node_mut::<BM>().to_debug();
@@ -715,7 +713,6 @@ mod tests {
         );
         NodeDynamic::<BM>::merge(n1, &mut *g3);
         let s2 = NodeDynamic::<BM>::to_debug(n1);
-        dbg!(&n1);
         assert_eq!(s1, s2);
     }
 
