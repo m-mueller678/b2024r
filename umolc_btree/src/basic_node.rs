@@ -492,7 +492,11 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>, V: NodeKind> NodeStatic<'bm, BM> 
     fn iter_children(&self) -> impl Iterator<Item = (Self::TruncatedKey<'_>, PageId)> {
         assert!(<Self as NodeStatic<'bm, BM>>::IS_INNER);
         let lower = std::iter::once((Default::default(), Self::LOWER_OFFSET));
-        let rest = (0..self.common.count as usize).map(|i| (self.key_combined(i), self.slots()[i] as usize));
+        let rest = (0..self.common.count as usize).map(|i| {
+            // TODO change inner layout to have values at fixed offset
+            let tail_len = self.key_tail(i).len();
+            (self.key_combined(i), self.slots()[i] as usize + Self::RECORD_TO_KEY_OFFSET + tail_len)
+        });
         lower.chain(rest).map(|(k, o)| (k, page_id_from_bytes(self.page_id_bytes(o))))
     }
 
