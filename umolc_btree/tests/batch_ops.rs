@@ -59,174 +59,188 @@ fn batch_ops(
         let mut join_handles: Vec<_> = (0..threads)
             .map(|tid| {
                 let mut after_batch = after_batch.take();
-                scope.spawn(move || {
-                    let mut thread_rng = SmallRng::seed_from_u64(tid as u64);
-                    for batch in 1..=batches {
-                        let weights = op_weights(tid, batch);
-                        let op_dist = &WeightedIndex::new(weights).unwrap();
-                        let batch_rng = SmallRng::from_rng(&mut thread_rng).unwrap();
-                        let ops = |mut brng: SmallRng| {
-                            (0..weights.iter().sum::<u32>()).map(move |_| {
-                                (
-                                    match op_dist.sample(&mut brng) {
-                                        const { Op::Lookup as usize } => Op::Lookup,
-                                        const { Op::Insert as usize } => Op::Insert,
-                                        const { Op::Remove as usize } => Op::Remove,
-                                        _ => unreachable!(),
-                                    },
-                                    key_dist.sample(&mut brng),
-                                )
-                            })
-                        };
-                        for phase in 0..4 {
-                            const PHASE_ANNOUNCE: usize = 0;
-                            const PHASE_RUN: usize = 1;
-                            const PHASE_REWRITE: usize = 2;
-                            const PHASE_CLEAN: usize = 3;
-                            #[allow(clippy::unused_enumerate_index)]
-                            for (_op_index, (op, index)) in ops(batch_rng.clone()).enumerate() {
-                                let ks = &key_states[index];
-                                if phase == PHASE_ANNOUNCE {
-                                    inc_state_12(match op {
-                                        Op::Insert => &ks.inserted,
-                                        Op::Remove => &ks.removed,
-                                        Op::Lookup => continue,
-                                    });
-                                    key_states[index].max_write_thread.fetch_max(tid as u32, Relaxed);
-                                } else if phase == PHASE_CLEAN {
-                                    match op {
-                                        Op::Lookup => continue,
-                                        Op::Insert => (),
-                                        Op::Remove => (),
-                                    }
-                                    if ks
-                                        .max_write_thread
-                                        .fetch_update(
-                                            Relaxed,
-                                            Relaxed,
-                                            |x| if x == tid as u32 { Some(0) } else { None },
-                                        )
-                                        .is_err()
-                                    {
-                                        continue;
-                                    }
-                                    ks.old_write_batch.store(batch, Relaxed);
-                                    ks.old_write_thread.store(tid as u32, Relaxed);
-                                    ks.old_present.store(ks.max_write_is_insert.load(Relaxed), Relaxed);
-                                    // assert_eq!(tree.lookup_inspect(&keys[index],|x|x.map(|_|())).is_some(),ks.max_write_is_insert.load(Relaxed));
-                                    ks.removed.store(0, Relaxed);
-                                    ks.inserted.store(0, Relaxed);
-                                } else {
-                                    let write = || {
-                                        phase == PHASE_RUN
-                                            || (phase == PHASE_REWRITE
-                                                && ks.inserted.load(Relaxed) + ks.removed.load(Relaxed) > 1
-                                                && tid as u32 == ks.max_write_thread.load(Relaxed))
-                                    };
-                                    match op {
-                                        Op::Lookup => {
-                                            if phase == PHASE_RUN {
-                                                let mut batch_matches = false;
-                                                let mut new_batch_matches = false;
-                                                let mut was_present = false;
-                                                let result = tree.lookup_inspect(&keys[index], |v| {
-                                                    if let Some(v) = v {
-                                                        was_present = true;
-                                                        batch_matches = v
-                                                            .mem_cmp(&ks.old_write_batch.load(Relaxed).to_ne_bytes())
-                                                            .is_eq();
-                                                        new_batch_matches = v.mem_cmp(&batch.to_ne_bytes()).is_eq();
-                                                        if batch_matches && ks.old_present.load(Relaxed) {
-                                                            Ok(())
-                                                        } else if new_batch_matches && ks.inserted.load(Relaxed) != 0 {
-                                                            Ok(())
-                                                        } else {
-                                                            let found_batch = v.load_slice_to_vec();
-                                                            let found_batch: [u8; 8] =
-                                                                found_batch[..].try_into().map_err(|_| {
-                                                                    format!(
-                                                                        "batch has bad length {}: {:?}",
-                                                                        found_batch.len(),
-                                                                        found_batch
-                                                                    )
-                                                                })?;
-                                                            let mut message = format!(
-                                                                "found batch {}",
-                                                                u64::from_ne_bytes(found_batch)
-                                                            );
-                                                            if ks.old_present.load(Relaxed) {
-                                                                message = format!(
-                                                                    "{message} was present as {}",
-                                                                    ks.old_write_batch.load(Relaxed)
+                std::thread::Builder::new()
+                    .name(format!("batch-ops-{tid}"))
+                    .spawn_scoped(scope, move || {
+                        let mut thread_rng = SmallRng::seed_from_u64(tid as u64);
+                        for batch in 1..=batches {
+                            let weights = op_weights(tid, batch);
+                            let op_dist = &WeightedIndex::new(weights).unwrap();
+                            let batch_rng = SmallRng::from_rng(&mut thread_rng).unwrap();
+                            let ops = |mut brng: SmallRng| {
+                                (0..weights.iter().sum::<u32>()).map(move |_| {
+                                    (
+                                        match op_dist.sample(&mut brng) {
+                                            const { Op::Lookup as usize } => Op::Lookup,
+                                            const { Op::Insert as usize } => Op::Insert,
+                                            const { Op::Remove as usize } => Op::Remove,
+                                            _ => unreachable!(),
+                                        },
+                                        key_dist.sample(&mut brng),
+                                    )
+                                })
+                            };
+                            for phase in 0..4 {
+                                const PHASE_ANNOUNCE: usize = 0;
+                                const PHASE_RUN: usize = 1;
+                                const PHASE_REWRITE: usize = 2;
+                                const PHASE_CLEAN: usize = 3;
+                                #[allow(clippy::unused_enumerate_index)]
+                                for (_op_index, (op, index)) in ops(batch_rng.clone()).enumerate() {
+                                    let ks = &key_states[index];
+                                    if phase == PHASE_ANNOUNCE {
+                                        inc_state_12(match op {
+                                            Op::Insert => &ks.inserted,
+                                            Op::Remove => &ks.removed,
+                                            Op::Lookup => continue,
+                                        });
+                                        key_states[index].max_write_thread.fetch_max(tid as u32, Relaxed);
+                                    } else if phase == PHASE_CLEAN {
+                                        match op {
+                                            Op::Lookup => continue,
+                                            Op::Insert => (),
+                                            Op::Remove => (),
+                                        }
+                                        if ks
+                                            .max_write_thread
+                                            .fetch_update(Relaxed, Relaxed, |x| {
+                                                if x == tid as u32 {
+                                                    Some(0)
+                                                } else {
+                                                    None
+                                                }
+                                            })
+                                            .is_err()
+                                        {
+                                            continue;
+                                        }
+                                        ks.old_write_batch.store(batch, Relaxed);
+                                        ks.old_write_thread.store(tid as u32, Relaxed);
+                                        ks.old_present.store(ks.max_write_is_insert.load(Relaxed), Relaxed);
+                                        // assert_eq!(tree.lookup_inspect(&keys[index],|x|x.map(|_|())).is_some(),ks.max_write_is_insert.load(Relaxed));
+                                        ks.removed.store(0, Relaxed);
+                                        ks.inserted.store(0, Relaxed);
+                                    } else {
+                                        let write = || {
+                                            phase == PHASE_RUN
+                                                || (phase == PHASE_REWRITE
+                                                    && ks.inserted.load(Relaxed) + ks.removed.load(Relaxed) > 1
+                                                    && tid as u32 == ks.max_write_thread.load(Relaxed))
+                                        };
+                                        match op {
+                                            Op::Lookup => {
+                                                if phase == PHASE_RUN {
+                                                    let mut batch_matches = false;
+                                                    let mut new_batch_matches = false;
+                                                    let mut was_present = false;
+                                                    let result = tree.lookup_inspect(&keys[index], |v| {
+                                                        if let Some(v) = v {
+                                                            was_present = true;
+                                                            batch_matches = v
+                                                                .mem_cmp(
+                                                                    &ks.old_write_batch.load(Relaxed).to_ne_bytes(),
                                                                 )
+                                                                .is_eq();
+                                                            new_batch_matches = v.mem_cmp(&batch.to_ne_bytes()).is_eq();
+                                                            if batch_matches && ks.old_present.load(Relaxed) {
+                                                                Ok(())
+                                                            } else if new_batch_matches
+                                                                && ks.inserted.load(Relaxed) != 0
+                                                            {
+                                                                Ok(())
+                                                            } else {
+                                                                let found_batch = v.load_slice_to_vec();
+                                                                let found_batch: [u8; 8] =
+                                                                    found_batch[..].try_into().map_err(|_| {
+                                                                        format!(
+                                                                            "batch has bad length {}: {:?}",
+                                                                            found_batch.len(),
+                                                                            found_batch
+                                                                        )
+                                                                    })?;
+                                                                let mut message = format!(
+                                                                    "found batch {}",
+                                                                    u64::from_ne_bytes(found_batch)
+                                                                );
+                                                                if ks.old_present.load(Relaxed) {
+                                                                    message = format!(
+                                                                        "{message} was present as {}",
+                                                                        ks.old_write_batch.load(Relaxed)
+                                                                    )
+                                                                }
+                                                                if ks.inserted.load(Relaxed) != 0 {
+                                                                    message =
+                                                                        format!("{message} is inserted as {batch}")
+                                                                }
+                                                                Err(message)
                                                             }
-                                                            if ks.inserted.load(Relaxed) != 0 {
-                                                                message = format!("{message} is inserted as {batch}")
-                                                            }
-                                                            Err(message)
-                                                        }
-                                                    } else {
-                                                        was_present = false;
-                                                        if !ks.old_present.load(Relaxed)
-                                                            || ks.removed.load(Relaxed) != 0
-                                                        {
-                                                            Ok(())
                                                         } else {
-                                                            Err("value missing".to_string())
+                                                            was_present = false;
+                                                            if !ks.old_present.load(Relaxed)
+                                                                || ks.removed.load(Relaxed) != 0
+                                                            {
+                                                                Ok(())
+                                                            } else {
+                                                                Err("value missing".to_string())
+                                                            }
                                                         }
+                                                    });
+                                                    result.unwrap();
+                                                }
+                                            }
+                                            Op::Insert => {
+                                                if write() {
+                                                    if phase == PHASE_RUN
+                                                        && ks.max_write_thread.load(Relaxed) == tid as u32
+                                                    {
+                                                        ks.max_write_is_insert.store(true, Relaxed);
                                                     }
-                                                });
-                                                result.unwrap();
-                                            }
-                                        }
-                                        Op::Insert => {
-                                            if write() {
-                                                if phase == PHASE_RUN && ks.max_write_thread.load(Relaxed) == tid as u32
-                                                {
-                                                    ks.max_write_is_insert.store(true, Relaxed);
-                                                }
-                                                if tree.insert(&keys[index], &batch.to_ne_bytes()).is_some() {
-                                                    assert!(
-                                                        ks.old_present.load(Relaxed)
-                                                            || ks.inserted.load(Relaxed) == 2
-                                                            || phase == PHASE_REWRITE
-                                                    )
-                                                } else {
-                                                    assert!(
-                                                        !ks.old_present.load(Relaxed) || ks.removed.load(Relaxed) != 0
-                                                    )
+                                                    if tree.insert(&keys[index], &batch.to_ne_bytes()).is_some() {
+                                                        assert!(
+                                                            ks.old_present.load(Relaxed)
+                                                                || ks.inserted.load(Relaxed) == 2
+                                                                || phase == PHASE_REWRITE
+                                                        )
+                                                    } else {
+                                                        assert!(
+                                                            !ks.old_present.load(Relaxed)
+                                                                || ks.removed.load(Relaxed) != 0
+                                                        )
+                                                    }
                                                 }
                                             }
-                                        }
-                                        Op::Remove => {
-                                            if write() {
-                                                if phase == PHASE_RUN && ks.max_write_thread.load(Relaxed) == tid as u32
-                                                {
-                                                    ks.max_write_is_insert.store(false, Relaxed);
-                                                }
-                                                if tree.remove(&keys[index]).is_some() {
-                                                    assert!(
-                                                        ks.old_present.load(Relaxed) || ks.inserted.load(Relaxed) != 0
-                                                    )
-                                                } else {
-                                                    assert!(
-                                                        !ks.old_present.load(Relaxed)
-                                                            || ks.removed.load(Relaxed) == 2
-                                                            || phase == PHASE_REWRITE
-                                                    )
+                                            Op::Remove => {
+                                                if write() {
+                                                    if phase == PHASE_RUN
+                                                        && ks.max_write_thread.load(Relaxed) == tid as u32
+                                                    {
+                                                        ks.max_write_is_insert.store(false, Relaxed);
+                                                    }
+                                                    if tree.remove(&keys[index]).is_some() {
+                                                        assert!(
+                                                            ks.old_present.load(Relaxed)
+                                                                || ks.inserted.load(Relaxed) != 0
+                                                        )
+                                                    } else {
+                                                        assert!(
+                                                            !ks.old_present.load(Relaxed)
+                                                                || ks.removed.load(Relaxed) == 2
+                                                                || phase == PHASE_REWRITE
+                                                        )
+                                                    }
                                                 }
                                             }
                                         }
                                     }
                                 }
+                                barrier.wait();
                             }
-                            barrier.wait();
+                            if let Some(ab) = &mut after_batch {
+                                ab(batch, tree);
+                            }
                         }
-                        if let Some(ab) = &mut after_batch {
-                            ab(batch, tree);
-                        }
-                    }
-                })
+                    })
+                    .unwrap()
             })
             .collect();
         while !join_handles.is_empty() {
