@@ -8,3 +8,6 @@ radium = "1.1.0"
 bytemuck = { version = "1.19.0",features = ["derive","zeroable_atomics"] }
 libc = "0.2.161"
 memmap2="0.9.5"
+
+[features]
+track-thread-locks=[]

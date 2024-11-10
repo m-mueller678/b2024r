@@ -2,6 +2,7 @@
 #![feature(array_ptr_get)]
 #![feature(never_type)]
 #![feature(new_zeroed_alloc)]
+#![feature(map_try_insert)]
 
 use bytemuck::{Pod, Zeroable};
 pub use o_ptr::OPtr;
