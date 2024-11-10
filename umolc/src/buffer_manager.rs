@@ -5,7 +5,7 @@ use crate::{
 };
 use bytemuck::Pod;
 use std::cell::UnsafeCell;
-use std::mem::MaybeUninit;
+use std::mem::{forget, MaybeUninit};
 use std::ops::{Deref, DerefMut};
 use std::sync::Mutex;
 
@@ -104,7 +104,9 @@ impl<'bm, BM: CommonSeqLockBM<'bm>> BufferManagerGuard<'bm, BM> for SimpleGuardS
     }
 
     fn release(self) -> OlcVersion {
-        self.bm.lock(self.page_id()).unlock_shared()
+        let version = self.bm.lock(self.page_id()).unlock_shared();
+        forget(self);
+        version
     }
 
     fn page_id(&self) -> PageId {
@@ -141,7 +143,9 @@ impl<'bm, BM: CommonSeqLockBM<'bm>> BufferManagerGuard<'bm, BM> for SimpleGuardX
     }
 
     fn release(self) -> OlcVersion {
-        self.bm.lock(self.page_id()).unlock_exclusive()
+        let version = self.bm.lock(self.page_id()).unlock_exclusive();
+        forget(self);
+        version
     }
 
     fn page_id(&self) -> PageId {
@@ -157,7 +161,8 @@ impl<'bm, BM: CommonSeqLockBM<'bm>> ExclusiveGuard<'bm, BM> for SimpleGuardX<'bm
     fn reset_written(&mut self) {}
 
     fn dealloc(self) {
-        self.bm.dealloc(self.page_id())
+        self.bm.dealloc(self.page_id());
+        forget(self);
     }
 }
 
@@ -210,7 +215,7 @@ impl<'bm, BM: CommonSeqLockBM<'bm>> BufferManageGuardUpgrade<'bm, BM, SimpleGuar
 
 impl<'bm, BM: CommonSeqLockBM<'bm>> OptimisticGuard<'bm, BM> for SimpleGuardO<'bm, BM> {
     fn release_unchecked(self) {
-        std::mem::forget(self);
+        forget(self);
     }
 
     fn check(&self) -> OlcVersion {
@@ -256,7 +261,9 @@ impl<'bm, BM: CommonSeqLockBM<'bm>> BufferManagerGuard<'bm, BM> for SimpleGuardO
 
     fn release(self) -> OlcVersion {
         BM::OlcEH::optmistic_fail_check(self.bm.lock(self.page_id()).try_unlock_optimistic(self.version));
-        self.version
+        let version = self.version;
+        forget(self);
+        version
     }
 
     fn page_id(&self) -> PageId {
