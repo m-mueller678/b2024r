@@ -3,6 +3,7 @@
 #![feature(never_type)]
 #![feature(new_zeroed_alloc)]
 #![feature(map_try_insert)]
+#![feature(maybe_uninit_slice)]
 
 use bytemuck::{Pod, Zeroable};
 pub use o_ptr::OPtr;

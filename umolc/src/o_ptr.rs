@@ -6,6 +6,7 @@ use std::cell::UnsafeCell;
 use std::cmp::Ordering;
 use std::ffi::c_void;
 use std::marker::PhantomData;
+use std::mem::MaybeUninit;
 use std::ptr::slice_from_raw_parts;
 use std::slice::SliceIndex;
 use std::sync::atomic::Ordering::Relaxed;
@@ -121,6 +122,14 @@ impl<O: OlcErrorHandler> OPtr<'_, [u8], O> {
     pub fn load_bytes(self, dst: &mut [u8]) {
         assert_eq!(self.p.len(), dst.len());
         unsafe { std::ptr::copy(self.p as *const u8, dst.as_mut_ptr(), self.p.len()) }
+    }
+
+    pub fn load_bytes_uninit<'a>(self, dst: &'a mut [MaybeUninit<u8>]) -> &'a mut [u8] {
+        unsafe {
+            assert_eq!(self.p.len(), dst.len());
+            std::ptr::copy(self.p as *const u8, dst.as_mut_ptr() as *mut u8, self.p.len());
+            MaybeUninit::slice_assume_init_mut(dst)
+        }
     }
 
     pub fn load_slice_to_vec(self) -> Vec<u8> {

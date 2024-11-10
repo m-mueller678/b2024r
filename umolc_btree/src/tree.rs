@@ -4,10 +4,10 @@ use crate::node::{
     CommonNodeHead, DebugNode, KindLeaf, NodeDynamic, NodeDynamicAuto, NodeStatic, Page, ToFromPageExt, PAGE_SIZE,
 };
 use crate::util::PodPad;
-use crate::{impl_to_from_page, MAX_KEY_SIZE};
+use crate::{impl_to_from_page, MAX_KEY_SIZE, MAX_VAL_SIZE};
 use bytemuck::{Pod, Zeroable};
 use std::marker::PhantomData;
-use std::mem::size_of;
+use std::mem::{size_of, MaybeUninit};
 use umolc::{
     o_project, BufferManageGuardUpgrade, BufferManager, BufferManagerExt, BufferManagerGuard, ExclusiveGuard, OPtr,
     OlcErrorHandler, OptimisticGuard, PageId,
@@ -147,6 +147,11 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> Tree<'bm, BM> {
 
     pub fn lookup_to_vec(&self, k: &[u8]) -> Option<Vec<u8>> {
         self.lookup_inspect(k, |v| v.map(|v| v.load_slice_to_vec()))
+    }
+
+    pub fn lookup_to_buffer<'a>(&self, k: &[u8], b: &'a mut [MaybeUninit<u8>; MAX_VAL_SIZE]) -> Option<&'a mut [u8]> {
+        let valid_len = self.lookup_inspect(k, |v| v.map(|v| v.load_bytes_uninit(&mut b[..v.len()]).len()));
+        valid_len.map(|l| unsafe { MaybeUninit::slice_assume_init_mut(&mut b[..l]) })
     }
 
     pub fn lookup_inspect<R>(&self, k: &[u8], mut f: impl FnMut(Option<OPtr<[u8], BM::OlcEH>>) -> R) -> R {

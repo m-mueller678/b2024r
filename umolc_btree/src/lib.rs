@@ -1,4 +1,5 @@
 #![feature(arbitrary_self_types_pointers)]
+#![feature(maybe_uninit_slice)]
 
 mod basic_node;
 mod key_source;
@@ -9,3 +10,4 @@ mod util;
 pub use node::Page;
 pub use tree::Tree;
 const MAX_KEY_SIZE: usize = 512;
+const MAX_VAL_SIZE: usize = 512;
