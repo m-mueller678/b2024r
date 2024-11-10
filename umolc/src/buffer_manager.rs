@@ -232,18 +232,28 @@ impl<'bm, BM: CommonSeqLockBM<'bm>> OptimisticGuard<'bm, BM> for SimpleGuardO<'b
 
 impl<'bm, BM: CommonSeqLockBM<'bm>> Drop for SimpleGuardO<'bm, BM> {
     fn drop(&mut self) {
-        self.check();
+        match self.bm.lock(self.bm.pid_from_address(self.ptr.to_raw().addr())).try_unlock_optimistic(self.version) {
+            Ok(_) => (),
+            Err(e) => {
+                if !BM::OlcEH::is_unwinding() {
+                    BM::OlcEH::optimistic_fail_with(e);
+                }
+            }
+        }
     }
 }
 
 impl<'bm, BM: CommonSeqLockBM<'bm>> Drop for SimpleGuardS<'bm, BM> {
     fn drop(&mut self) {
+        // the guard is read only, so this cannot lead to corruption, but it is still not expected to occur.
+        debug_assert!(!BM::OlcEH::is_unwinding());
         self.bm.lock(self.page_id()).unlock_shared();
     }
 }
 
 impl<'bm, BM: CommonSeqLockBM<'bm>> Drop for SimpleGuardX<'bm, BM> {
     fn drop(&mut self) {
+        assert!(!BM::OlcEH::is_unwinding());
         self.bm.lock(self.page_id()).unlock_exclusive();
     }
 }

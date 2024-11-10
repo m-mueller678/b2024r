@@ -30,6 +30,10 @@ pub trait OlcErrorHandler {
     }
     // TODO consider adding a marker type that is returned by functions that may unwind and marked must_use
     fn catch<R>(f: impl FnOnce() -> R) -> Result<R, OptimisticError>;
+
+    /// Returns `true` if currently unwinding due to an optimistic error.
+    /// Lock guards should use this for poisoning and to avoid calling one of the fail methods while already unwinding
+    fn is_unwinding() -> bool;
 }
 
 pub struct UnwindOlcEh;
@@ -57,6 +61,10 @@ impl OlcErrorHandler for UnwindOlcEh {
             },
         }
     }
+
+    fn is_unwinding() -> bool {
+        std::thread::panicking()
+    }
 }
 
 impl OlcErrorHandler for PanicOlcEh {
@@ -66,5 +74,9 @@ impl OlcErrorHandler for PanicOlcEh {
 
     fn catch<R>(_f: impl FnOnce() -> R) -> Result<R, OptimisticError> {
         unimplemented!()
+    }
+
+    fn is_unwinding() -> bool {
+        std::thread::panicking()
     }
 }
