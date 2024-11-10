@@ -115,6 +115,7 @@ fn batch_ops(threads: u32, batches: u32, key_count: usize, op_weights: (impl Fn(
 
         // announce ops
         for (_k_op, (op, index, ks, _key)) in ops() {
+            //eprintln!("announce {tid} {op:?} {index}");
             let counter = match op {
                 Op::Insert => &ks.insert_count,
                 Op::Remove => &ks.insert_count,
@@ -135,6 +136,7 @@ fn batch_ops(threads: u32, batches: u32, key_count: usize, op_weights: (impl Fn(
 
         //run
         for (_k_op, (op, _index, ks, key)) in ops() {
+            //eprintln!("run {tid} {op:?} {_index}");
             match op {
                 Op::Lookup => {
                     let buffer = &mut MaybeUninit::uninit_array();
@@ -171,6 +173,7 @@ fn batch_ops(threads: u32, batches: u32, key_count: usize, op_weights: (impl Fn(
 
         // fix-up conflicting writes
         for (_k_op, (op, _index, ks, key)) in ops() {
+            //eprintln!("fix {tid} {op:?} {_index}");
             if ks.principal_thread.load(Relaxed) != tid
                 || ks.removed_count.load(Relaxed) + ks.insert_count.load(Relaxed) <= 1
             {
@@ -198,6 +201,7 @@ fn batch_ops(threads: u32, batches: u32, key_count: usize, op_weights: (impl Fn(
 
         // update_state
         for (_k_op, (op, _index, ks, _key)) in ops() {
+            //eprintln!("update {tid} {op:?} {_index}");
             if ks.principal_thread.load(Relaxed) == tid {
                 let is_present = match op {
                     Op::Lookup => continue,
@@ -208,10 +212,13 @@ fn batch_ops(threads: u32, batches: u32, key_count: usize, op_weights: (impl Fn(
                 ks.old_write_thread.store(tid, Relaxed);
             }
         }
-        // no barrier needed
-        // reset principal thread
-        for (_k_op, (_op, _index, ks, _key)) in ops() {
-            if ks.principal_thread.load(Relaxed) == tid {
+        barrier.wait();
+
+        // reset announcements
+        for (_k_op, (op, _index, ks, _key)) in ops() {
+            if let Op::Remove | Op::Insert = op {
+                ks.insert_count.store(0, Relaxed);
+                ks.removed_count.store(0, Relaxed);
                 ks.principal_thread.store(0, Relaxed);
             }
         }
