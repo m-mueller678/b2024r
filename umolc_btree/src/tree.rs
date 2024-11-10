@@ -146,7 +146,11 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> Tree<'bm, BM> {
     }
 
     pub fn lookup_to_vec(&self, k: &[u8]) -> Option<Vec<u8>> {
-        BM::repeat(|| self.try_lookup(k).map(|v| v.1.load_slice_to_vec()))
+        self.lookup_inspect(k, |v| v.map(|v| v.load_slice_to_vec()))
+    }
+
+    pub fn lookup_inspect<R>(&self, k: &[u8], mut f: impl FnMut(Option<OPtr<[u8], BM::OlcEH>>) -> R) -> R {
+        BM::repeat(move || if let Some((_guard, val)) = self.try_lookup(k) { f(Some(val)) } else { f(None) })
     }
 
     pub fn try_lookup(&self, k: &[u8]) -> Option<(BM::GuardO, OPtr<[u8], BM::OlcEH>)> {

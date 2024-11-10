@@ -6,5 +6,6 @@ mod node;
 mod tree;
 mod util;
 
+pub use node::Page;
 pub use tree::Tree;
 const MAX_KEY_SIZE: usize = 512;
