@@ -91,8 +91,8 @@ impl SeqLock {
     /// returns version before locking
     pub fn lock_exclusive<F: VersionFilter>(&self, f: F) -> Result<F::R, F::E> {
         lock_track_check(self, Some(true));
-        let mut x = self.0.load(Relaxed);
         loop {
+            let mut x = self.0.load(Relaxed);
             f.check(x >> VERSION_SHIFT)?;
             if x & EXCLUSIVE_MASK == 0 {
                 x = self.0.fetch_or(EXCLUSIVE_MASK, Acquire);
