@@ -96,13 +96,19 @@ impl SeqLock {
             f.check(x >> VERSION_SHIFT)?;
             if x & EXCLUSIVE_MASK == 0 {
                 x = self.0.fetch_or(EXCLUSIVE_MASK, Acquire);
-                if x & (EXCLUSIVE_MASK | COUNT_MASK) == 0 {
-                    lock_track_set(self, Some(true));
-                    return Ok(f.map_r(x >> VERSION_SHIFT));
-                }
                 if x & EXCLUSIVE_MASK != 0 {
                     self.wait();
                     continue;
+                }
+                if f.check(x >> VERSION_SHIFT).is_err() {
+                    dbg!();
+                    self.0.fetch_and(!EXCLUSIVE_MASK, Relaxed);
+                    self.wait();
+                    continue;
+                }
+                if x & (EXCLUSIVE_MASK | COUNT_MASK) == 0 {
+                    lock_track_set(self, Some(true));
+                    return Ok(f.map_r(x >> VERSION_SHIFT));
                 }
                 loop {
                     self.wait();
