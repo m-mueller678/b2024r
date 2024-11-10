@@ -38,12 +38,13 @@ impl<'bm, P: Pod> CommonSeqLockBM<'bm> for &'bm SimpleBm<P> {
         debug_assert!(address >= start);
         debug_assert!(address < start + size_of::<P>() * self.pages.len());
         let offset = address - start;
-        debug_assert!(offset % size_of::<P>() == 0);
+        assert_eq!(offset % size_of::<P>(), 0);
         PageId { x: (offset / size_of::<P>()) as u64 }
     }
 
     fn alloc(self) -> PageId {
         let pid = self.free_list.lock().unwrap().pop().expect("out of pages");
+        self.locks[pid].force_lock_exclusive();
         PageId { x: pid as u64 }
     }
 
@@ -191,7 +192,9 @@ impl<'bm, BM: CommonSeqLockBM<'bm>> BufferManageGuardUpgrade<'bm, BM, SimpleGuar
     fn upgrade(self) -> SimpleGuardS<'bm, BM> {
         let pid = self.bm.pid_from_address(self.ptr.to_raw().addr());
         BM::OlcEH::optmistic_fail_check(self.bm.lock(pid).lock_shared(self.version));
-        SimpleGuardS { bm: self.bm, ptr: unsafe { &*self.bm.page(pid).get() } }
+        let ret = SimpleGuardS { bm: self.bm, ptr: unsafe { &*self.bm.page(pid).get() } };
+        self.release_unchecked();
+        ret
     }
 }
 
@@ -199,7 +202,9 @@ impl<'bm, BM: CommonSeqLockBM<'bm>> BufferManageGuardUpgrade<'bm, BM, SimpleGuar
     fn upgrade(self) -> SimpleGuardX<'bm, BM> {
         let pid = self.bm.pid_from_address(self.ptr.to_raw().addr());
         BM::OlcEH::optmistic_fail_check(self.bm.lock(pid).lock_exclusive(self.version));
-        SimpleGuardX { bm: self.bm, ptr: unsafe { &mut *self.bm.page(pid).get() } }
+        let ret = SimpleGuardX { bm: self.bm, ptr: unsafe { &mut *self.bm.page(pid).get() } };
+        self.release_unchecked();
+        ret
     }
 }
 
@@ -223,6 +228,18 @@ impl<'bm, BM: CommonSeqLockBM<'bm>> OptimisticGuard<'bm, BM> for SimpleGuardO<'b
 impl<'bm, BM: CommonSeqLockBM<'bm>> Drop for SimpleGuardO<'bm, BM> {
     fn drop(&mut self) {
         self.check();
+    }
+}
+
+impl<'bm, BM: CommonSeqLockBM<'bm>> Drop for SimpleGuardS<'bm, BM> {
+    fn drop(&mut self) {
+        self.bm.lock(self.page_id()).unlock_shared();
+    }
+}
+
+impl<'bm, BM: CommonSeqLockBM<'bm>> Drop for SimpleGuardX<'bm, BM> {
+    fn drop(&mut self) {
+        self.bm.lock(self.page_id()).unlock_exclusive();
     }
 }
 

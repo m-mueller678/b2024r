@@ -73,7 +73,9 @@ impl SeqLock {
     }
 
     pub fn unlock_shared(&self) -> OlcVersion {
-        OlcVersion { x: self.0.fetch_sub(1, Release) >> VERSION_SHIFT }
+        let fetched = self.0.fetch_sub(1, Release);
+        debug_assert!(fetched & COUNT_MASK != 0);
+        OlcVersion { x: fetched >> VERSION_SHIFT }
     }
 
     fn wait(&self) {
@@ -106,7 +108,7 @@ impl SeqLock {
         }
     }
 
-    pub fn force_lock_exclusive<F: VersionFilter>(&self) -> OlcVersion {
+    pub fn force_lock_exclusive(&self) -> OlcVersion {
         let x = self.0.fetch_or(EXCLUSIVE_MASK, Acquire);
         debug_assert!(x & (EXCLUSIVE_MASK | COUNT_MASK) == 0);
         OlcVersion { x: x >> VERSION_SHIFT }
@@ -114,7 +116,9 @@ impl SeqLock {
 
     /// returns version after unlocking
     pub fn unlock_exclusive(&self) -> OlcVersion {
-        OlcVersion { x: (self.0.fetch_add(EXCLUSIVE_MASK, Release) + EXCLUSIVE_MASK) >> VERSION_SHIFT }
+        let fetched = self.0.fetch_add(EXCLUSIVE_MASK, Release);
+        debug_assert!(fetched & EXCLUSIVE_MASK != 0);
+        OlcVersion { x: (fetched + EXCLUSIVE_MASK) >> VERSION_SHIFT }
     }
 
     pub fn lock_optimistic<F: VersionFilter>(&self, f: F) -> Result<F::R, F::E> {
