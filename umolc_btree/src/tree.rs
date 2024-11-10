@@ -1,7 +1,7 @@
 use crate::basic_node::{BasicInner, BasicNode};
 use crate::node::{
     node_tag, o_ptr_is_inner, o_ptr_lookup_inner, o_ptr_lookup_leaf, page_cast, page_cast_mut, page_id_to_bytes,
-    CommonNodeHead, KindLeaf, NodeDynamic, NodeDynamicAuto, NodeStatic, Page, ToFromPageExt, PAGE_SIZE,
+    CommonNodeHead, DebugNode, KindLeaf, NodeDynamic, NodeDynamicAuto, NodeStatic, Page, ToFromPageExt, PAGE_SIZE,
 };
 use crate::util::PodPad;
 use crate::{impl_to_from_page, MAX_KEY_SIZE};
@@ -228,8 +228,14 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeDynamic<'bm, BM> for Metadata
         unimplemented!()
     }
 
-    fn to_debug_kv(&self) -> (Vec<Vec<u8>>, Vec<Vec<u8>>) {
-        todo!()
+    fn to_debug(&self) -> DebugNode {
+        DebugNode {
+            prefix_len: 0,
+            lf: Vec::new(),
+            uf: Vec::new(),
+            keys: Vec::new(),
+            values: vec![page_id_to_bytes(self.root).to_vec()],
+        }
     }
 
     fn merge(&mut self, _right: &mut Page) {

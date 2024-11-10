@@ -47,12 +47,12 @@ pub unsafe fn print_page(p: *const Page) {
 }
 
 #[derive(Eq, PartialEq, Debug)]
-pub struct DebugNode<V> {
+pub struct DebugNode {
     pub prefix_len: usize,
     pub lf: Vec<u8>,
     pub uf: Vec<u8>,
     pub keys: Vec<Vec<u8>>,
-    pub values: Vec<V>,
+    pub values: Vec<Vec<u8>>,
 }
 
 #[macro_export]
@@ -151,7 +151,7 @@ pub trait NodeDynamic<'bm, BM: BufferManager<'bm, Page = Page>>: ToFromPage + No
     /// fails iff parent_insert fails.
     /// if node is near empty, no split is performed and parent_insert is not called.
     fn split<'g>(&mut self, bm: BM, parent: &mut dyn NodeDynamic<'bm, BM>) -> Result<(), ()>;
-    fn to_debug_kv(&self) -> (Vec<Vec<u8>>, Vec<Vec<u8>>);
+    fn to_debug(&self) -> DebugNode;
     fn merge(&mut self, right: &mut Page);
     fn validate(&self);
     fn insert_inner(&mut self, key: &[u8], pid: PageId) -> Result<(), ()>;

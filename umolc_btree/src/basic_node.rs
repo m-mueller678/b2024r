@@ -2,7 +2,7 @@ use crate::impl_to_from_page;
 use crate::key_source::{common_prefix, key_head, HeadSourceSlice, SourceSlice, SourceSlicePair};
 use crate::node::{
     insert_upper_sibling, node_tag, page_cast_mut, page_id_from_bytes, page_id_from_olc_bytes, page_id_to_bytes,
-    CommonNodeHead, KindInner, KindLeaf, NodeDynamic, NodeKind, NodeStatic, Page, ToFromPage, ToFromPageExt,
+    CommonNodeHead, DebugNode, KindInner, KindLeaf, NodeDynamic, NodeKind, NodeStatic, Page, ToFromPage, ToFromPageExt,
     PAGE_ID_LEN, PAGE_SIZE,
 };
 use crate::util::Supreme;
@@ -599,15 +599,21 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>, V: NodeKind> NodeDynamic<'bm, BM>
         Ok(())
     }
 
-    fn to_debug_kv(&self) -> (Vec<Vec<u8>>, Vec<Vec<u8>>) {
+    fn to_debug(&self) -> DebugNode {
         let range = 0..self.common.count as usize;
         let keys = range.clone().map(|i| self.key_combined(i).to_vec()).collect();
-        let vals = (0..1)
+        let values = (0..1)
             .filter(|_| !V::IS_LEAF)
             .map(|_| self.lower().to_vec())
             .chain(range.map(|i| self.val(i).to_vec()))
             .collect();
-        (keys, vals)
+        DebugNode {
+            prefix_len: self.common.prefix_len as usize,
+            lf: self.lower_fence().to_vec(),
+            uf: self.upper_fence_combined().to_vec(),
+            keys,
+            values,
+        }
     }
 
     fn leaf_remove(&mut self, k: &[u8]) -> Option<()> {
@@ -692,19 +698,25 @@ mod tests {
                 break;
             }
         }
-        let s1 = NodeDynamic::<BM>::to_debug_kv(n1);
+        let s1 = NodeDynamic::<BM>::to_debug(n1);
+        dbg!(&n1);
         n1.split(bm, g2.as_dyn_node_mut()).unwrap();
         g2.as_dyn_node_mut::<BM>().validate();
-        let (g2_keys, g2_values) = g2.as_dyn_node_mut::<BM>().to_debug_kv();
-        assert_eq!(g2_keys.len(), 1);
-        assert_eq!(g2_values.len(), 2);
-        let mut g3 = bm.lock_exclusive(page_id_from_bytes(&g2_values[1][..].try_into().unwrap()));
+        let g2_debug = g2.as_dyn_node_mut::<BM>().to_debug();
+        assert_eq!(g2_debug.keys.len(), 1);
+        assert_eq!(g2_debug.values.len(), 2);
+        let mut g3 = bm.lock_exclusive(page_id_from_bytes(&g2_debug.values[1][..].try_into().unwrap()));
         let n3 = g3.cast::<BasicNode<V>>();
-        assert_eq!(n1.upper_fence_combined().to_vec(), g2_keys[0]);
-        assert_eq!(g3.lower_fence().to_vec(), g2_keys[0]);
-        assert_eq!([NodeDynamic::<BM>::to_debug_kv(n1).1, NodeDynamic::<BM>::to_debug_kv(n3).1].concat(), s1.1);
+        assert_eq!(n1.upper_fence_combined().to_vec(), g2_debug.keys[0]);
+        assert_eq!(g3.lower_fence().to_vec(), g2_debug.keys[0]);
+        assert_eq!(
+            [NodeDynamic::<BM>::to_debug(n1).values, NodeDynamic::<BM>::to_debug(n3).values].concat(),
+            s1.values
+        );
         NodeDynamic::<BM>::merge(n1, &mut *g3);
-        assert_eq!(s1, NodeDynamic::<BM>::to_debug_kv(n1));
+        let s2 = NodeDynamic::<BM>::to_debug(n1);
+        dbg!(&n1);
+        assert_eq!(s1, s2);
     }
 
     #[test]
