@@ -101,7 +101,6 @@ impl SeqLock {
                     continue;
                 }
                 if f.check(x >> VERSION_SHIFT).is_err() {
-                    dbg!();
                     self.0.fetch_and(!EXCLUSIVE_MASK, Relaxed);
                     self.wait();
                     continue;
