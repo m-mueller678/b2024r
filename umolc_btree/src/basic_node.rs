@@ -130,10 +130,8 @@ impl<V: NodeKind> BasicNode<V> {
 
     fn val(&self, index: usize) -> &[u8] {
         let offset = self.slot(index);
-        self.slice(
-            offset + Self::RECORD_TO_KEY_OFFSET + self.u16(offset).saturating_sub(4),
-            self.record_val_len(offset),
-        )
+        let val_len = self.record_val_len(offset);
+        self.slice(offset - val_len, val_len)
     }
 
     fn find<O: OlcErrorHandler>(this: OPtr<Self, O>, key: &[u8]) -> Result<usize, usize>
@@ -261,15 +259,16 @@ impl<V: NodeKind> BasicNode<V> {
         let key_tail = key.slice_start(tail_offset);
         let tail_len = key_len - tail_offset;
         let size = Self::record_size(tail_len, val.len());
-        let offset = self.heap_bump as usize - size;
+        let new_bump = self.heap_bump as usize - size;
+        let offset = new_bump + val.len();
         self.store_u16(offset, key_len);
         if V::IS_LEAF {
             self.store_u16(offset + 2, val.len());
         }
         let key_offset = offset + Self::RECORD_TO_KEY_OFFSET;
         key_tail.write_to(self.slice_mut(key_offset, tail_len));
-        self.slice_mut(key_offset + tail_len, val.len()).copy_from_slice(val);
-        self.heap_bump = offset as u16;
+        self.slice_mut(new_bump, val.len()).copy_from_slice(val);
+        self.heap_bump = new_bump as u16;
         self.set_slot(write_slot, offset);
     }
 
@@ -309,19 +308,19 @@ impl<V: NodeKind> BasicNode<V> {
     fn compactify(&mut self) {
         let buffer = &mut [0u8; PAGE_SIZE];
         let heap_end = self.fences_start();
-        let mut dst_offset = heap_end;
+        let mut dst_bump = heap_end;
         for i in 0..self.common.count as usize {
             let offset = self.slot(i);
             let val_len = if V::IS_LEAF { self.u16(offset + 2) } else { PAGE_ID_LEN };
             let record_len = Self::RECORD_TO_KEY_OFFSET + self.u16(offset).saturating_sub(4) + val_len;
-            dst_offset -= record_len;
-            buffer[dst_offset..][..record_len].copy_from_slice(self.slice(offset, record_len));
-            self.set_slot(i, dst_offset);
+            dst_bump -= record_len;
+            buffer[dst_bump..][..record_len].copy_from_slice(self.slice(offset - val_len, record_len));
+            self.set_slot(i, dst_bump + val_len);
         }
-        self.slice_mut(dst_offset, heap_end - dst_offset).copy_from_slice(&buffer[dst_offset..heap_end]);
-        debug_assert_eq!(self.heap_bump as usize + self.heap_freed as usize, dst_offset);
+        self.slice_mut(dst_bump, heap_end - dst_bump).copy_from_slice(&buffer[dst_bump..heap_end]);
+        debug_assert_eq!(self.heap_bump as usize + self.heap_freed as usize, dst_bump);
         self.heap_freed = 0;
-        self.heap_bump = dst_offset as u16;
+        self.heap_bump = dst_bump as u16;
         self.validate();
     }
 
@@ -489,11 +488,8 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>, V: NodeKind> NodeStatic<'bm, BM> 
     fn iter_children(&self) -> impl Iterator<Item = (Self::TruncatedKey<'_>, PageId)> {
         assert!(<Self as NodeStatic<'bm, BM>>::IS_INNER);
         let lower = std::iter::once((Default::default(), Self::LOWER_OFFSET));
-        let rest = (0..self.common.count as usize).map(|i| {
-            // TODO change inner layout to have values at fixed offset
-            let tail_len = self.key_tail(i).len();
-            (self.key_combined(i), self.slot(i) + Self::RECORD_TO_KEY_OFFSET + tail_len)
-        });
+        let rest =
+            (0..self.common.count as usize).map(|i| (self.key_combined(i), self.slot(i) - self.record_val_len(i)));
         lower.chain(rest).map(|(k, o)| (k, page_id_from_bytes(self.page_id_bytes(o))))
     }
 
@@ -502,9 +498,8 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>, V: NodeKind> NodeStatic<'bm, BM> 
         let index = Self::find(this, key).ok()?;
         let slot_offset = Self::slot_offset(o_project!(this.common.count).r() as usize);
         let offset = this.as_slice::<u16>().i(slot_offset / 2 + index).r() as usize;
-        let k_tail_len = this.read_unaligned_nonatomic_u16(offset).saturating_sub(4);
         let v_len = this.read_unaligned_nonatomic_u16(offset + 2);
-        Some(this.as_slice().sub(offset + Self::RECORD_TO_KEY_OFFSET + k_tail_len, v_len))
+        Some(this.as_slice().sub(offset - v_len, v_len))
     }
 
     fn lookup_inner(this: OPtr<'_, Self, BM::OlcEH>, key: &[u8], high_on_equal: bool) -> PageId {
@@ -518,8 +513,7 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>, V: NodeKind> NodeStatic<'bm, BM> 
         } else {
             let slot_offset = Self::slot_offset(o_project!(this.common.count).r() as usize);
             let offset = this.as_slice::<u16>().i(slot_offset / 2 + index - 1).r() as usize;
-            let tail_len = this.read_unaligned_nonatomic_u16(offset).saturating_sub(4);
-            offset + tail_len + Self::RECORD_TO_KEY_OFFSET
+            offset - PAGE_ID_LEN
         };
         page_id_from_olc_bytes(this.array_slice(lower_offset))
     }
