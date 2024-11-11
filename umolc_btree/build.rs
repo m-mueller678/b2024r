@@ -1,4 +1,4 @@
-use git2::{DiffOptions, Repository};
+use git2::Repository;
 use serde::Serialize;
 use serde_json::{Map, Value};
 use std::collections::BTreeSet;
@@ -25,12 +25,6 @@ fn main() {
     let head = repo.head().expect("Failed to get HEAD");
     let commit = head.peel_to_commit().expect("Failed to get commit");
     let commit_hash = commit.id().to_string();
-
-    // Get the diff of the working directory against the most recent commit
-    let mut diff_options = DiffOptions::new();
-    let diff = repo
-        .diff_tree_to_workdir_with_index(Some(&commit.tree().expect("Failed to get tree")), Some(&mut diff_options))
-        .expect("Failed to diff tree to workdir");
 
     let diff_files: BTreeSet<PathBuf> = repo
         .diff_index_to_workdir(None, None)
