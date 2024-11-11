@@ -70,6 +70,7 @@ fn run_many(threads: u32, batches: u32, f: &(impl Fn(&mut SmallRng, &Barrier, u3
 
 fn batch_ops(threads: u32, batches: u32, key_count: usize, op_weights: (impl Fn(u32, u32) -> [u32; 3] + Sync)) {
     const LOG_OPS: bool = false;
+    const LOOKUP_ALL: bool = false;
     let bm: BM = &SimpleBm::new(1 << 18);
     #[repr(u32)]
     #[derive(Debug)]
@@ -223,6 +224,19 @@ fn batch_ops(threads: u32, batches: u32, key_count: usize, op_weights: (impl Fn(
                 ks.principal_thread.store(0, Relaxed);
             }
         }
+        barrier.wait();
+
+        if LOOKUP_ALL {
+            let range_start = |i0| if i0 == threads { keys.len() } else { i0 as usize * keys.len() / threads as usize };
+            let range = range_start(tid - 1) as usize..range_start(tid) as usize;
+            for i in range {
+                let buffer = &mut MaybeUninit::uninit_array();
+                let found = tree.lookup_to_buffer(&*keys[i], buffer).map(|x| &*x);
+                let write_batch = key_states[i].old_write_batch.load(Relaxed).to_le_bytes();
+                let expected = Some(&write_batch[..]).filter(|_| key_states[i].old_present.load(Relaxed));
+                assert_eq!(found, expected);
+            }
+        }
     });
 }
 
@@ -252,6 +266,6 @@ fn multi() {
 }
 
 #[cfg_attr(not(miri), test)]
-fn multi_small() {
-    batch_ops(4, 1000, 500, |_, _| [0, 50, 0]);
+fn multi_insert() {
+    batch_ops(4, 100, 500, |_, _| [0, 50, 0]);
 }

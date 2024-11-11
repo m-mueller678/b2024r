@@ -253,6 +253,9 @@ impl<'bm, BM: CommonSeqLockBM<'bm>> Drop for SimpleGuardS<'bm, BM> {
 
 impl<'bm, BM: CommonSeqLockBM<'bm>> Drop for SimpleGuardX<'bm, BM> {
     fn drop(&mut self) {
+        // TODO only panic if this has already been used for writing.
+        // upgrading two optimistic locks to exclusive may trigger this if one of them fails to upgrade
+        // same for shared locks in debug mode
         assert!(!BM::OlcEH::is_unwinding());
         self.bm.lock(self.page_id()).unlock_exclusive();
     }

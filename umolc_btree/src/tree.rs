@@ -83,6 +83,9 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> Tree<'bm, BM> {
             parent = node;
             node = self.bm.lock_optimistic(node_pid);
         }
+        // ensure we return the correct node
+        // we could push this responsibility on the caller, but this has proven error-prone
+        parent.check();
         [parent, node]
     }
 

@@ -702,7 +702,6 @@ mod tests {
         let mut keys: Vec<Vec<u8>> = (0..30).map(|i| keys(rng, i)).collect();
         keys.sort();
         keys.dedup();
-        let leaf = &mut BasicNode::<KindLeaf>::zeroed();
         for (_k, keys) in dev_utils::subslices(&keys, 5).enumerate() {
             node.init(&*keys[0], &*keys[keys.len() - 1], Some(&[1; 5]));
             for (i, k) in keys[1..keys.len() - 1].iter().enumerate() {
