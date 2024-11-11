@@ -250,3 +250,8 @@ fn single_large() {
 fn multi() {
     batch_ops(4, 10, 2_500, |_, _| [500, 500, 500]);
 }
+
+#[cfg_attr(not(miri), test)]
+fn multi_small() {
+    batch_ops(4, 1000, 500, |_, _| [0, 50, 0]);
+}
