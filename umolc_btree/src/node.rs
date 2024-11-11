@@ -1,4 +1,5 @@
 use crate::basic_node::{BasicInner, BasicLeaf};
+use crate::heap_node::{ConstHeapLength, HeapLength};
 use crate::key_source::{common_prefix, SourceSlice, SourceSlicePair};
 use crate::tree::MetadataPage;
 use crate::MAX_KEY_SIZE;
@@ -15,6 +16,7 @@ pub mod node_tag {
     pub const METADATA_MARKER: u8 = 43;
     pub const BASIC_INNER: u8 = 250;
     pub const BASIC_LEAF: u8 = 251;
+    pub const HASH_LEAF: u8 = 252;
 }
 
 #[cfg(feature = "page_1k")]
@@ -272,14 +274,17 @@ unsafe impl ToFromPage for Page {}
 
 pub trait NodeKind: Pod {
     const IS_LEAF: bool;
+    type BasicValLength: HeapLength;
 }
 
 impl NodeKind for KindInner {
     const IS_LEAF: bool = false;
+    type BasicValLength = ConstHeapLength<PAGE_ID_LEN>;
 }
 
 impl NodeKind for KindLeaf {
     const IS_LEAF: bool = true;
+    type BasicValLength = u16;
 }
 
 #[derive(Clone, Copy, Zeroable, Pod)]
@@ -306,6 +311,12 @@ pub fn insert_upper_sibling<'bm, BM: BufferManager<'bm, Page = Page>>(
 }
 
 impl Page {
+    pub fn validate(&self) {
+        if cfg!(debug_assertions) {
+            self.as_dyn_node().validate();
+        }
+    }
+
     pub fn common_init(&mut self, tag: u8, lf: impl SourceSlice, uf: impl SourceSlice) {
         self.common.tag = tag;
         self.common.count = 0;

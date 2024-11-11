@@ -1,3 +1,4 @@
+use crate::heap_node::{HeapLength, HeapLengthError, HeapNode, HeapNodeInfo};
 use crate::impl_to_from_page;
 use crate::key_source::{common_prefix, key_head, HeadSourceSlice, SourceSlice, SourceSlicePair};
 use crate::node::{
@@ -47,8 +48,7 @@ macro_rules! def_basic_node {
 
 def_basic_node! {
     common: CommonNodeHead,
-    heap_bump: u16,
-    heap_freed: u16,
+    heap: HeapNodeInfo,
     _pad: u16,
     hints: [u32; HINT_COUNT],
     _data: [u32; BASIC_NODE_DATA_SIZE],
@@ -253,24 +253,6 @@ impl<V: NodeKind> BasicNode<V> {
             self.cast_slice_mut::<T>().copy_within(offset..offset + count, offset - dist);
         }
     }
-    fn heap_write_new(&mut self, key: impl SourceSlice, val: &[u8], write_slot: usize) {
-        let key_len = key.len();
-        let tail_offset = key.len().min(4);
-        let key_tail = key.slice_start(tail_offset);
-        let tail_len = key_len - tail_offset;
-        let size = Self::record_size(tail_len, val.len());
-        let new_bump = self.heap_bump as usize - size;
-        let offset = new_bump + val.len();
-        self.store_u16(offset, key_len);
-        if V::IS_LEAF {
-            self.store_u16(offset + 2, val.len());
-        }
-        let key_offset = offset + Self::RECORD_TO_KEY_OFFSET;
-        key_tail.write_to(self.slice_mut(key_offset, tail_len));
-        self.slice_mut(new_bump, val.len()).copy_from_slice(val);
-        self.heap_bump = new_bump as u16;
-        self.set_slot(write_slot, offset);
-    }
 
     fn update_hints(&mut self, old_count: usize, new_count: usize, mut change_index: usize) {
         debug_assert!(old_count != new_count);
@@ -301,27 +283,7 @@ impl<V: NodeKind> BasicNode<V> {
             self.slice_mut(Self::LOWER_OFFSET, 5).copy_from_slice(lower.unwrap());
         }
         self.as_page_mut().common_init(if V::IS_LEAF { node_tag::BASIC_LEAF } else { node_tag::BASIC_INNER }, lf, uf);
-        self.heap_freed = 0;
-        self.heap_bump = size_of::<Self>() as u16 - self.common.lower_fence_len - self.common.upper_fence_len;
-    }
-
-    fn compactify(&mut self) {
-        let buffer = &mut [0u8; PAGE_SIZE];
-        let heap_end = self.fences_start();
-        let mut dst_bump = heap_end;
-        for i in 0..self.common.count as usize {
-            let offset = self.slot(i);
-            let val_len = if V::IS_LEAF { self.u16(offset + 2) } else { PAGE_ID_LEN };
-            let record_len = Self::RECORD_TO_KEY_OFFSET + self.u16(offset).saturating_sub(4) + val_len;
-            dst_bump -= record_len;
-            buffer[dst_bump..][..record_len].copy_from_slice(self.slice(offset - val_len, record_len));
-            self.set_slot(i, dst_bump + val_len);
-        }
-        self.slice_mut(dst_bump, heap_end - dst_bump).copy_from_slice(&buffer[dst_bump..heap_end]);
-        debug_assert_eq!(self.heap_bump as usize + self.heap_freed as usize, dst_bump);
-        self.heap_freed = 0;
-        self.heap_bump = dst_bump as u16;
-        self.validate();
+        self.init_heap();
     }
 
     fn validate(&self) {
@@ -335,17 +297,7 @@ impl<V: NodeKind> BasicNode<V> {
                 assert_eq!(self.hints[i], self.heads()[(i + 1) * spacing]);
             }
         }
-        let record_size_sum: usize = (0..self.common.count as usize)
-            .map(|i| {
-                let offset = self.slot(i);
-                self.u16(offset).saturating_sub(4) + self.record_val_len(offset) + Self::RECORD_TO_KEY_OFFSET
-            })
-            .sum();
-        let calculated = (size_of::<Self>() - self.common.lower_fence_len as usize
-            + self.common.upper_fence_len as usize)
-            - record_size_sum;
-        let tracked = self.heap_bump as usize + self.heap_freed as usize;
-        assert_eq!(calculated, tracked);
+        self.validate_heap();
         let lower_fence =
             std::iter::once(Supreme::X(self.lower_fence().slice(self.common.prefix_len as usize..).to_vec()));
         let keys = (0..self.common.count as usize).map(|i| self.key_combined(i)).map(|k| Supreme::X(k.to_vec()));
@@ -362,7 +314,7 @@ impl<V: NodeKind> BasicNode<V> {
         let Ok(index) = Self::find::<O>(OPtr::from_mut(self), key) else {
             return None;
         };
-        self.heap_freed += self.stored_record_size(self.slot(index)) as u16;
+        self.heap_free(index);
         let count = self.common.count as usize;
         {
             let orhc = Self::reserved_head_count(count);
@@ -387,66 +339,28 @@ impl<V: NodeKind> BasicNode<V> {
 
     #[allow(clippy::result_unit_err)]
     fn insert<O: OlcErrorHandler>(&mut self, key: &[u8], val: &[u8]) -> Result<Option<()>, ()> {
-        self.validate();
-        if !V::IS_LEAF {
-            assert_eq!(val.len(), PAGE_ID_LEN);
-        }
         let index = Self::find::<O>(OPtr::from_mut(self), key);
-        let key = &key[self.common.prefix_len as usize..];
         let count = self.common.count as usize;
-        let record_size = Self::record_size(key.len().saturating_sub(4), val.len());
-        loop {
-            let new_heap_start;
-            match index {
-                Ok(existing) => {
-                    new_heap_start = Self::slot_end(count);
-                    //TODO in-place update
-                    if record_size <= (self.heap_bump as usize - new_heap_start) {
-                        self.heap_freed += self.stored_record_size(self.slot(existing)) as u16;
-                        self.heap_write_new(key, val, existing);
-                        self.validate();
-                        return Ok(Some(()));
-                    }
-                }
-                Err(insert_at) => {
-                    new_heap_start = Self::slot_end(count + 1);
-                    if new_heap_start + record_size <= self.heap_bump as usize {
-                        let orhc = Self::reserved_head_count(count);
-                        let nrhc = Self::reserved_head_count(count + 1);
-                        if nrhc == orhc {
-                            self.relocate_by::<true, u16>(
-                                Self::HEAD_OFFSET + nrhc * 4 + insert_at * 2,
-                                count - insert_at,
-                                1,
-                            );
-                        } else {
-                            self.relocate_by::<true, u16>(
-                                Self::HEAD_OFFSET + orhc * 4 + insert_at * 2,
-                                count - insert_at,
-                                HEAD_RESERVATION * 2 + 1,
-                            );
-                            self.relocate_by::<true, u16>(
-                                Self::HEAD_OFFSET + orhc * 4,
-                                insert_at,
-                                HEAD_RESERVATION * 2,
-                            );
-                        }
-                        self.relocate_by::<true, u32>(Self::HEAD_OFFSET + 4 * insert_at, count - insert_at, 1);
-                        self.common.count += 1;
-                        self.set_head(insert_at, key_head(key));
-                        self.update_hints(count, count + 1, insert_at);
-                        self.heap_write_new(key, val, insert_at);
-                        self.validate();
-                        return Ok(None);
-                    }
-                }
+        let new_heap_start = Self::slot_end(count + index.is_err() as usize);
+        HeapNode::insert(self, new_heap_start, key, val, index, || {
+            let insert_at = index.unwrap_err();
+            let orhc = Self::reserved_head_count(count);
+            let nrhc = Self::reserved_head_count(count + 1);
+            if nrhc == orhc {
+                self.relocate_by::<true, u16>(Self::HEAD_OFFSET + nrhc * 4 + insert_at * 2, count - insert_at, 1);
+            } else {
+                self.relocate_by::<true, u16>(
+                    Self::HEAD_OFFSET + orhc * 4 + insert_at * 2,
+                    count - insert_at,
+                    HEAD_RESERVATION * 2 + 1,
+                );
+                self.relocate_by::<true, u16>(Self::HEAD_OFFSET + orhc * 4, insert_at, HEAD_RESERVATION * 2);
             }
-            if self.heap_bump as usize + (self.heap_freed as usize) < new_heap_start + record_size {
-                self.validate();
-                return Err(());
-            }
-            self.compactify();
-        }
+            self.relocate_by::<true, u32>(Self::HEAD_OFFSET + 4 * insert_at, count - insert_at, 1);
+            self.common.count += 1;
+            self.set_head(insert_at, key_head(key));
+            self.update_hints(count, count + 1, insert_at);
+        })
     }
 
     const TAG: u8 = if V::IS_LEAF { node_tag::BASIC_LEAF } else { node_tag::BASIC_INNER };
@@ -758,5 +672,41 @@ mod tests {
         let fake_pid = |i| page_id_to_bytes(PageId { x: i + 1024 }).to_vec();
         split_merge::<KindInner>(1, Some(&[0; PAGE_ID_LEN]), fake_pid);
         split_merge::<KindInner>(0, Some(&[0; PAGE_ID_LEN]), fake_pid);
+    }
+}
+
+impl<V: NodeKind> HeapNode for BasicNode<V> {
+    type KeyLength = u16;
+    type ValLength = V::BasicValLength;
+
+    fn slot_offset(&self) -> usize {
+        Self::slot_offset(self.common.count as usize)
+    }
+
+    fn heap_info(&mut self) -> &mut HeapNodeInfo {
+        &mut self.heap
+    }
+
+    fn validate(&self) {
+        self.validate()
+    }
+}
+
+#[derive(Pod, Zeroable, Copy, Clone)]
+#[repr(transparent)]
+struct BasicNodeKeyHeapLength(u16);
+
+impl HeapLength for BasicNodeKeyHeapLength {
+    fn to_usize(self) -> usize {
+        (self.0 as usize).saturating_sub(4)
+    }
+
+    fn from_slice(x: impl SourceSlice) -> Result<Self, HeapLengthError> {
+        Ok(Self(x.len() as u16))
+    }
+
+    fn map_insert_slice<S: SourceSlice>(x: S) -> S {
+        let head_len = x.len().min(4);
+        x.slice_start(head_len)
     }
 }

@@ -2,6 +2,7 @@
 #![feature(maybe_uninit_slice)]
 
 mod basic_node;
+mod heap_node;
 mod key_source;
 mod node;
 mod tree;
