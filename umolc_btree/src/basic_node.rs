@@ -96,14 +96,14 @@ impl<V: NodeKind> BasicNode<V> {
         self.cast_slice_mut::<u16>()[index] = offset as u16;
     }
 
-    fn slots(&self) -> &[u16] {
-        //TODO maybe replace with getter?
-        &self.cast_slice::<u16>()[Self::slot_offset(self.common.count as usize) / 2..][..self.common.count as usize]
+    fn slot(&self, index: usize) -> usize {
+        debug_assert!(index < self.common.count as usize);
+        self.cast_slice::<u16>()[Self::slot_offset(self.common.count as usize) / 2 + index] as usize
     }
 
     fn key_combined(&self, index: usize) -> SourceSlicePair<u8, HeadSourceSlice, &[u8]> {
         let head = self.heads()[index];
-        let offset = self.slots()[index] as usize;
+        let offset = self.slot(index);
         let len = self.u16(offset);
         let tail_len = len.saturating_sub(4);
         let head = HeadSourceSlice::from_head_len(head, len);
@@ -124,12 +124,12 @@ impl<V: NodeKind> BasicNode<V> {
     }
 
     fn key_tail(&self, index: usize) -> &[u8] {
-        let offset = self.slots()[index] as usize;
+        let offset = self.slot(index);
         self.slice(offset + Self::RECORD_TO_KEY_OFFSET, self.u16(offset).saturating_sub(4))
     }
 
     fn val(&self, index: usize) -> &[u8] {
-        let offset = self.slots()[index] as usize;
+        let offset = self.slot(index);
         self.slice(
             offset + Self::RECORD_TO_KEY_OFFSET + self.u16(offset).saturating_sub(4),
             self.record_val_len(offset),
@@ -311,7 +311,7 @@ impl<V: NodeKind> BasicNode<V> {
         let heap_end = self.fences_start();
         let mut dst_offset = heap_end;
         for i in 0..self.common.count as usize {
-            let offset = self.slots()[i] as usize;
+            let offset = self.slot(i);
             let val_len = if V::IS_LEAF { self.u16(offset + 2) } else { PAGE_ID_LEN };
             let record_len = Self::RECORD_TO_KEY_OFFSET + self.u16(offset).saturating_sub(4) + val_len;
             dst_offset -= record_len;
@@ -336,12 +336,9 @@ impl<V: NodeKind> BasicNode<V> {
                 assert_eq!(self.hints[i], self.heads()[(i + 1) * spacing]);
             }
         }
-        let record_size_sum: usize = self
-            .slots()
-            .iter()
-            .copied()
-            .map(|offset| {
-                let offset = offset as usize;
+        let record_size_sum: usize = (0..self.common.count as usize)
+            .map(|i| {
+                let offset = self.slot(i);
                 self.u16(offset).saturating_sub(4) + self.record_val_len(offset) + Self::RECORD_TO_KEY_OFFSET
             })
             .sum();
@@ -366,7 +363,7 @@ impl<V: NodeKind> BasicNode<V> {
         let Ok(index) = Self::find::<O>(OPtr::from_mut(self), key) else {
             return None;
         };
-        self.heap_freed += self.stored_record_size(self.slots()[index] as usize) as u16;
+        self.heap_freed += self.stored_record_size(self.slot(index)) as u16;
         let count = self.common.count as usize;
         {
             let orhc = Self::reserved_head_count(count);
@@ -406,7 +403,7 @@ impl<V: NodeKind> BasicNode<V> {
                     new_heap_start = Self::slot_end(count);
                     //TODO in-place update
                     if record_size <= (self.heap_bump as usize - new_heap_start) {
-                        self.heap_freed += self.stored_record_size(self.slots()[existing] as usize) as u16;
+                        self.heap_freed += self.stored_record_size(self.slot(existing)) as u16;
                         self.heap_write_new(key, val, existing);
                         self.validate();
                         return Ok(Some(()));
@@ -471,7 +468,7 @@ impl<V: NodeKind> Debug for BasicNode<V> {
             s.field("lower", &page_id_from_bytes(self.lower()));
         };
         let records_fmt = (0..self.common.count as usize).format_with(",\n", |i, f| {
-            let offset = self.slots()[i] as usize;
+            let offset = self.slot(i);
             let val: &dyn Debug =
                 if V::IS_LEAF { &BStr::new(self.val(i)) } else { &page_id_from_bytes(self.val(i).try_into().unwrap()) };
             let head = self.heads()[i];
@@ -495,7 +492,7 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>, V: NodeKind> NodeStatic<'bm, BM> 
         let rest = (0..self.common.count as usize).map(|i| {
             // TODO change inner layout to have values at fixed offset
             let tail_len = self.key_tail(i).len();
-            (self.key_combined(i), self.slots()[i] as usize + Self::RECORD_TO_KEY_OFFSET + tail_len)
+            (self.key_combined(i), self.slot(i) + Self::RECORD_TO_KEY_OFFSET + tail_len)
         });
         lower.chain(rest).map(|(k, o)| (k, page_id_from_bytes(self.page_id_bytes(o))))
     }
