@@ -69,6 +69,7 @@ fn run_many(threads: u32, batches: u32, f: &(impl Fn(&mut SmallRng, &Barrier, u3
 }
 
 fn batch_ops(threads: u32, batches: u32, key_count: usize, op_weights: (impl Fn(u32, u32) -> [u32; 3] + Sync)) {
+    const LOG_OPS: bool = false;
     let bm: BM = &SimpleBm::new(1 << 18);
     #[repr(u32)]
     #[derive(Debug)]
@@ -96,7 +97,7 @@ fn batch_ops(threads: u32, batches: u32, key_count: usize, op_weights: (impl Fn(
         let weights = op_weights(tid, bid);
         let op_dist = &WeightedIndex::new(weights).unwrap();
         let batch_rng_seed = SmallRng::from_rng(rng).unwrap();
-        let ops = || {
+        let ops = |phase_label: &'static str| {
             let mut brng = batch_rng_seed.clone();
             let total_ops = weights.iter().sum::<u32>();
             (0..total_ops)
@@ -108,17 +109,19 @@ fn batch_ops(threads: u32, batches: u32, key_count: usize, op_weights: (impl Fn(
                         _ => unreachable!(),
                     };
                     let index = key_dist.sample(&mut brng);
+                    if LOG_OPS {
+                        println!("b={bid:<6} p={phase_label:<15} t={tid:<6} o={op:?} k={index:<6}")
+                    }
                     (op, index, &key_states[index], &*keys[index])
                 })
                 .enumerate()
         };
 
         // announce ops
-        for (_k_op, (op, index, ks, _key)) in ops() {
-            //eprintln!("announce {tid} {op:?} {index}");
+        for (_k_op, (op, index, ks, _key)) in ops("announce") {
             let counter = match op {
                 Op::Insert => &ks.insert_count,
-                Op::Remove => &ks.insert_count,
+                Op::Remove => &ks.removed_count,
                 Op::Lookup => continue,
             };
             inc_state_12(counter);
@@ -135,8 +138,7 @@ fn batch_ops(threads: u32, batches: u32, key_count: usize, op_weights: (impl Fn(
         barrier.wait();
 
         //run
-        for (_k_op, (op, _index, ks, key)) in ops() {
-            //eprintln!("run {tid} {op:?} {_index}");
+        for (_k_op, (op, _index, ks, key)) in ops("run") {
             match op {
                 Op::Lookup => {
                     let buffer = &mut MaybeUninit::uninit_array();
@@ -172,8 +174,7 @@ fn batch_ops(threads: u32, batches: u32, key_count: usize, op_weights: (impl Fn(
         barrier.wait();
 
         // fix-up conflicting writes
-        for (_k_op, (op, _index, ks, key)) in ops() {
-            //eprintln!("fix {tid} {op:?} {_index}");
+        for (_k_op, (op, _index, ks, key)) in ops("fix") {
             if ks.principal_thread.load(Relaxed) != tid
                 || ks.removed_count.load(Relaxed) + ks.insert_count.load(Relaxed) <= 1
             {
@@ -200,8 +201,7 @@ fn batch_ops(threads: u32, batches: u32, key_count: usize, op_weights: (impl Fn(
         barrier.wait();
 
         // update_state
-        for (_k_op, (op, _index, ks, _key)) in ops() {
-            //eprintln!("update {tid} {op:?} {_index}");
+        for (_k_op, (op, _index, ks, _key)) in ops("update") {
             if ks.principal_thread.load(Relaxed) == tid {
                 let is_present = match op {
                     Op::Lookup => continue,
@@ -210,12 +210,13 @@ fn batch_ops(threads: u32, batches: u32, key_count: usize, op_weights: (impl Fn(
                 };
                 ks.old_present.store(is_present, Relaxed);
                 ks.old_write_thread.store(tid, Relaxed);
+                ks.old_write_batch.store(bid, Relaxed);
             }
         }
         barrier.wait();
 
         // reset announcements
-        for (_k_op, (op, _index, ks, _key)) in ops() {
+        for (_k_op, (op, _index, ks, _key)) in ops("reset") {
             if let Op::Remove | Op::Insert = op {
                 ks.insert_count.store(0, Relaxed);
                 ks.removed_count.store(0, Relaxed);
