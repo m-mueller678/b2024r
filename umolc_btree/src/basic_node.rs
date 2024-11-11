@@ -576,7 +576,7 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>, V: NodeKind> NodeDynamic<'bm, BM>
         *self = *tmp;
     }
 
-    fn split<'g>(&mut self, bm: BM, parent: &mut dyn NodeDynamic<'bm, BM>) -> Result<(), ()> {
+    fn split(&mut self, bm: BM, parent: &mut dyn NodeDynamic<'bm, BM>) -> Result<(), ()> {
         let left = &mut BasicNode::<V>::zeroed();
         let count = self.common.count as usize;
         let (low_count, sep_key) = self.find_separator();

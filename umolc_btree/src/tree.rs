@@ -236,7 +236,7 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeStatic<'bm, BM> for MetadataP
 }
 
 impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeDynamic<'bm, BM> for MetadataPage {
-    fn split<'g>(&mut self, _bm: BM, _parent: &mut dyn NodeDynamic<'bm, BM>) -> Result<(), ()> {
+    fn split(&mut self, _bm: BM, _parent: &mut dyn NodeDynamic<'bm, BM>) -> Result<(), ()> {
         unimplemented!()
     }
 

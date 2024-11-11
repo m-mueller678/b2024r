@@ -61,7 +61,7 @@ macro_rules! impl_to_from_page {
         static_assertions::assert_eq_size!($t, $crate::node::Page);
         static_assertions::assert_eq_align!($t, $crate::node::Page);
         static_assertions::assert_impl_all!($t: bytemuck::Pod);
-        unsafe impl crate::node::ToFromPage for $t {}
+        unsafe impl $crate::node::ToFromPage for $t {}
     };
 }
 
@@ -72,6 +72,7 @@ pub fn page_cast_mut<A: ToFromPage, B: ToFromPage>(a: &mut A) -> &mut B {
     unsafe { transmute::<&mut A, &mut B>(a) }
 }
 
+#[allow(clippy::missing_safety_doc)]
 pub unsafe trait ToFromPage {}
 
 pub trait ToFromPageExt: ToFromPage + Pod {
@@ -150,7 +151,7 @@ pub trait NodeStatic<'bm, BM: BufferManager<'bm, Page = Page>>: NodeDynamic<'bm,
 pub trait NodeDynamic<'bm, BM: BufferManager<'bm, Page = Page>>: ToFromPage + NodeDynamicAuto<'bm, BM> + Debug {
     /// fails iff parent_insert fails.
     /// if node is near empty, no split is performed and parent_insert is not called.
-    fn split<'g>(&mut self, bm: BM, parent: &mut dyn NodeDynamic<'bm, BM>) -> Result<(), ()>;
+    fn split(&mut self, bm: BM, parent: &mut dyn NodeDynamic<'bm, BM>) -> Result<(), ()>;
     fn to_debug(&self) -> DebugNode;
     fn merge(&mut self, right: &mut Page);
     fn validate(&self);

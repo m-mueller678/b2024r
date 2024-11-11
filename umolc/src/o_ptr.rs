@@ -124,7 +124,7 @@ impl<O: OlcErrorHandler> OPtr<'_, [u8], O> {
         unsafe { std::ptr::copy(self.p as *const u8, dst.as_mut_ptr(), self.p.len()) }
     }
 
-    pub fn load_bytes_uninit<'a>(self, dst: &'a mut [MaybeUninit<u8>]) -> &'a mut [u8] {
+    pub fn load_bytes_uninit(self, dst: &mut [MaybeUninit<u8>]) -> &mut [u8] {
         unsafe {
             assert_eq!(self.p.len(), dst.len());
             std::ptr::copy(self.p as *const u8, dst.as_mut_ptr() as *mut u8, self.p.len());
