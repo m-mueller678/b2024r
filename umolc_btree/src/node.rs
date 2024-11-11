@@ -1,4 +1,4 @@
-use crate::basic_node::{BasicInner, BasicLeaf};
+use crate::basic_node::{BasicInner, BasicLeaf, BasicNodeKeyHeapLength};
 use crate::heap_node::{ConstHeapLength, HeapLength};
 use crate::key_source::{common_prefix, SourceSlice, SourceSlicePair};
 use crate::tree::MetadataPage;
@@ -284,7 +284,7 @@ impl NodeKind for KindInner {
 
 impl NodeKind for KindLeaf {
     const IS_LEAF: bool = true;
-    type BasicValLength = u16;
+    type BasicValLength = BasicNodeKeyHeapLength;
 }
 
 #[derive(Clone, Copy, Zeroable, Pod)]
@@ -311,12 +311,6 @@ pub fn insert_upper_sibling<'bm, BM: BufferManager<'bm, Page = Page>>(
 }
 
 impl Page {
-    pub fn validate(&self) {
-        if cfg!(debug_assertions) {
-            self.as_dyn_node().validate();
-        }
-    }
-
     pub fn common_init(&mut self, tag: u8, lf: impl SourceSlice, uf: impl SourceSlice) {
         self.common.tag = tag;
         self.common.count = 0;
