@@ -129,17 +129,18 @@ impl<'bm, BM: CommonSeqLockBM<'bm>> Deref for SimpleGuardS<'bm, BM> {
 pub struct SimpleGuardX<'bm, BM: CommonSeqLockBM<'bm>> {
     bm: BM,
     ptr: &'bm mut BM::Page,
+    written: bool,
 }
 
 impl<'bm, BM: CommonSeqLockBM<'bm>> BufferManagerGuard<'bm, BM> for SimpleGuardX<'bm, BM> {
     fn acquire_wait(bm: BM, page_id: PageId) -> Self {
         let Ok(_version) = bm.lock(page_id).lock_exclusive(());
-        SimpleGuardX { bm, ptr: unsafe { &mut *bm.page(page_id).get() } }
+        SimpleGuardX { bm, ptr: unsafe { &mut *bm.page(page_id).get() }, written: false }
     }
 
     fn acquire_wait_version(bm: BM, page_id: PageId, version: OlcVersion) -> Option<Self> {
         bm.lock(page_id).lock_exclusive(version).ok()?;
-        Some(SimpleGuardX { bm, ptr: unsafe { &mut *bm.page(page_id).get() } })
+        Some(SimpleGuardX { bm, ptr: unsafe { &mut *bm.page(page_id).get() }, written: false })
     }
 
     fn release(self) -> OlcVersion {
@@ -158,7 +159,9 @@ impl<'bm, BM: CommonSeqLockBM<'bm>> BufferManagerGuard<'bm, BM> for SimpleGuardX
 }
 
 impl<'bm, BM: CommonSeqLockBM<'bm>> ExclusiveGuard<'bm, BM> for SimpleGuardX<'bm, BM> {
-    fn reset_written(&mut self) {}
+    fn reset_written(&mut self) {
+        self.written = false;
+    }
 
     fn dealloc(self) {
         self.bm.dealloc(self.page_id());
@@ -176,6 +179,7 @@ impl<'bm, BM: CommonSeqLockBM<'bm>> Deref for SimpleGuardX<'bm, BM> {
 
 impl<'bm, BM: CommonSeqLockBM<'bm>> DerefMut for SimpleGuardX<'bm, BM> {
     fn deref_mut(&mut self) -> &mut Self::Target {
+        self.written = true;
         self.ptr
     }
 }
@@ -189,7 +193,7 @@ impl<'bm, BM: CommonSeqLockBM<'bm>> BufferManager<'bm> for BM {
 
     fn alloc(self) -> Self::GuardX {
         let pid = self.alloc();
-        SimpleGuardX { bm: self, ptr: unsafe { &mut *self.page(pid).get() } }
+        SimpleGuardX { bm: self, ptr: unsafe { &mut *self.page(pid).get() }, written: false }
     }
 }
 
@@ -207,7 +211,7 @@ impl<'bm, BM: CommonSeqLockBM<'bm>> BufferManageGuardUpgrade<'bm, BM, SimpleGuar
     fn upgrade(self) -> SimpleGuardX<'bm, BM> {
         let pid = self.bm.pid_from_address(self.ptr.to_raw().addr());
         BM::OlcEH::optmistic_fail_check(self.bm.lock(pid).lock_exclusive(self.version));
-        let ret = SimpleGuardX { bm: self.bm, ptr: unsafe { &mut *self.bm.page(pid).get() } };
+        let ret = SimpleGuardX { bm: self.bm, ptr: unsafe { &mut *self.bm.page(pid).get() }, written: false };
         self.release_unchecked();
         ret
     }
@@ -245,18 +249,15 @@ impl<'bm, BM: CommonSeqLockBM<'bm>> Drop for SimpleGuardO<'bm, BM> {
 
 impl<'bm, BM: CommonSeqLockBM<'bm>> Drop for SimpleGuardS<'bm, BM> {
     fn drop(&mut self) {
-        // the guard is read only, so this cannot lead to corruption, but it is still not expected to occur.
-        debug_assert!(!BM::OlcEH::is_unwinding());
         self.bm.lock(self.page_id()).unlock_shared();
     }
 }
 
 impl<'bm, BM: CommonSeqLockBM<'bm>> Drop for SimpleGuardX<'bm, BM> {
     fn drop(&mut self) {
-        // TODO only panic if this has already been used for writing.
-        // upgrading two optimistic locks to exclusive may trigger this if one of them fails to upgrade
-        // same for shared locks in debug mode
-        assert!(!BM::OlcEH::is_unwinding());
+        if BM::OlcEH::is_unwinding() {
+            assert!(!self.written);
+        }
         self.bm.lock(self.page_id()).unlock_exclusive();
     }
 }
