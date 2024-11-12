@@ -3,7 +3,7 @@ use crate::hash_leaf::HashLeaf;
 use crate::key_source::SourceSlice;
 use crate::node::{
     node_tag, o_ptr_is_inner, o_ptr_lookup_inner, o_ptr_lookup_leaf, page_cast, page_cast_mut, page_id_to_bytes,
-    CommonNodeHead, DebugNode, NodeDynamic, NodeDynamicAuto, NodeStatic, Page, ToFromPageExt, PAGE_SIZE,
+    CommonNodeHead, DebugNode, NodeDynamic, NodeDynamicAuto, NodeStatic, Page, ToFromPage, ToFromPageExt, PAGE_SIZE,
 };
 use crate::util::PodPad;
 use crate::{impl_to_from_page, MAX_KEY_SIZE, MAX_VAL_SIZE};
@@ -210,7 +210,7 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> Drop for Tree<'bm, BM> {
     }
 }
 
-#[derive(Pod, Zeroable, Copy, Clone, Debug)]
+#[derive(Debug)]
 #[repr(C, align(16))]
 pub struct MetadataPage {
     node_head: CommonNodeHead,
@@ -219,7 +219,7 @@ pub struct MetadataPage {
     _pad2: PodPad<{ PAGE_SIZE - size_of::<CommonNodeHead>() - 8 - (8 - size_of::<CommonNodeHead>() % 8) % 8 }>,
 }
 
-impl_to_from_page!(MetadataPage);
+unsafe impl ToFromPage for MetadataPage {} //TODO
 
 impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeStatic<'bm, BM> for MetadataPage {
     const TAG: u8 = node_tag::METADATA_MARKER;

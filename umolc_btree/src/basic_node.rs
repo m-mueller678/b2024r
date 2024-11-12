@@ -23,36 +23,17 @@ const MIN_HINT_SPACING: usize = 3;
 // must align with min hint spacing, so hints are updated when min count is reached
 const MIN_HINT_COUNT: usize = MIN_HINT_SPACING * (HINT_COUNT + 1);
 
-// Pod cannot be automatically implemented for generic structs, so we define a second non-generic version to get automatic checking
-macro_rules! def_basic_node {
-    {$($n:ident:$t:ty,)*}=>{
-        #[derive(Copy, Clone, Zeroable)]
-        #[repr(C, align(16))]
-        pub struct BasicNode<V>{
-            $($n:$t,)*
-            _p:PhantomData<V>,
-        }
-
-        unsafe impl<V:Copy+Zeroable+'static> Pod for BasicNode<V>{}
-        unsafe impl<V> ToFromPage for BasicNode<V>{}
-
-        #[derive(Pod,Copy,Clone,Zeroable)]
-        #[repr(C, align(16))]
-        #[allow(dead_code)]
-        pub struct AssertBasicNodePod{
-            $($n:$t,)*
-        }
-        impl_to_from_page!{AssertBasicNodePod}
-    }
-}
-
-def_basic_node! {
+#[repr(C, align(16))]
+pub struct BasicNode<V> {
     common: CommonNodeHead,
     heap: HeapNodeInfo,
     _pad: u16,
     hints: [u32; HINT_COUNT],
     _data: [u32; BASIC_NODE_DATA_SIZE],
+    _p: PhantomData<V>,
 }
+
+unsafe impl<V> ToFromPage for BasicNode<V> {} //TODO
 
 pub type BasicLeaf = BasicNode<KindLeaf>;
 pub type BasicInner = BasicNode<KindInner>;
@@ -95,10 +76,7 @@ impl<V: NodeKind> BasicNode<V> {
         head.join(tail)
     }
 
-    fn find<O: OlcErrorHandler>(this: OPtr<Self, O>, key: &[u8]) -> Result<usize, usize>
-    where
-        Self: Copy,
-    {
+    fn find<O: OlcErrorHandler>(this: OPtr<Self, O>, key: &[u8]) -> Result<usize, usize> {
         let prefix_len = o_project!(this.common.prefix_len).r() as usize;
         if prefix_len > key.len() {
             O::optimistic_fail()
@@ -162,11 +140,11 @@ impl<V: NodeKind> BasicNode<V> {
     const HEAD_OFFSET: usize = offset_of!(Self, _data) + if V::IS_LEAF { 0 } else { 8 };
 
     fn heads(&self) -> &[u32] {
-        &bytemuck::cast_slice(std::slice::from_ref(self))[Self::HEAD_OFFSET / 4..][..self.common.count as usize]
+        self.slice(Self::HEAD_OFFSET / 4, self.common.count as usize)
     }
 
     fn set_head(&mut self, i: usize, head: u32) {
-        bytemuck::cast_slice_mut(std::slice::from_mut(self))[Self::HEAD_OFFSET / 4 + i] = head
+        *self.page_index_mut(Self::HEAD_OFFSET / 4 + i) = head;
     }
     fn copy_records(&self, dst: &mut Self, src_range: Range<usize>, dst_start: usize) {
         let dst_range = dst_start..(src_range.end + dst_start - src_range.start);
@@ -371,19 +349,19 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>, V: NodeKind> NodeDynamic<'bm, BM>
             right.as_dyn_node::<BM>().validate();
         }
         let right = page_cast_mut::<Page, Self>(right);
-        let tmp = &mut BasicNode::<V>::zeroed();
+        let mut tmp = BasicNode::<V>::zeroed();
         let left_count = self.common.count as usize;
         let right_count = right.common.count as usize;
         if V::IS_LEAF {
-            NodeStatic::<BM>::init(tmp, self.lower_fence(), right.upper_fence_combined(), None);
+            NodeStatic::<BM>::init(&mut tmp, self.lower_fence(), right.upper_fence_combined(), None);
             tmp.common.count = (left_count + right_count) as u16;
-            self.copy_records(tmp, 0..left_count, 0);
-            right.copy_records(tmp, 0..right_count, left_count);
+            self.copy_records(&mut tmp, 0..left_count, 0);
+            right.copy_records(&mut tmp, 0..right_count, left_count);
         } else {
-            NodeStatic::<BM>::init(tmp, self.lower_fence(), right.upper_fence_combined(), Some(self.lower()));
+            NodeStatic::<BM>::init(&mut tmp, self.lower_fence(), right.upper_fence_combined(), Some(self.lower()));
             tmp.common.count = (left_count + right_count + 1) as u16;
-            self.copy_records(tmp, 0..left_count, 0);
-            right.copy_records(tmp, 0..right_count, left_count + 1);
+            self.copy_records(&mut tmp, 0..left_count, 0);
+            right.copy_records(&mut tmp, 0..right_count, left_count + 1);
             tmp.heap_write_new(
                 self.as_page().upper_fence_combined().slice_start(tmp.common.prefix_len as usize),
                 right.lower().as_slice(),
@@ -392,22 +370,22 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>, V: NodeKind> NodeDynamic<'bm, BM>
         }
         tmp.update_hints(0, tmp.common.count as usize, 0);
         tmp.validate();
-        *self = *tmp;
+        *self = tmp;
     }
 
     fn split(&mut self, bm: BM, parent: &mut dyn NodeDynamic<'bm, BM>) -> Result<(), ()> {
-        let left = &mut BasicNode::<V>::zeroed();
+        let mut left = BasicNode::<V>::zeroed();
         let count = self.common.count as usize;
         let (low_count, sep_key) = find_separator::<BM, _>(self, |i| self.key_combined(i));
         let mut right = insert_upper_sibling(parent, bm, sep_key)?;
         let right = page_cast_mut::<_, BasicNode<V>>(&mut *right);
         self.validate();
         let (lr, rr) = if V::IS_LEAF {
-            NodeStatic::<BM>::init(left, self.lower_fence(), sep_key, None);
+            NodeStatic::<BM>::init(&mut left, self.lower_fence(), sep_key, None);
             NodeStatic::<BM>::init(right, sep_key, self.upper_fence_combined(), None);
             (0..low_count, low_count..count)
         } else {
-            NodeStatic::<BM>::init(left, self.as_page().lower_fence(), sep_key, Some(self.lower()));
+            NodeStatic::<BM>::init(&mut left, self.as_page().lower_fence(), sep_key, Some(self.lower()));
             let mid_child = self.heap_val(low_count).try_into().unwrap();
             NodeStatic::<BM>::init(right, sep_key, self.as_page().upper_fence_combined(), Some(mid_child));
             (0..low_count, low_count + 1..count)
@@ -415,14 +393,14 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>, V: NodeKind> NodeDynamic<'bm, BM>
         debug_assert!(self.key_combined(lr.end - 1).cmp(sep_key.slice(self.common.prefix_len as usize..)).is_lt());
         debug_assert!(sep_key.slice(self.common.prefix_len as usize..).cmp(self.key_combined(rr.start)).is_le());
         left.common.count = lr.len() as u16;
-        self.copy_records(left, lr.clone(), 0);
+        self.copy_records(&mut left, lr.clone(), 0);
         left.update_hints(0, lr.count(), 0);
         right.common.count = rr.len() as u16;
         self.copy_records(right, rr.clone(), 0);
         right.update_hints(0, rr.count(), 0);
         left.validate();
         right.validate();
-        *self = *left;
+        *self = left;
         Ok(())
     }
 

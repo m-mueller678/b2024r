@@ -148,13 +148,12 @@ pub trait HeapNode: ToFromPageExt + Debug {
 
     fn slot(&self, index: usize) -> usize {
         debug_assert!(index < self.as_page().common.count as usize);
-        bytemuck::cast_ref::<Page, [u16; PAGE_SIZE / 2]>(self.as_page())[self.slot_offset() / 2 + index] as usize
+        *self.page_index::<u16>(self.slot_offset() / 2 + index) as usize
     }
 
     fn set_slot(&mut self, index: usize, v: usize) {
         debug_assert!(index < self.as_page().common.count as usize);
-        let so = self.slot_offset();
-        bytemuck::cast_mut::<Page, [u16; PAGE_SIZE / 2]>(self.as_page_mut())[so / 2 + index] = v as u16;
+        *self.page_index_mut::<u16>(self.slot_offset() / 2 + index) = v as u16;
     }
 
     fn stored_record_size(&self, slot_index: usize) -> usize {

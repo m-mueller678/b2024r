@@ -17,9 +17,10 @@ pub struct SimpleBm<P> {
 
 unsafe impl<P> Sync for SimpleBm<P> {}
 
-impl<P: Pod> SimpleBm<P> {
+impl<P> SimpleBm<P> {
     pub fn new(capacity: usize) -> Self {
         unsafe {
+            panic!(); //TODO zeroable
             SimpleBm {
                 pages: Box::<[MaybeUninit<_>]>::assume_init(Box::new_zeroed_slice(capacity)),
                 locks: Box::<[MaybeUninit<_>]>::assume_init(Box::new_zeroed_slice(capacity)),
@@ -29,7 +30,7 @@ impl<P: Pod> SimpleBm<P> {
     }
 }
 
-impl<'bm, P: Pod> CommonSeqLockBM<'bm> for &'bm SimpleBm<P> {
+impl<'bm, P> CommonSeqLockBM<'bm> for &'bm SimpleBm<P> {
     type Page = P;
     type OlcEH = UnwindOlcEh;
 
@@ -64,7 +65,7 @@ impl<'bm, P: Pod> CommonSeqLockBM<'bm> for &'bm SimpleBm<P> {
 }
 
 pub trait CommonSeqLockBM<'bm>: Copy + Sync + Send + 'bm {
-    type Page: Pod;
+    type Page;
     type OlcEH: OlcErrorHandler;
     fn pid_from_address(self, address: usize) -> PageId;
     /// acquires exclusive lock

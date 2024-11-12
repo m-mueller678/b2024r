@@ -2,7 +2,7 @@ use crate::heap_node::{HeapNode, HeapNodeInfo};
 use crate::key_source::SourceSlice;
 use crate::node::{
     find_separator, insert_upper_sibling, node_tag, page_cast_mut, CommonNodeHead, DebugNode, NodeDynamic, NodeStatic,
-    ToFromPageExt, PAGE_SIZE,
+    ToFromPage, ToFromPageExt, PAGE_SIZE,
 };
 use crate::util::Supreme;
 use crate::{impl_to_from_page, Page};
@@ -15,7 +15,6 @@ use std::mem::offset_of;
 use std::ops::Range;
 use umolc::{o_project, BufferManager, OPtr, OlcErrorHandler, PageId};
 
-#[derive(Pod, Copy, Clone, Zeroable)]
 #[repr(C, align(16))]
 #[allow(dead_code)]
 pub struct HashLeaf {
@@ -28,7 +27,7 @@ pub struct HashLeaf {
 const HASH_LEAF_DATA_SIZE: usize = PAGE_SIZE - 16;
 const SLOT_RESERVATION: usize = 8;
 
-impl_to_from_page! {HashLeaf}
+unsafe impl ToFromPage for HashLeaf {} //TODO
 
 impl HashLeaf {
     const SLOT_OFFSET: usize = offset_of!(Self, _data);
@@ -211,13 +210,13 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeStatic<'bm, BM> for HashLeaf 
 impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeDynamic<'bm, BM> for HashLeaf {
     fn split(&mut self, bm: BM, parent: &mut dyn NodeDynamic<'bm, BM>) -> Result<(), ()> {
         self.sort();
-        let left = &mut Self::zeroed();
+        let mut left = Self::zeroed();
         let count = self.common.count as usize;
         let (low_count, sep_key) = find_separator::<BM, _>(self, |i| self.heap_key(i));
         let mut right = insert_upper_sibling(parent, bm, sep_key)?;
         let right = right.cast_mut::<Self>();
         self.validate();
-        NodeStatic::<BM>::init(left, self.lower_fence(), sep_key, None);
+        NodeStatic::<BM>::init(&mut left, self.lower_fence(), sep_key, None);
         NodeStatic::<BM>::init(right, sep_key, self.upper_fence_combined(), None);
         let (lr, rr) = (0..low_count, low_count..count);
         debug_assert!(
@@ -228,13 +227,13 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeDynamic<'bm, BM> for HashLeaf
         );
         left.common.count = lr.len() as u16;
         left.sorted = lr.len() as u16;
-        self.copy_records(left, lr.clone(), 0);
+        self.copy_records(&mut left, lr.clone(), 0);
         right.common.count = rr.len() as u16;
         right.sorted = rr.len() as u16;
         self.copy_records(right, rr.clone(), 0);
         left.validate();
         right.validate();
-        *self = *left;
+        *self = left;
         Ok(())
     }
 
@@ -256,16 +255,16 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeDynamic<'bm, BM> for HashLeaf
             right.as_dyn_node::<BM>().validate();
         }
         let right = page_cast_mut::<Page, Self>(right);
-        let tmp = &mut Self::zeroed();
+        let mut tmp = Self::zeroed();
         let left_count = self.common.count as usize;
         let right_count = right.common.count as usize;
-        NodeStatic::<BM>::init(tmp, self.lower_fence(), right.upper_fence_combined(), None);
+        NodeStatic::<BM>::init(&mut tmp, self.lower_fence(), right.upper_fence_combined(), None);
         tmp.common.count = (left_count + right_count) as u16;
-        self.copy_records(tmp, 0..left_count, 0);
-        right.copy_records(tmp, 0..right_count, left_count);
+        self.copy_records(&mut tmp, 0..left_count, 0);
+        right.copy_records(&mut tmp, 0..right_count, left_count);
         tmp.sorted = if self.common.count == self.sorted { self.sorted + right.sorted } else { self.sorted };
         tmp.validate();
-        *self = *tmp;
+        *self = tmp;
     }
 
     fn validate(&self) {

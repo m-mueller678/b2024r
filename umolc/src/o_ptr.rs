@@ -24,10 +24,11 @@ pub struct OPtr<'a, T: ?Sized, O: OlcErrorHandler> {
     _bm: PhantomData<O>,
 }
 
-impl<'a, T: Pod, O: OlcErrorHandler> OPtr<'a, T, O> {
+impl<'a, T, O: OlcErrorHandler> OPtr<'a, T, O> {
     pub fn to_raw(self) -> *const T {
         self.p
     }
+
     pub fn from_mut(x: &'a mut T) -> Self {
         OPtr { p: x as *const T, _p: PhantomData, _bm: PhantomData }
     }
@@ -42,22 +43,12 @@ impl<'a, T: Pod, O: OlcErrorHandler> OPtr<'a, T, O> {
         OPtr { p, _p: PhantomData, _bm: PhantomData }
     }
 
-    pub fn r(self) -> T
-    where
-        T: Atomic,
-    {
-        unsafe { (*(self.p as *const T::Atom)).load(Relaxed) }
+    #[allow(clippy::missing_safety_doc)]
+    pub unsafe fn project<R>(self, f: impl FnOnce(*const T) -> *const R) -> OPtr<'a, R, O> {
+        OPtr { p: f(self.p), _p: PhantomData, _bm: PhantomData }
     }
 
-    pub fn read_unaligned_nonatomic_u16(self, offset: usize) -> usize {
-        if offset + 2 <= size_of::<T>() {
-            unsafe { ((self.p as *const u8).add(offset) as *const u16).read_unaligned() as usize }
-        } else {
-            O::optimistic_fail()
-        }
-    }
-
-    pub fn cast<U: Pod>(self) -> OPtr<'a, U, O> {
+    pub fn cast<U>(self) -> OPtr<'a, U, O> {
         assert_eq!(size_of::<T>(), size_of::<U>());
         assert!(align_of::<T>() >= align_of::<U>());
         OPtr { p: self.p as *const U, _p: PhantomData, _bm: PhantomData }
@@ -81,9 +72,19 @@ impl<'a, T: Pod, O: OlcErrorHandler> OPtr<'a, T, O> {
         }
     }
 
-    #[allow(clippy::missing_safety_doc)]
-    pub unsafe fn project<R>(self, f: impl FnOnce(*const T) -> *const R) -> OPtr<'a, R, O> {
-        OPtr { p: f(self.p), _p: PhantomData, _bm: PhantomData }
+    pub fn read_unaligned_nonatomic_u16(self, offset: usize) -> usize {
+        if offset + 2 <= size_of::<T>() {
+            unsafe { ((self.p as *const u8).add(offset) as *const u16).read_unaligned() as usize }
+        } else {
+            O::optimistic_fail()
+        }
+    }
+
+    pub fn r(self) -> T
+    where
+        T: Atomic + Pod,
+    {
+        unsafe { (*(self.p as *const T::Atom)).load(Relaxed) }
     }
 }
 

@@ -9,7 +9,8 @@ use bytemuck::{Pod, Zeroable};
 use static_assertions::{assert_impl_all, const_assert_eq};
 use std::assert;
 use std::fmt::Debug;
-use std::mem::{swap, transmute};
+use std::mem::{swap, transmute, MaybeUninit};
+use std::sync::atomic::AtomicU8;
 use umolc::{
     o_project, BufferManager, BufferManagerExt, BufferManagerGuard, ExclusiveGuard, OPtr, OlcErrorHandler, PageId,
 };
@@ -29,11 +30,11 @@ pub const PAGE_SIZE: usize = 4096;
 
 const NODE_TAIL_SIZE: usize = PAGE_SIZE - size_of::<CommonNodeHead>();
 
-#[derive(Clone, Copy, Zeroable, Pod, Debug)]
+#[derive(Debug)]
 #[repr(C)]
 pub struct CommonNodeHead {
     pub tag: u8,
-    _pad: u8,
+    pub counter: AtomicU8,
     pub prefix_len: u16,
     pub count: u16,
     pub lower_fence_len: u16,
@@ -82,6 +83,10 @@ pub unsafe trait ToFromPage {}
 pub trait ToFromPageExt: ToFromPage + Sized {
     fn as_page(&self) -> &Page {
         page_cast::<Self, Page>(self)
+    }
+
+    fn zeroed() -> Self {
+        unsafe { MaybeUninit::zeroed().assume_init() }
     }
 
     fn as_page_mut(&mut self) -> &mut Page {
@@ -144,7 +149,7 @@ pub trait ToFromPageExt: ToFromPage + Sized {
     }
 
     fn fences_start(&self) -> usize {
-        let head = self.as_page().common;
+        let head = &self.as_page().common;
         size_of::<Self>() - head.lower_fence_len as usize - head.upper_fence_len as usize
     }
 
@@ -161,7 +166,7 @@ pub trait ToFromPageExt: ToFromPage + Sized {
 
 impl<T: ToFromPage> ToFromPageExt for T {}
 
-pub trait NodeStatic<'bm, BM: BufferManager<'bm, Page = Page>>: NodeDynamic<'bm, BM> + Pod {
+pub trait NodeStatic<'bm, BM: BufferManager<'bm, Page = Page>>: NodeDynamic<'bm, BM> {
     const TAG: u8;
     const IS_INNER: bool;
     type TruncatedKey<'a>: SourceSlice + 'a
@@ -299,17 +304,13 @@ pub fn page_id_from_olc_bytes<O: OlcErrorHandler>(x: OPtr<[u8; PAGE_ID_LEN], O>)
     PageId { x: u64::from_ne_bytes(b) }
 }
 
-#[derive(Clone, Copy)]
 #[repr(C, align(16))]
 pub struct Page {
     pub common: CommonNodeHead,
     _pad: [u8; NODE_TAIL_SIZE],
 }
 
-assert_impl_all!(CommonNodeHead:Pod,Zeroable);
 const_assert_eq!(size_of::<Page>(), PAGE_SIZE);
-unsafe impl Zeroable for Page {}
-unsafe impl Pod for Page {}
 unsafe impl ToFromPage for Page {}
 
 pub trait NodeKind: Pod {
