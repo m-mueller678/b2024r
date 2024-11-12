@@ -1,9 +1,9 @@
+use crate::define_node;
 use crate::heap_node::{HeapLength, HeapLengthError, HeapNode, HeapNodeInfo};
-use crate::impl_to_from_page;
 use crate::key_source::{key_head, HeadSourceSlice, SourceSlice, SourceSlicePair};
 use crate::node::{
     find_separator, insert_upper_sibling, node_tag, page_cast_mut, page_id_from_bytes, page_id_from_olc_bytes,
-    CommonNodeHead, DebugNode, KindInner, KindLeaf, NodeDynamic, NodeKind, NodeStatic, Page, ToFromPage, ToFromPageExt,
+    CommonNodeHead, DebugNode, KindInner, KindLeaf, NodeDynamic, NodeKind, NodeStatic, Page, ToFromPageExt,
     PAGE_ID_LEN, PAGE_SIZE,
 };
 use crate::util::Supreme;
@@ -12,7 +12,6 @@ use bytemuck::{Pod, Zeroable};
 use indxvec::Search;
 use itertools::Itertools;
 use std::fmt::{Debug, Formatter};
-use std::marker::PhantomData;
 use std::mem::{offset_of, size_of};
 use std::ops::Range;
 use umolc::{o_project, BufferManager, OPtr, OlcErrorHandler, PageId};
@@ -23,18 +22,15 @@ const MIN_HINT_SPACING: usize = 3;
 // must align with min hint spacing, so hints are updated when min count is reached
 const MIN_HINT_COUNT: usize = MIN_HINT_SPACING * (HINT_COUNT + 1);
 
-#[repr(C, align(16))]
-#[derive(Zeroable)]
-pub struct BasicNode<V> {
-    common: CommonNodeHead,
-    heap: HeapNodeInfo,
-    _pad: u16,
-    hints: [u32; HINT_COUNT],
-    _data: [u32; BASIC_NODE_DATA_SIZE],
-    _p: PhantomData<V>,
+define_node! {
+    pub struct BasicNode<V> {
+        pub common: CommonNodeHead,
+        heap: HeapNodeInfo,
+        _pad: u16,
+        hints: [u32; HINT_COUNT],
+        _data: [u32; BASIC_NODE_DATA_SIZE],
+    }
 }
-
-unsafe impl<V> ToFromPage for BasicNode<V> {} //TODO
 
 pub type BasicLeaf = BasicNode<KindLeaf>;
 pub type BasicInner = BasicNode<KindInner>;

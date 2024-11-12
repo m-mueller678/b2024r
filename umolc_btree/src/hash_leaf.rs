@@ -1,11 +1,11 @@
 use crate::heap_node::{HeapNode, HeapNodeInfo};
 use crate::key_source::SourceSlice;
 use crate::node::{
-    find_separator, insert_upper_sibling, node_tag, page_cast_mut, CommonNodeHead, DebugNode, NodeDynamic, NodeStatic,
-    ToFromPage, ToFromPageExt, PAGE_SIZE,
+    find_separator, insert_upper_sibling, node_tag, page_cast_mut, DebugNode, NodeDynamic, NodeStatic, ToFromPageExt,
+    PAGE_SIZE,
 };
 use crate::util::Supreme;
-use crate::{impl_to_from_page, Page};
+use crate::{define_node, Page};
 use arrayvec::ArrayVec;
 use bstr::{BStr, BString};
 use bytemuck::{Pod, Zeroable};
@@ -15,19 +15,17 @@ use std::mem::offset_of;
 use std::ops::Range;
 use umolc::{o_project, BufferManager, OPtr, OlcErrorHandler, PageId};
 
-#[repr(C, align(16))]
-#[derive(Zeroable)]
-pub struct HashLeaf {
-    common: CommonNodeHead,
-    heap: HeapNodeInfo,
-    sorted: u16,
-    _data: [u16; HASH_LEAF_DATA_SIZE / 2],
+define_node! {
+    pub struct HashLeaf {
+    pub common: CommonNodeHead,
+    pub heap: HeapNodeInfo,
+    pub sorted: u16,
+    pub _data: [u16; HASH_LEAF_DATA_SIZE / 2],
+    }
 }
 
 const HASH_LEAF_DATA_SIZE: usize = PAGE_SIZE - 16;
 const SLOT_RESERVATION: usize = 8;
-
-unsafe impl ToFromPage for HashLeaf {} //TODO
 
 impl HashLeaf {
     const SLOT_OFFSET: usize = offset_of!(Self, _data);

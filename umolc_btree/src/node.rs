@@ -6,10 +6,10 @@ use crate::tree::MetadataPage;
 use crate::MAX_KEY_SIZE;
 use bstr::BStr;
 use bytemuck::{Pod, Zeroable};
-use static_assertions::{assert_impl_all, const_assert_eq};
+use static_assertions::const_assert_eq;
 use std::assert;
 use std::fmt::Debug;
-use std::mem::{swap, transmute, MaybeUninit};
+use std::mem::{swap, transmute};
 use std::sync::atomic::AtomicU8;
 use umolc::{
     o_project, BufferManager, BufferManagerExt, BufferManagerGuard, ExclusiveGuard, OPtr, OlcErrorHandler, PageId,
@@ -63,12 +63,31 @@ pub struct DebugNode {
 }
 
 #[macro_export]
-macro_rules! impl_to_from_page {
-    ($t:ty) => {
-        static_assertions::assert_eq_size!($t, $crate::node::Page);
-        static_assertions::assert_eq_align!($t, $crate::node::Page);
-        static_assertions::assert_impl_all!($t: bytemuck::Pod);
-        unsafe impl $crate::node::ToFromPage for $t {}
+macro_rules! define_node {
+    (
+        pub struct $struct_name:ident $(<$($generic_param:ident),+>)?{
+            pub common: CommonNodeHead,
+            $($v:vis $f:ident:$t:ty,)*
+        }) => {
+        #[derive(Pod,Zeroable,Clone,Copy)]
+        #[allow(dead_code)]
+        #[repr(C,align(16))]
+        struct ToFromPageExtCheck{
+            common:[u16;size_of::<$crate::node::CommonNodeHead>()/2],
+            $($f:$t),*
+        }
+
+        #[derive(Zeroable)]
+        #[repr(C,align(16))]
+        pub struct $struct_name $(<$($generic_param),*>)?{
+            common:$crate::node::CommonNodeHead,
+            $(_p:std::marker::PhantomData<($($generic_param,)*)>,)?
+            $($v $f:$t),*
+        }
+
+        static_assertions::assert_eq_size!(ToFromPageExtCheck, $crate::node::Page);
+        static_assertions::assert_eq_align!(ToFromPageExtCheck, $crate::node::Page);
+        unsafe impl$(<$($generic_param),*>)? $crate::node::ToFromPage for $struct_name$(<$($generic_param),*>)? {}
     };
 }
 
@@ -123,11 +142,11 @@ pub trait ToFromPageExt: ToFromPage + Sized {
 
     fn lower_fence(&self) -> &[u8] {
         let l = self.as_page().common.lower_fence_len as usize;
-        &self.slice::<u8>(size_of::<Self>() - l, l)
+        self.slice::<u8>(size_of::<Self>() - l, l)
     }
 
     fn prefix(&self) -> &[u8] {
-        &self.slice::<u8>(
+        self.slice::<u8>(
             size_of::<Self>() - self.as_page().common.lower_fence_len as usize,
             self.as_page().common.prefix_len as usize,
         )
@@ -366,7 +385,7 @@ impl Page {
         self.common.prefix_len = pl as u16;
         self.common.lower_fence_len = ll as u16;
         self.common.upper_fence_len = ul as u16;
-        lf.write_to(&mut self.slice_mut(size_of::<Self>() - ll, ll));
+        lf.write_to(self.slice_mut(size_of::<Self>() - ll, ll));
         uf.slice_start(self.common.prefix_len as usize).write_to(self.slice_mut(size_of::<Self>() - ll - ul, ul));
     }
 

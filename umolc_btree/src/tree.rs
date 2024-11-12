@@ -3,11 +3,11 @@ use crate::hash_leaf::HashLeaf;
 use crate::key_source::SourceSlice;
 use crate::node::{
     node_tag, o_ptr_is_inner, o_ptr_lookup_inner, o_ptr_lookup_leaf, page_cast, page_cast_mut, page_id_to_bytes,
-    CommonNodeHead, DebugNode, NodeDynamic, NodeDynamicAuto, NodeStatic, Page, ToFromPage, ToFromPageExt, PAGE_SIZE,
+    CommonNodeHead, DebugNode, NodeDynamic, NodeDynamicAuto, NodeStatic, Page, ToFromPageExt, PAGE_SIZE,
 };
-use crate::util::PodPad;
-use crate::{impl_to_from_page, MAX_KEY_SIZE, MAX_VAL_SIZE};
+use crate::{define_node, MAX_KEY_SIZE, MAX_VAL_SIZE};
 use bytemuck::{Pod, Zeroable};
+use std::fmt::{Debug, Formatter};
 use std::marker::PhantomData;
 use std::mem::{size_of, MaybeUninit};
 use umolc::{
@@ -28,7 +28,7 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> Tree<'bm, BM> {
         {
             let meta = page_cast_mut::<_, MetadataPage>(&mut *meta_guard);
             meta.root = root_guard.page_id();
-            meta.node_head.tag = node_tag::METADATA_MARKER;
+            meta.common.tag = node_tag::METADATA_MARKER;
         }
         NodeStatic::<BM>::init(root_guard.cast_mut::<HashLeaf>(), &[][..], &[][..], None);
         Tree { meta: meta_guard.page_id(), bm, _p: PhantomData }
@@ -210,16 +210,22 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> Drop for Tree<'bm, BM> {
     }
 }
 
-#[derive(Debug, Zeroable)]
-#[repr(C, align(16))]
+define_node! {
 pub struct MetadataPage {
-    node_head: CommonNodeHead,
+    pub common: CommonNodeHead,
     _pad1: [u8; (8 - size_of::<CommonNodeHead>() % 8) % 8],
     root: PageId,
-    _pad2: PodPad<{ PAGE_SIZE - size_of::<CommonNodeHead>() - 8 - (8 - size_of::<CommonNodeHead>() % 8) % 8 }>,
+    _pad2: [u8;PAGE_SIZE - size_of::<CommonNodeHead>() - 8 - (8 - size_of::<CommonNodeHead>() % 8) % 8 ],
+}
 }
 
-unsafe impl ToFromPage for MetadataPage {} //TODO
+impl Debug for MetadataPage {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        let mut s = f.debug_struct(std::any::type_name::<Self>());
+        s.field("root", &self.root);
+        s.finish()
+    }
+}
 
 impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeStatic<'bm, BM> for MetadataPage {
     const TAG: u8 = node_tag::METADATA_MARKER;

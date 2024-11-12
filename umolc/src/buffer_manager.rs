@@ -3,7 +3,7 @@ use crate::{
     BufferManageGuardUpgrade, BufferManager, BufferManagerGuard, ExclusiveGuard, OPtr, OlcErrorHandler, OlcVersion,
     OptimisticGuard, PageId, UnwindOlcEh,
 };
-use bytemuck::{Pod, Zeroable};
+use bytemuck::Zeroable;
 use std::cell::UnsafeCell;
 use std::mem::{forget, MaybeUninit};
 use std::ops::{Deref, DerefMut};
