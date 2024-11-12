@@ -79,7 +79,7 @@ pub fn page_cast_mut<A: ToFromPage, B: ToFromPage>(a: &mut A) -> &mut B {
 #[allow(clippy::missing_safety_doc)]
 pub unsafe trait ToFromPage {}
 
-pub trait ToFromPageExt: ToFromPage + Pod {
+pub trait ToFromPageExt: ToFromPage + Sized {
     fn as_page(&self) -> &Page {
         page_cast::<Self, Page>(self)
     }
@@ -96,34 +96,47 @@ pub trait ToFromPageExt: ToFromPage + Pod {
         page_cast_mut(self)
     }
 
-    fn cast_slice_mut<T: Pod>(&mut self) -> &mut [T] {
-        bytemuck::cast_slice_mut(std::slice::from_mut(self))
-    }
-    fn cast_slice<T: Pod>(&self) -> &[T] {
-        bytemuck::cast_slice(std::slice::from_ref(self))
-    }
-
-    fn slice(&self, offset: usize, len: usize) -> &[u8] {
-        &self.cast_slice::<u8>()[offset..][..len]
+    fn slice<T: Pod>(&self, count_offset: usize, len: usize) -> &[T] {
+        assert_eq!(align_of::<Page>() % align_of::<T>(), 0);
+        assert!(count_offset * size_of::<T>() >= NODE_UNSAFE_CELL_HEAD);
+        assert!((count_offset + len) <= size_of::<Page>() / size_of::<T>());
+        unsafe { std::slice::from_raw_parts((self as *const Self as *const T).add(count_offset), len) }
     }
 
-    fn slice_mut(&mut self, offset: usize, len: usize) -> &mut [u8] {
-        &mut self.cast_slice_mut::<u8>()[offset..][..len]
+    fn slice_mut<T: Pod>(&mut self, count_offset: usize, len: usize) -> &mut [T] {
+        assert_eq!(align_of::<Page>() % align_of::<T>(), 0);
+        assert!(count_offset * size_of::<T>() >= NODE_UNSAFE_CELL_HEAD);
+        assert!((count_offset + len) <= size_of::<Page>() / size_of::<T>());
+        unsafe { std::slice::from_raw_parts_mut((self as *mut Self as *mut T).add(count_offset), len) }
+    }
+
+    fn page_index<T: Pod>(&self, index: usize) -> &T {
+        &self.slice(index, 1)[0]
+    }
+
+    fn page_index_mut<T: Pod>(&mut self, index: usize) -> &mut T {
+        &mut self.slice_mut(index, 1)[0]
     }
 
     fn lower_fence(&self) -> &[u8] {
-        &self.cast_slice::<u8>()[size_of::<Self>() - self.as_page().common.lower_fence_len as usize..]
+        let l = self.as_page().common.lower_fence_len as usize;
+        &self.slice::<u8>(size_of::<Self>() - l, l)
     }
 
     fn prefix(&self) -> &[u8] {
-        &self.cast_slice::<u8>()[size_of::<Self>() - self.as_page().common.lower_fence_len as usize..]
-            [..self.as_page().common.prefix_len as usize]
+        &self.slice::<u8>(
+            size_of::<Self>() - self.as_page().common.lower_fence_len as usize,
+            self.as_page().common.prefix_len as usize,
+        )
     }
 
     fn upper_fence_tail(&self) -> &[u8] {
-        &self.cast_slice::<u8>()[size_of::<Self>()
-            - self.as_page().common.lower_fence_len as usize
-            - self.as_page().common.upper_fence_len as usize..][..self.as_page().common.upper_fence_len as usize]
+        self.slice::<u8>(
+            size_of::<Self>()
+                - self.as_page().common.lower_fence_len as usize
+                - self.as_page().common.upper_fence_len as usize,
+            self.as_page().common.upper_fence_len as usize,
+        )
     }
 
     fn upper_fence_combined(&self) -> SourceSlicePair<u8, &[u8], &[u8]> {
@@ -139,14 +152,14 @@ pub trait ToFromPageExt: ToFromPage + Pod {
         assert_eq!(offset % size_of::<T>(), 0);
         let offset = offset / size_of::<T>();
         if UP {
-            self.cast_slice_mut::<T>().copy_within(offset..offset + count, offset + dist);
+            self.slice_mut::<T>(offset, count + dist).copy_within(0..count, dist);
         } else {
-            self.cast_slice_mut::<T>().copy_within(offset..offset + count, offset - dist);
+            self.slice_mut::<T>(offset - dist, count + dist).copy_within(dist..dist + count, 0);
         }
     }
 }
 
-impl<T: ToFromPage + Pod> ToFromPageExt for T {}
+impl<T: ToFromPage> ToFromPageExt for T {}
 
 pub trait NodeStatic<'bm, BM: BufferManager<'bm, Page = Page>>: NodeDynamic<'bm, BM> + Pod {
     const TAG: u8;
@@ -353,7 +366,7 @@ impl Page {
         self.common.prefix_len = pl as u16;
         self.common.lower_fence_len = ll as u16;
         self.common.upper_fence_len = ul as u16;
-        lf.write_to(&mut self.cast_slice_mut()[size_of::<Self>() - ll..]);
+        lf.write_to(&mut self.slice_mut(size_of::<Self>() - ll, ll));
         uf.slice_start(self.common.prefix_len as usize).write_to(self.slice_mut(size_of::<Self>() - ll - ul, ul));
     }
 
@@ -454,3 +467,5 @@ pub fn find_separator<'a, 'bm, BM: BufferManager<'bm, Page = Page>, N: NodeStati
         (best_split, node.as_page().prefix().join(sep))
     }
 }
+
+const NODE_UNSAFE_CELL_HEAD: usize = 2;

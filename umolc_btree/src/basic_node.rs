@@ -71,7 +71,7 @@ impl<V: NodeKind> BasicNode<V> {
 
     fn page_id_bytes(&self, offset: usize) -> &[u8; PAGE_ID_LEN] {
         assert!(!V::IS_LEAF);
-        self.cast_slice::<u8>()[offset..][..PAGE_ID_LEN].try_into().unwrap()
+        self.slice::<u8>(offset, PAGE_ID_LEN).try_into().unwrap()
     }
 
     fn reserved_head_count(count: usize) -> usize {

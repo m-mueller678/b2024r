@@ -55,7 +55,7 @@ impl HashLeaf {
             return;
         }
         let mut buffer: ArrayVec<(u16, u16), { PAGE_SIZE / 4 }> = (0..count)
-            .map(|i| (self.slot(i) as u16, self.cast_slice::<u8>()[Self::hash_offset(count) + i] as u16))
+            .map(|i| (self.slot(i) as u16, *self.page_index::<u8>(Self::hash_offset(count) + i) as u16))
             .collect();
         buffer.sort_unstable_by_key(|s| self.heap_key_at(s.0 as usize));
         for i in 0..count {
@@ -99,7 +99,7 @@ impl HashLeaf {
         self.validate_heap();
         let count = self.common.count as usize;
         for i in 0..count {
-            assert_eq!(Self::hash(self.heap_key(i)), self.cast_slice::<u8>()[Self::hash_offset(count) + i])
+            assert_eq!(Self::hash(self.heap_key(i)), *self.page_index::<u8>(Self::hash_offset(count) + i))
         }
         let lower_fence =
             std::iter::once(Supreme::X(self.lower_fence().slice(self.common.prefix_len as usize..).to_vec()));
@@ -123,8 +123,9 @@ impl HashLeaf {
             let key = restore_prefix.join(self.heap_key(src_i).slice(prefix_grow..));
             dst.heap_write_new(key, self.heap_val(src_i), dst_i);
         }
-        let dst_hashes = dst.slice_mut(Self::hash_offset(dst.common.count as usize) + dst_start, src_range.len());
-        let self_hashes = self.slice(Self::hash_offset(self.common.count as usize) + src_range.start, src_range.len());
+        let dst_hashes = dst.slice_mut::<u8>(Self::hash_offset(dst.common.count as usize) + dst_start, src_range.len());
+        let self_hashes =
+            self.slice::<u8>(Self::hash_offset(self.common.count as usize) + src_range.start, src_range.len());
         dst_hashes.copy_from_slice(self_hashes);
     }
 }
@@ -144,7 +145,7 @@ impl Debug for HashLeaf {
             let val: &dyn Debug = &BStr::new(self.heap_val(i));
             let key = BStr::new(self.heap_key(i));
             let kl = key.len();
-            let hash = self.cast_slice::<u8>()[Self::hash_offset(self.common.count as usize) + i];
+            let hash = *self.page_index::<u8>(Self::hash_offset(self.common.count as usize) + i);
             f(&mut format_args!("{i:4}:{offset:04x}->[0x{hash:02x}][{kl:3}] {key:?} -> {val:?}"))
         });
         s.field("records", &format_args!("\n{}", records_fmt));
@@ -200,7 +201,7 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeStatic<'bm, BM> for HashLeaf 
                     this.relocate_by::<true, u8>(Self::SLOT_OFFSET + r1 * 2, count, SLOT_RESERVATION * 2);
                 }
                 this.common.count += 1;
-                this.cast_slice_mut::<u8>()[Self::hash_offset(count + 1) + count] = hash;
+                *this.page_index_mut::<u8>(Self::hash_offset(count + 1) + count) = hash;
             },
         )
         .map_err(|_| ())
