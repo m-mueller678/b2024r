@@ -1,4 +1,5 @@
 use crate::basic_node::{BasicInner, BasicLeaf};
+use crate::hash_leaf::HashLeaf;
 use crate::heap_node::{ConstHeapLength, HeapLength, HeapNode};
 use crate::key_source::{common_prefix, key_head, SourceSlice, SourceSlicePair};
 use crate::tree::MetadataPage;
@@ -336,6 +337,12 @@ pub fn insert_upper_sibling<'bm, BM: BufferManager<'bm, Page = Page>>(
     })
 }
 
+macro_rules! invoke_all_nodes {
+    ($m:ident) => {
+        $m!(BasicInner, BasicLeaf, HashLeaf, MetadataPage)
+    };
+}
+
 impl Page {
     pub fn common_init(&mut self, tag: u8, lf: impl SourceSlice, uf: impl SourceSlice) {
         self.common.tag = tag;
@@ -359,7 +366,7 @@ impl Page {
                 })*
             };
         }
-        impl_case!(BasicInner, BasicLeaf, MetadataPage);
+        invoke_all_nodes!(impl_case);
         panic!("unexpected node tag: {tag}");
     }
     pub fn as_dyn_node_mut<'bm, BM: BufferManager<'bm, Page = Page>>(&mut self) -> &mut dyn NodeDynamic<'bm, BM> {
@@ -371,7 +378,7 @@ impl Page {
                 })*
             };
         }
-        impl_case!(BasicInner, BasicLeaf, MetadataPage);
+        invoke_all_nodes!(impl_case);
         panic!("unexpected node tag: {tag}");
     }
 }
@@ -389,7 +396,7 @@ pub fn o_ptr_lookup_inner<'bm, BM: BufferManager<'bm, Page = Page>>(
                 })*
             };
         }
-    impl_case!(BasicInner, BasicLeaf, MetadataPage);
+    invoke_all_nodes!(impl_case);
     BM::OlcEH::optimistic_fail()
 }
 
@@ -405,7 +412,7 @@ pub fn o_ptr_lookup_leaf<'a, 'bm, BM: BufferManager<'bm, Page = Page>>(
                 })*
             };
         }
-    impl_case!(BasicInner, BasicLeaf, MetadataPage);
+    invoke_all_nodes!(impl_case);
     BM::OlcEH::optimistic_fail()
 }
 
@@ -418,6 +425,32 @@ pub fn o_ptr_is_inner<'bm, BM: BufferManager<'bm, Page = Page>>(this: OPtr<'_, B
                 })*
             };
         }
-    impl_case!(BasicInner, BasicLeaf, MetadataPage);
+    invoke_all_nodes!(impl_case);
     BM::OlcEH::optimistic_fail()
+}
+
+/// returns the number of keys in the low node and the separator (including prefix)
+pub fn find_separator<'a, 'bm, BM: BufferManager<'bm, Page = Page>, N: NodeStatic<'bm, BM>>(
+    node: &'a N,
+    mut get_key: impl FnMut(usize) -> N::TruncatedKey<'a>,
+) -> (usize, SourceSlicePair<u8, &[u8], N::TruncatedKey<'a>>) {
+    let count = node.as_page().common.count as usize;
+    if N::IS_INNER {
+        let low_count = count / 2;
+        let sep = node.as_page().prefix().join(get_key(low_count));
+        (low_count, sep)
+    } else {
+        let range_start = count / 2 - count / 8;
+        let range_end = count / 2 + count / 8;
+        let common_prefix = common_prefix(get_key(range_start - 1), get_key(range_end));
+        let best_split = (range_start..=range_end)
+            .filter(|&lc| {
+                get_key(lc - 1).len() == common_prefix
+                    || get_key(lc - 1).index_ss(common_prefix) != get_key(lc).index_ss(common_prefix)
+            })
+            .min_by_key(|&lc| (lc as isize - count as isize / 2).abs())
+            .unwrap();
+        let sep = get_key(best_split).slice(..common_prefix + 1);
+        (best_split, node.as_page().prefix().join(sep))
+    }
 }

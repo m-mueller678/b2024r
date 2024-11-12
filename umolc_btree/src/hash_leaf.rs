@@ -1,12 +1,17 @@
+use crate::basic_node::BasicNode;
 use crate::heap_node::{HeapNode, HeapNodeInfo};
 use crate::key_source::{key_head, SourceSlice};
 use crate::node::{
-    node_tag, CommonNodeHead, DebugNode, NodeDynamic, NodeStatic, ToFromPageExt, PAGE_ID_LEN, PAGE_SIZE,
+    find_separator, insert_upper_sibling, node_tag, page_cast_mut, CommonNodeHead, DebugNode, NodeDynamic, NodeStatic,
+    ToFromPageExt, PAGE_ID_LEN, PAGE_SIZE,
 };
+use crate::util::Supreme;
 use crate::{impl_to_from_page, Page};
+use arrayvec::ArrayVec;
 use bytemuck::{Pod, Zeroable};
 use std::fmt::{Debug, Formatter};
-use std::mem::offset_of;
+use std::mem::{offset_of, MaybeUninit};
+use std::ops::Range;
 use umolc::{o_project, BufferManager, OPtr, OlcErrorHandler, PageId};
 
 #[derive(Pod, Copy, Clone, Zeroable)]
@@ -43,9 +48,23 @@ impl HashLeaf {
         crc32fast::hash(k) as u8
     }
 
-    fn slot(&self, index: usize) -> usize {
-        debug_assert!(index < self.common.count as usize);
-        self._data[index] as usize
+    fn sort(&mut self) {
+        let count = self.common.count as usize;
+        if self.sorted as usize == count {
+            return;
+        }
+        let mut buffer: ArrayVec<(u16, u16), { PAGE_SIZE / 4 }> = (0..count)
+            .map(|i| (self.slot(i) as u16, self.cast_slice::<u8>()[Self::hash_offset(count) + i] as u16))
+            .collect();
+        buffer.sort_unstable_by_key(|s| self.heap_key_at(s.0 as usize));
+        for i in 0..count {
+            self.set_slot(i, buffer[i].0 as usize);
+        }
+        let hashes = self.slice_mut(Self::hash_offset(count), count);
+        for (i, h) in buffer.iter().enumerate() {
+            hashes[i] = h.1 as u8;
+        }
+        self.sorted = self.common.count
     }
 
     fn find<O: OlcErrorHandler>(this: OPtr<Self, O>, key: &[u8]) -> (Option<usize>, u8) {
@@ -70,6 +89,43 @@ impl HashLeaf {
         }
         (None, hash)
     }
+
+    fn validate(&self) {
+        if !cfg!(feature = "validate_node") {
+            return;
+        }
+        assert!(self.sorted <= self.common.count);
+        self.validate_heap();
+        let count = self.common.count as usize;
+        for i in 0..count {
+            assert_eq!(Self::hash(self.heap_key(i)), self.cast_slice::<u8>()[Self::hash_offset(count) + i])
+        }
+        let lower_fence =
+            std::iter::once(Supreme::X(self.lower_fence().slice(self.common.prefix_len as usize..).to_vec()));
+        let sorted_keys = (0..self.sorted as usize).map(|i| self.heap_key(i)).map(|k| Supreme::X(k.to_vec()));
+        let upper_fence = std::iter::once(if self.common.upper_fence_len == 0 && self.common.prefix_len == 0 {
+            Supreme::Sup
+        } else {
+            Supreme::X(self.upper_fence_tail().to_vec())
+        });
+        let keys_and_fences = lower_fence.chain(sorted_keys).chain(upper_fence);
+        assert!(keys_and_fences.is_sorted(), "not sorted: {:?}", self);
+    }
+
+    fn copy_records(&self, dst: &mut Self, src_range: Range<usize>, dst_start: usize) {
+        let dst_range = dst_start..(src_range.end + dst_start - src_range.start);
+        let dpl = dst.common.prefix_len as usize;
+        let spl = self.common.prefix_len as usize;
+        let restore_prefix: &[u8] = if dpl < spl { &self.as_page().prefix()[dpl..] } else { &[][..] };
+        let prefix_grow = dpl.saturating_sub(spl);
+        for (src_i, dst_i) in src_range.clone().zip(dst_range.clone()) {
+            let key = restore_prefix.join(self.heap_key(src_i).slice(prefix_grow..));
+            dst.heap_write_new(key, self.heap_val(src_i), dst_i);
+        }
+        let dst_hashes = dst.slice_mut(Self::hash_offset(dst.common.count as usize) + dst_start, src_range.len());
+        let self_hashes = self.slice(Self::hash_offset(self.common.count as usize) + src_range.start, src_range.len());
+        dst_hashes.copy_from_slice(self_hashes);
+    }
 }
 
 impl Debug for HashLeaf {
@@ -89,6 +145,7 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeStatic<'bm, BM> for HashLeaf 
     fn init(&mut self, lf: impl SourceSlice, uf: impl SourceSlice, _lower: Option<&[u8; 5]>) {
         self.as_page_mut().common_init(node_tag::HASH_LEAF, lf, uf);
         self.init_heap();
+        self.sorted = 0;
     }
 
     fn iter_children(&self) -> impl Iterator<Item = (Self::TruncatedKey<'_>, PageId)> {
@@ -134,7 +191,32 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeStatic<'bm, BM> for HashLeaf 
 
 impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeDynamic<'bm, BM> for HashLeaf {
     fn split(&mut self, bm: BM, parent: &mut dyn NodeDynamic<'bm, BM>) -> Result<(), ()> {
-        todo!()
+        self.sort();
+        let left = &mut Self::zeroed();
+        let count = self.common.count as usize;
+        let (low_count, sep_key) = find_separator::<BM, _>(self, |i| self.heap_key(i));
+        let mut right = insert_upper_sibling(parent, bm, sep_key)?;
+        let right = right.cast_mut::<Self>();
+        self.validate();
+        NodeStatic::<BM>::init(left, self.lower_fence(), sep_key, None);
+        NodeStatic::<BM>::init(right, sep_key, self.upper_fence_combined(), None);
+        let (lr, rr) = (0..low_count, low_count..count);
+        debug_assert!(
+            SourceSlice::cmp(self.heap_key(lr.end - 1), sep_key.slice(self.common.prefix_len as usize..)).is_lt()
+        );
+        debug_assert!(
+            SourceSlice::cmp(sep_key.slice(self.common.prefix_len as usize..), self.heap_key(rr.start)).is_le()
+        );
+        left.common.count = lr.len() as u16;
+        left.sorted = lr.len() as u16;
+        self.copy_records(left, lr.clone(), 0);
+        right.common.count = rr.len() as u16;
+        right.sorted = rr.len() as u16;
+        self.copy_records(right, rr.clone(), 0);
+        left.validate();
+        right.validate();
+        *self = *left;
+        Ok(())
     }
 
     fn to_debug(&self) -> DebugNode {
@@ -149,11 +231,26 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeDynamic<'bm, BM> for HashLeaf
     }
 
     fn merge(&mut self, right: &mut Page) {
-        todo!()
+        debug_assert!(right.common.tag == node_tag::HASH_LEAF);
+        if cfg!(feature = "validate_node") {
+            self.validate();
+            right.as_dyn_node::<BM>().validate();
+        }
+        let right = page_cast_mut::<Page, Self>(right);
+        let tmp = &mut Self::zeroed();
+        let left_count = self.common.count as usize;
+        let right_count = right.common.count as usize;
+        NodeStatic::<BM>::init(tmp, self.lower_fence(), right.upper_fence_combined(), None);
+        tmp.common.count = (left_count + right_count) as u16;
+        self.copy_records(tmp, 0..left_count, 0);
+        right.copy_records(tmp, 0..right_count, left_count);
+        tmp.sorted = if self.common.count == self.sorted { self.sorted + right.sorted } else { self.sorted };
+        tmp.validate();
+        *self = *tmp;
     }
 
     fn validate(&self) {
-        HeapNode::validate(self);
+        self.validate()
     }
 
     fn leaf_remove(&mut self, key: &[u8]) -> Option<()> {
@@ -199,5 +296,7 @@ impl HeapNode for HashLeaf {
         &self.heap
     }
 
-    fn validate(&self) {}
+    fn validate(&self) {
+        self.validate();
+    }
 }

@@ -178,7 +178,10 @@ pub trait HeapNode: ToFromPageExt + Debug {
     }
 
     fn heap_key(&self, index: usize) -> &[u8] {
-        let offset = self.slot(index);
+        self.heap_key_at(self.slot(index))
+    }
+
+    fn heap_key_at(&self, offset: usize) -> &[u8] {
         let len = self.heap_key_len(offset);
         self.slice(offset + Self::KEY_OFFSET, len)
     }
@@ -210,7 +213,7 @@ pub trait HeapNode: ToFromPageExt + Debug {
         let calculated = (size_of::<Self>() - self.as_page().common.lower_fence_len as usize
             + self.as_page().common.upper_fence_len as usize)
             - record_size_sum;
-        let tracked = self.heap_info().bump as usize + self.heap_info().bump as usize;
+        let tracked = self.heap_info().bump as usize + self.heap_info().freed as usize;
         assert_eq!(calculated, tracked);
     }
 

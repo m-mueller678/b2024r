@@ -1,5 +1,6 @@
 #![feature(arbitrary_self_types_pointers)]
 #![feature(maybe_uninit_slice)]
+#![feature(maybe_uninit_uninit_array)]
 
 mod basic_node;
 mod hash_leaf;

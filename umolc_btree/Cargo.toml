@@ -13,6 +13,7 @@ bstr = "1.10.0"
 itertools = "0.13.0"
 indxvec = "1.9.6"
 crc32fast = "1.4.2"
+arrayvec = "0.7.6"
 
 [dev-dependencies]
 dev_utils = {path = "../dev_utils"}

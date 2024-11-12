@@ -2,9 +2,9 @@ use crate::heap_node::{HeapLength, HeapLengthError, HeapNode, HeapNodeInfo};
 use crate::impl_to_from_page;
 use crate::key_source::{common_prefix, key_head, HeadSourceSlice, SourceSlice, SourceSlicePair};
 use crate::node::{
-    insert_upper_sibling, node_tag, page_cast_mut, page_id_from_bytes, page_id_from_olc_bytes, page_id_to_bytes,
-    CommonNodeHead, DebugNode, KindInner, KindLeaf, NodeDynamic, NodeKind, NodeStatic, Page, ToFromPage, ToFromPageExt,
-    PAGE_ID_LEN, PAGE_SIZE,
+    find_separator, insert_upper_sibling, node_tag, page_cast_mut, page_id_from_bytes, page_id_from_olc_bytes,
+    page_id_to_bytes, CommonNodeHead, DebugNode, KindInner, KindLeaf, NodeDynamic, NodeKind, NodeStatic, Page,
+    ToFromPage, ToFromPageExt, PAGE_ID_LEN, PAGE_SIZE,
 };
 use crate::util::Supreme;
 use bstr::{BStr, BString};
@@ -178,30 +178,6 @@ impl<V: NodeKind> BasicNode<V> {
             let key = restore_prefix.join(self.key_combined(src_i).slice(prefix_grow..));
             dst.heap_write_new(key, self.heap_val(src_i), dst_i);
             dst.set_head(dst_i, key_head(key));
-        }
-    }
-
-    /// returns the number of keys in the low node and the separator (including prefix)
-    fn find_separator(&self) -> (usize, impl SourceSlice<u8> + '_) {
-        let count = self.common.count as usize;
-        if V::IS_LEAF {
-            let range_start = count / 2 - count / 8;
-            let range_end = count / 2 + count / 8;
-            let common_prefix = common_prefix(self.key_combined(range_start - 1), self.key_combined(range_end));
-            let best_split = (range_start..=range_end)
-                .filter(|&lc| {
-                    self.key_combined(lc - 1).len() == common_prefix
-                        || self.key_combined(lc - 1).index_ss(common_prefix)
-                            != self.key_combined(lc).index_ss(common_prefix)
-                })
-                .min_by_key(|&lc| (lc as isize - count as isize / 2).abs())
-                .unwrap();
-            let sep = self.key_combined(best_split).slice(..common_prefix + 1);
-            (best_split, self.as_page().prefix().join(sep))
-        } else {
-            let low_count = count / 2;
-            let sep = self.as_page().prefix().join(self.key_combined(low_count));
-            (low_count, sep)
         }
     }
 
@@ -422,7 +398,7 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>, V: NodeKind> NodeDynamic<'bm, BM>
     fn split(&mut self, bm: BM, parent: &mut dyn NodeDynamic<'bm, BM>) -> Result<(), ()> {
         let left = &mut BasicNode::<V>::zeroed();
         let count = self.common.count as usize;
-        let (low_count, sep_key) = self.find_separator();
+        let (low_count, sep_key) = find_separator::<BM, _>(self, |i| self.key_combined(i));
         let mut right = insert_upper_sibling(parent, bm, sep_key)?;
         let right = page_cast_mut::<_, BasicNode<V>>(&mut *right);
         self.validate();
@@ -607,17 +583,24 @@ mod tests {
         assert_eq!(s1, s2);
     }
 
+    fn split_merge_leaf_val(i: u64) -> Vec<u8> {
+        let mut v = i.to_be_bytes().to_vec();
+        if i % 2 == 0 {
+            v.push(42);
+        }
+        v
+    }
+
+    #[test]
+    fn split_merge_hash_leaf() {
+        split_merge::<HashLeaf>(1, None, split_merge_leaf_val);
+        split_merge::<HashLeaf>(0, None, split_merge_leaf_val);
+    }
+
     #[test]
     fn split_merge_basic_leaf() {
-        let val = |i: u64| {
-            let mut v = i.to_be_bytes().to_vec();
-            if i % 2 == 0 {
-                v.push(42);
-            }
-            v
-        };
-        split_merge::<BasicLeaf>(1, None, val);
-        split_merge::<BasicLeaf>(0, None, val);
+        split_merge::<BasicLeaf>(1, None, split_merge_leaf_val);
+        split_merge::<BasicLeaf>(0, None, split_merge_leaf_val);
     }
 
     #[test]
