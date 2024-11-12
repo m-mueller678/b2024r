@@ -147,8 +147,8 @@ fn batch_ops(threads: u32, batches: u32, key_count: usize, op_weights: (impl Fn(
                     match val {
                         Some(val) => {
                             let old_match =
-                                ks.old_present.load(Relaxed) && &ks.old_write_batch.load(Relaxed).to_le_bytes() == val;
-                            let new_match = ks.insert_count.load(Relaxed) > 0 && &bid.to_le_bytes() == val;
+                                ks.old_present.load(Relaxed) && ks.old_write_batch.load(Relaxed).to_le_bytes() == val;
+                            let new_match = ks.insert_count.load(Relaxed) > 0 && bid.to_le_bytes() == val;
                             assert!(old_match || new_match);
                         }
                         None => {

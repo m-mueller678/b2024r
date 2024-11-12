@@ -1,10 +1,10 @@
 use crate::heap_node::{HeapLength, HeapLengthError, HeapNode, HeapNodeInfo};
 use crate::impl_to_from_page;
-use crate::key_source::{common_prefix, key_head, HeadSourceSlice, SourceSlice, SourceSlicePair};
+use crate::key_source::{key_head, HeadSourceSlice, SourceSlice, SourceSlicePair};
 use crate::node::{
     find_separator, insert_upper_sibling, node_tag, page_cast_mut, page_id_from_bytes, page_id_from_olc_bytes,
-    page_id_to_bytes, CommonNodeHead, DebugNode, KindInner, KindLeaf, NodeDynamic, NodeKind, NodeStatic, Page,
-    ToFromPage, ToFromPageExt, PAGE_ID_LEN, PAGE_SIZE,
+    CommonNodeHead, DebugNode, KindInner, KindLeaf, NodeDynamic, NodeKind, NodeStatic, Page, ToFromPage, ToFromPageExt,
+    PAGE_ID_LEN, PAGE_SIZE,
 };
 use crate::util::Supreme;
 use bstr::{BStr, BString};
@@ -452,19 +452,18 @@ const HEAD_RESERVATION: usize = 16;
 
 #[cfg(test)]
 mod tests {
-    use crate::basic_node::{BasicInner, BasicLeaf, BasicNode, NodeKind};
+    use crate::basic_node::{BasicInner, BasicLeaf};
     use crate::hash_leaf::HashLeaf;
     use crate::key_source::SourceSlice;
     use crate::node::{
-        page_id_from_bytes, page_id_to_bytes, KindInner, KindLeaf, NodeDynamic, NodeStatic, Page, ToFromPageExt,
-        PAGE_ID_LEN,
+        page_id_from_bytes, page_id_to_bytes, NodeDynamic, NodeStatic, Page, ToFromPageExt, PAGE_ID_LEN,
     };
     use bytemuck::Zeroable;
     use rand::prelude::SliceRandom;
     use rand::rngs::SmallRng;
     use rand::SeedableRng;
     use std::collections::HashSet;
-    use umolc::{BufferManager, BufferManagerExt, BufferManagerGuard, OPtr, PageId, PanicOlcEh, SimpleBm};
+    use umolc::{BufferManager, BufferManagerExt, BufferManagerGuard, OPtr, PageId, SimpleBm};
 
     type BM<'a> = &'a SimpleBm<Page>;
 

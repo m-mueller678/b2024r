@@ -1,7 +1,7 @@
 use crate::basic_node::{BasicInner, BasicLeaf};
 use crate::hash_leaf::HashLeaf;
-use crate::heap_node::{ConstHeapLength, HeapLength, HeapNode};
-use crate::key_source::{common_prefix, key_head, SourceSlice, SourceSlicePair};
+use crate::heap_node::{ConstHeapLength, HeapLength};
+use crate::key_source::{common_prefix, SourceSlice, SourceSlicePair};
 use crate::tree::MetadataPage;
 use crate::MAX_KEY_SIZE;
 use bstr::BStr;
@@ -433,7 +433,7 @@ pub fn o_ptr_is_inner<'bm, BM: BufferManager<'bm, Page = Page>>(this: OPtr<'_, B
 pub fn find_separator<'a, 'bm, BM: BufferManager<'bm, Page = Page>, N: NodeStatic<'bm, BM>>(
     node: &'a N,
     mut get_key: impl FnMut(usize) -> N::TruncatedKey<'a>,
-) -> (usize, SourceSlicePair<u8, &[u8], N::TruncatedKey<'a>>) {
+) -> (usize, SourceSlicePair<u8, &'a [u8], N::TruncatedKey<'a>>) {
     let count = node.as_page().common.count as usize;
     if N::IS_INNER {
         let low_count = count / 2;

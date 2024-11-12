@@ -1,9 +1,9 @@
-use crate::basic_node::{BasicInner, BasicLeaf, BasicNode};
+use crate::basic_node::BasicInner;
 use crate::hash_leaf::HashLeaf;
 use crate::key_source::SourceSlice;
 use crate::node::{
     node_tag, o_ptr_is_inner, o_ptr_lookup_inner, o_ptr_lookup_leaf, page_cast, page_cast_mut, page_id_to_bytes,
-    CommonNodeHead, DebugNode, KindLeaf, NodeDynamic, NodeDynamicAuto, NodeStatic, Page, ToFromPageExt, PAGE_SIZE,
+    CommonNodeHead, DebugNode, NodeDynamic, NodeDynamicAuto, NodeStatic, Page, ToFromPageExt, PAGE_SIZE,
 };
 use crate::util::PodPad;
 use crate::{impl_to_from_page, MAX_KEY_SIZE, MAX_VAL_SIZE};
@@ -229,11 +229,11 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeStatic<'bm, BM> for MetadataP
     where
         Self: 'a;
 
-    fn insert(&mut self, key: &[u8], val: &[u8]) -> Result<Option<()>, ()> {
+    fn insert(&mut self, _key: &[u8], _val: &[u8]) -> Result<Option<()>, ()> {
         unimplemented!()
     }
 
-    fn init(&mut self, lf: impl SourceSlice, uf: impl SourceSlice, lower: Option<&[u8; 5]>) {
+    fn init(&mut self, _lf: impl SourceSlice, _uf: impl SourceSlice, _lower: Option<&[u8; 5]>) {
         unimplemented!()
     }
 

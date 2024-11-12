@@ -1,16 +1,15 @@
-use crate::basic_node::BasicNode;
 use crate::heap_node::{HeapNode, HeapNodeInfo};
-use crate::key_source::{key_head, SourceSlice};
+use crate::key_source::SourceSlice;
 use crate::node::{
     find_separator, insert_upper_sibling, node_tag, page_cast_mut, CommonNodeHead, DebugNode, NodeDynamic, NodeStatic,
-    ToFromPageExt, PAGE_ID_LEN, PAGE_SIZE,
+    ToFromPageExt, PAGE_SIZE,
 };
 use crate::util::Supreme;
 use crate::{impl_to_from_page, Page};
 use arrayvec::ArrayVec;
 use bytemuck::{Pod, Zeroable};
 use std::fmt::{Debug, Formatter};
-use std::mem::{offset_of, MaybeUninit};
+use std::mem::offset_of;
 use std::ops::Range;
 use umolc::{o_project, BufferManager, OPtr, OlcErrorHandler, PageId};
 
@@ -138,9 +137,9 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeStatic<'bm, BM> for HashLeaf 
     const TAG: u8 = node_tag::HASH_LEAF;
     const IS_INNER: bool = false;
     type TruncatedKey<'a>
+        = &'a [u8]
     where
-        Self: 'a,
-    = &'a [u8];
+        Self: 'a;
 
     fn init(&mut self, lf: impl SourceSlice, uf: impl SourceSlice, _lower: Option<&[u8; 5]>) {
         self.as_page_mut().common_init(node_tag::HASH_LEAF, lf, uf);
@@ -149,8 +148,10 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeStatic<'bm, BM> for HashLeaf 
     }
 
     fn iter_children(&self) -> impl Iterator<Item = (Self::TruncatedKey<'_>, PageId)> {
+        #![allow(unreachable_code)]
+        unimplemented!();
         // needed for type inference
-        let ret: std::iter::Once<_> = unimplemented!();
+        let ret: std::iter::Once<_>;
         ret
     }
 
@@ -161,7 +162,7 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeStatic<'bm, BM> for HashLeaf 
         Some(this.as_slice().sub(offset - v_len, v_len))
     }
 
-    fn lookup_inner(this: OPtr<'_, Self, BM::OlcEH>, key: &[u8], high_on_equal: bool) -> PageId {
+    fn lookup_inner(_this: OPtr<'_, Self, BM::OlcEH>, _key: &[u8], _high_on_equal: bool) -> PageId {
         unimplemented!()
     }
 
