@@ -1,11 +1,12 @@
 use crate::basic_node::{BasicInner, BasicLeaf};
-use crate::heap_node::{ConstHeapLength, HeapLength};
-use crate::key_source::{common_prefix, SourceSlice, SourceSlicePair};
+use crate::heap_node::{ConstHeapLength, HeapLength, HeapNode};
+use crate::key_source::{common_prefix, key_head, SourceSlice, SourceSlicePair};
 use crate::tree::MetadataPage;
 use crate::MAX_KEY_SIZE;
 use bstr::BStr;
 use bytemuck::{Pod, Zeroable};
 use static_assertions::{assert_impl_all, const_assert_eq};
+use std::assert;
 use std::fmt::Debug;
 use std::mem::{swap, transmute};
 use umolc::{
@@ -132,6 +133,16 @@ pub trait ToFromPageExt: ToFromPage + Pod {
         let head = self.as_page().common;
         size_of::<Self>() - head.lower_fence_len as usize - head.upper_fence_len as usize
     }
+
+    fn relocate_by<const UP: bool, T: Pod>(&mut self, offset: usize, count: usize, dist: usize) {
+        assert_eq!(offset % size_of::<T>(), 0);
+        let offset = offset / size_of::<T>();
+        if UP {
+            self.cast_slice_mut::<T>().copy_within(offset..offset + count, offset + dist);
+        } else {
+            self.cast_slice_mut::<T>().copy_within(offset..offset + count, offset - dist);
+        }
+    }
 }
 
 impl<T: ToFromPage + Pod> ToFromPageExt for T {}
@@ -142,6 +153,9 @@ pub trait NodeStatic<'bm, BM: BufferManager<'bm, Page = Page>>: NodeDynamic<'bm,
     type TruncatedKey<'a>: SourceSlice + 'a
     where
         Self: 'a;
+    #[allow(clippy::result_unit_err)]
+    fn insert(&mut self, key: &[u8], val: &[u8]) -> Result<Option<()>, ()>;
+    fn init(&mut self, lf: impl SourceSlice, uf: impl SourceSlice, lower: Option<&[u8; 5]>);
     /// first returns lower with empty slice, then pairs
     /// keys are prefix truncated
     fn iter_children(&self) -> impl Iterator<Item = (Self::TruncatedKey<'_>, PageId)>;
@@ -157,8 +171,6 @@ pub trait NodeDynamic<'bm, BM: BufferManager<'bm, Page = Page>>: ToFromPage + No
     fn to_debug(&self) -> DebugNode;
     fn merge(&mut self, right: &mut Page);
     fn validate(&self);
-    fn insert_inner(&mut self, key: &[u8], pid: PageId) -> Result<(), ()>;
-    fn insert_leaf(&mut self, key: &[u8], val: &[u8]) -> Result<Option<()>, ()>;
     fn leaf_remove(&mut self, k: &[u8]) -> Option<()>;
 }
 
@@ -174,6 +186,12 @@ pub trait NodeDynamicAuto<'bm, BM: BufferManager<'bm, Page = Page>> {
     );
 
     fn is_inner(&self) -> bool;
+
+    #[allow(clippy::result_unit_err)]
+    fn insert_inner(&mut self, key: &[u8], pid: PageId) -> Result<(), ()>;
+
+    #[allow(clippy::result_unit_err)]
+    fn insert_leaf(&mut self, key: &[u8], val: &[u8]) -> Result<Option<()>, ()>;
 }
 
 impl<'bm, BM: BufferManager<'bm, Page = Page>, N: NodeStatic<'bm, BM>> NodeDynamicAuto<'bm, BM> for N {
@@ -234,6 +252,14 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>, N: NodeStatic<'bm, BM>> NodeDynam
 
     fn is_inner(&self) -> bool {
         Self::IS_INNER
+    }
+
+    fn insert_inner(&mut self, key: &[u8], pid: PageId) -> Result<(), ()> {
+        self.insert(key, &page_id_to_bytes(pid)).map(|x| debug_assert!(x.is_none()))
+    }
+
+    fn insert_leaf(&mut self, key: &[u8], val: &[u8]) -> Result<Option<()>, ()> {
+        self.insert(key, val)
     }
 }
 

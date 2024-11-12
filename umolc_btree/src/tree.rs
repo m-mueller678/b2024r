@@ -1,4 +1,6 @@
-use crate::basic_node::{BasicInner, BasicNode};
+use crate::basic_node::{BasicInner, BasicLeaf, BasicNode};
+use crate::hash_leaf::HashLeaf;
+use crate::key_source::SourceSlice;
 use crate::node::{
     node_tag, o_ptr_is_inner, o_ptr_lookup_inner, o_ptr_lookup_leaf, page_cast, page_cast_mut, page_id_to_bytes,
     CommonNodeHead, DebugNode, KindLeaf, NodeDynamic, NodeDynamicAuto, NodeStatic, Page, ToFromPageExt, PAGE_SIZE,
@@ -28,7 +30,7 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> Tree<'bm, BM> {
             meta.root = root_guard.page_id();
             meta.node_head.tag = node_tag::METADATA_MARKER;
         }
-        page_cast_mut::<_, BasicNode<KindLeaf>>(&mut *root_guard).init(&[][..], &[][..], None);
+        NodeStatic::<BM>::init(root_guard.cast_mut::<HashLeaf>(), &[][..], &[][..], None);
         Tree { meta: meta_guard.page_id(), bm, _p: PhantomData }
     }
 
@@ -116,7 +118,12 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> Tree<'bm, BM> {
         if parent.common.tag == node_tag::METADATA_MARKER {
             let meta = parent.cast_mut::<MetadataPage>();
             let mut new_root = self.bm.alloc();
-            new_root.cast_mut::<BasicInner>().init(&[][..], &[][..], Some(&page_id_to_bytes(meta.root)));
+            NodeStatic::<BM>::init(
+                new_root.cast_mut::<BasicInner>(),
+                &[][..],
+                &[][..],
+                Some(&page_id_to_bytes(meta.root)),
+            );
             meta.root = new_root.page_id();
             *parent = new_root
         }
@@ -222,6 +229,14 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeStatic<'bm, BM> for MetadataP
     where
         Self: 'a;
 
+    fn insert(&mut self, key: &[u8], val: &[u8]) -> Result<Option<()>, ()> {
+        unimplemented!()
+    }
+
+    fn init(&mut self, lf: impl SourceSlice, uf: impl SourceSlice, lower: Option<&[u8; 5]>) {
+        unimplemented!()
+    }
+
     fn iter_children(&self) -> impl Iterator<Item = (&[u8], PageId)> {
         std::iter::once((&[][..], self.root))
     }
@@ -255,14 +270,6 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeDynamic<'bm, BM> for Metadata
     }
 
     fn validate(&self) {}
-
-    fn insert_inner(&mut self, _key: &[u8], _pid: PageId) -> Result<(), ()> {
-        unimplemented!()
-    }
-
-    fn insert_leaf(&mut self, _key: &[u8], _val: &[u8]) -> Result<Option<()>, ()> {
-        unimplemented!()
-    }
 
     fn leaf_remove(&mut self, _k: &[u8]) -> Option<()> {
         todo!()
