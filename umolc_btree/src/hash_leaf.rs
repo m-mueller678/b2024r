@@ -7,7 +7,9 @@ use crate::node::{
 use crate::util::Supreme;
 use crate::{impl_to_from_page, Page};
 use arrayvec::ArrayVec;
+use bstr::{BStr, BString};
 use bytemuck::{Pod, Zeroable};
+use itertools::Itertools;
 use std::fmt::{Debug, Formatter};
 use std::mem::offset_of;
 use std::ops::Range;
@@ -129,7 +131,24 @@ impl HashLeaf {
 
 impl Debug for HashLeaf {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        todo!()
+        let mut s = f.debug_struct(std::any::type_name::<Self>());
+        macro_rules! fields {
+            ($base:expr => $($f:ident),*) => {$(s.field(std::stringify!($f),&$base.$f);)*};
+        }
+        fields!(self.common => count, lower_fence_len, upper_fence_len, prefix_len);
+        fields!(self => heap);
+        s.field("lf", &BStr::new(self.lower_fence()));
+        s.field("uf", &BString::new(self.upper_fence_combined().to_vec()));
+        let records_fmt = (0..self.common.count as usize).format_with(",\n", |i, f| {
+            let offset = self.slot(i);
+            let val: &dyn Debug = &BStr::new(self.heap_val(i));
+            let key = BStr::new(self.heap_key(i));
+            let kl = key.len();
+            let hash = self.cast_slice::<u8>()[Self::hash_offset(self.common.count as usize) + i];
+            f(&mut format_args!("{i:4}:{offset:04x}->[0x{hash:02x}][{kl:3}] {key:?} -> {val:?}"))
+        });
+        s.field("records", &format_args!("\n{}", records_fmt));
+        s.finish()
     }
 }
 
