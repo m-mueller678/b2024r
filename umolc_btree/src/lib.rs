@@ -3,6 +3,7 @@
 #![feature(maybe_uninit_uninit_array)]
 
 mod basic_node;
+mod fully_dense_leaf;
 mod hash_leaf;
 mod heap_node;
 mod key_source;

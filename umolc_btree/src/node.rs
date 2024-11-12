@@ -20,6 +20,7 @@ pub mod node_tag {
     pub const BASIC_INNER: u8 = 250;
     pub const BASIC_LEAF: u8 = 251;
     pub const HASH_LEAF: u8 = 252;
+    pub const FULLY_DENSE_LEAF: u8 = 253;
 }
 
 #[cfg(feature = "page_1k")]
@@ -69,7 +70,7 @@ macro_rules! define_node {
             pub common: CommonNodeHead,
             $($v:vis $f:ident:$t:ty,)*
         }) => {
-        #[derive(Pod,Zeroable,Clone,Copy)]
+        #[derive(bytemuck::Pod,bytemuck::Zeroable,Clone,Copy)]
         #[allow(dead_code)]
         #[repr(C,align(16))]
         struct ToFromPageExtCheck{
@@ -77,7 +78,7 @@ macro_rules! define_node {
             $($f:$t),*
         }
 
-        #[derive(Zeroable)]
+        #[derive(bytemuck::Zeroable)]
         #[repr(C,align(16))]
         pub struct $struct_name $(<$($generic_param),*>)?{
             common:$crate::node::CommonNodeHead,
