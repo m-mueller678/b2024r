@@ -116,7 +116,10 @@ impl<V: NodeKind> BasicNode<V> {
     fn val(&self, index: usize) -> &[u8] {
         let offset = self.slot(index);
         let val_len = self.record_val_len(offset);
-        self.slice(offset - val_len, val_len)
+        let ret = self.slice(offset - val_len, val_len);
+        let r2 = HeapNode::val(self, index);
+        assert_eq!(ret, r2);
+        ret
     }
 
     fn find<O: OlcErrorHandler>(this: OPtr<Self, O>, key: &[u8]) -> Result<usize, usize>
@@ -323,7 +326,8 @@ impl<V: NodeKind> BasicNode<V> {
         let index = Self::find::<O>(OPtr::from_mut(self), key);
         let count = self.common.count as usize;
         let new_heap_start = Self::slot_end(count + index.is_err() as usize);
-        HeapNode::insert(self, new_heap_start, &key[self.common.prefix_len as usize..], val, index, |this| {
+        let key = &key[self.common.prefix_len as usize..];
+        HeapNode::insert(self, new_heap_start, key, val, index, |this| {
             let insert_at = index.unwrap_err();
             let orhc = Self::reserved_head_count(count);
             let nrhc = Self::reserved_head_count(count + 1);
@@ -526,7 +530,6 @@ mod tests {
         page_id_from_bytes, page_id_to_bytes, KindInner, KindLeaf, NodeDynamic, NodeStatic, Page, ToFromPageExt,
         PAGE_ID_LEN,
     };
-    use bstr::BStr;
     use bytemuck::Zeroable;
     use rand::prelude::SliceRandom;
     use rand::rngs::SmallRng;
@@ -557,7 +560,6 @@ mod tests {
                 // insert/remove
                 for (_i, &k) in to_insert.iter().enumerate() {
                     if insert_phase {
-                        dbg!(BStr::new(k));
                         match leaf.insert::<PanicOlcEh>(k, k) {
                             Ok(None) => assert!(inserted.insert(k)),
                             Ok(Some(())) => assert!(!inserted.insert(k)),
@@ -591,7 +593,7 @@ mod tests {
         let mut keys: Vec<Vec<u8>> = (0..30).map(|i| keys(rng, i)).collect();
         keys.sort();
         keys.dedup();
-        for (_k, keys) in dev_utils::subslices(&keys, 5).enumerate() {
+        for keys in dev_utils::subslices(&keys, 5) {
             node.init(&*keys[0], &*keys[keys.len() - 1], Some(&[1; 5]));
             for (i, k) in keys[1..keys.len() - 1].iter().enumerate() {
                 if NodeDynamic::<BM>::insert_inner(node, k, PageId { x: i as u64 }).is_err() {
@@ -633,7 +635,7 @@ mod tests {
             [NodeDynamic::<BM>::to_debug(n1).values, NodeDynamic::<BM>::to_debug(n3).values].concat(),
             s1.values
         );
-        NodeDynamic::<BM>::merge(n1, &mut *g3);
+        NodeDynamic::<BM>::merge(n1, &mut g3);
         let s2 = NodeDynamic::<BM>::to_debug(n1);
         assert_eq!(s1, s2);
     }
@@ -660,7 +662,7 @@ mod tests {
 }
 
 impl<V: NodeKind> HeapNode for BasicNode<V> {
-    type KeyLength = u16;
+    type KeyLength = BasicNodeKeyHeapLength;
     type ValLength = V::BasicValLength;
 
     fn slot_offset(&self) -> usize {
@@ -694,7 +696,6 @@ impl HeapLength for BasicNodeKeyHeapLength {
     }
 
     fn map_insert_slice<S: SourceSlice>(x: S) -> S {
-        dbg!();
         let head_len = x.len().min(4);
         x.slice_start(head_len)
     }

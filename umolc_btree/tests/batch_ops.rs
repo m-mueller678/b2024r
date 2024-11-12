@@ -44,7 +44,7 @@ fn run_many(threads: u32, batches: u32, f: &(impl Fn(&mut SmallRng, &Barrier, u3
                         let thread_rng = &mut SmallRng::seed_from_u64(tid as u64);
                         for batch_id in 1..=batches {
                             barrier.wait();
-                            f(thread_rng, &barrier, tid, batch_id);
+                            f(thread_rng, barrier, tid, batch_id);
                             barrier.wait();
                         }
                     })
@@ -228,10 +228,10 @@ fn batch_ops(threads: u32, batches: u32, key_count: usize, op_weights: (impl Fn(
 
         if LOOKUP_ALL {
             let range_start = |i0| if i0 == threads { keys.len() } else { i0 as usize * keys.len() / threads as usize };
-            let range = range_start(tid - 1) as usize..range_start(tid) as usize;
+            let range = range_start(tid - 1)..range_start(tid);
             for i in range {
                 let buffer = &mut MaybeUninit::uninit_array();
-                let found = tree.lookup_to_buffer(&*keys[i], buffer).map(|x| &*x);
+                let found = tree.lookup_to_buffer(&keys[i], buffer).map(|x| &*x);
                 let write_batch = key_states[i].old_write_batch.load(Relaxed).to_le_bytes();
                 let expected = Some(&write_batch[..]).filter(|_| key_states[i].old_present.load(Relaxed));
                 assert_eq!(found, expected);

@@ -1,10 +1,8 @@
-use crate::key_source::{key_head, SourceSlice};
-use crate::node::{NodeStatic, ToFromPage, ToFromPageExt, PAGE_ID_LEN, PAGE_SIZE};
-use crate::{Page, MAX_KEY_SIZE, MAX_VAL_SIZE};
-use bstr::BString;
+use crate::key_source::SourceSlice;
+use crate::node::{ToFromPageExt, PAGE_SIZE};
+use crate::Page;
 use bytemuck::{Pod, Zeroable};
 use std::fmt::Debug;
-use umolc::{BufferManager, OPtr, OlcErrorHandler};
 
 #[derive(Debug)]
 pub struct HeapLengthError;
@@ -29,8 +27,6 @@ pub trait HeapLength: Pod {
 #[derive(Pod, Zeroable, Copy, Clone)]
 #[repr(transparent)]
 pub struct ConstHeapLength<const L: usize>;
-
-pub struct ConstLengthMismatchError;
 
 impl<const L: usize> HeapLength for ConstHeapLength<L> {
     fn to_usize(self) -> usize {
@@ -86,7 +82,6 @@ pub trait HeapNode: ToFromPageExt + Debug {
         index: Result<usize, usize>,
         do_shift: impl FnOnce(&mut Self),
     ) -> Result<Option<()>, HeapInsertError> {
-        dbg!(&self);
         self.validate();
         let record_size = Self::KEY_OFFSET
             + Self::KeyLength::from_slice(key).map_err(|_| HeapInsertError::BadKeyLen)?.to_usize()
@@ -109,7 +104,6 @@ pub trait HeapNode: ToFromPageExt + Debug {
                         do_shift(self);
                         self.heap_write_new(key, val, insert_at);
                         self.validate();
-                        dbg!(&self);
                         return Ok(None);
                     }
                 }
@@ -173,17 +167,22 @@ pub trait HeapNode: ToFromPageExt + Debug {
     }
 
     fn val_len(&self, record_offset: usize) -> usize {
-        Self::ValLength::load_unaligned(self.as_page(), record_offset + Self::VAL_LEN_OFFSET)
+        let len_offset = record_offset + Self::VAL_LEN_OFFSET;
+        Self::ValLength::load_unaligned(self.as_page(), len_offset)
+    }
+
+    fn val(&self, index: usize) -> &[u8] {
+        let offset = self.slot(index);
+        let len = self.val_len(offset);
+        self.slice(offset - len, len)
     }
 
     fn validate(&self);
 
     fn heap_write_new(&mut self, key: impl SourceSlice, val: &[u8], write_slot: usize) {
-        dbg!(BString::new(key.to_vec()));
         let kl = Self::KeyLength::from_slice(key).unwrap();
         let vl = Self::ValLength::from_slice(val).unwrap();
         let key = Self::KeyLength::map_insert_slice(key);
-        dbg!(BString::new(key.to_vec()));
         let val = Self::ValLength::map_insert_slice(val);
         debug_assert_eq!(kl.to_usize(), key.len());
         debug_assert_eq!(vl.to_usize(), val.len());

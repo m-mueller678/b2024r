@@ -1,4 +1,4 @@
-use crate::basic_node::{BasicInner, BasicLeaf, BasicNodeKeyHeapLength};
+use crate::basic_node::{BasicInner, BasicLeaf};
 use crate::heap_node::{ConstHeapLength, HeapLength};
 use crate::key_source::{common_prefix, SourceSlice, SourceSlicePair};
 use crate::tree::MetadataPage;
@@ -284,7 +284,7 @@ impl NodeKind for KindInner {
 
 impl NodeKind for KindLeaf {
     const IS_LEAF: bool = true;
-    type BasicValLength = BasicNodeKeyHeapLength;
+    type BasicValLength = u16;
 }
 
 #[derive(Clone, Copy, Zeroable, Pod)]
