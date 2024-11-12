@@ -167,11 +167,9 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeStatic<'bm, BM> for HashLeaf 
     }
 
     fn iter_children(&self) -> impl Iterator<Item = (Self::TruncatedKey<'_>, PageId)> {
-        #![allow(unreachable_code)]
-        unimplemented!();
         // needed for type inference
-        let ret: std::iter::Once<_>;
-        ret
+        #[allow(unreachable_code)]
+        std::iter::once(unimplemented!())
     }
 
     fn lookup_leaf<'a>(this: OPtr<'a, Self, BM::OlcEH>, key: &[u8]) -> Option<OPtr<'a, [u8], BM::OlcEH>> {
