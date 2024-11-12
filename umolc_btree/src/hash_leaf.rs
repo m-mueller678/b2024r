@@ -16,7 +16,7 @@ use std::ops::Range;
 use umolc::{o_project, BufferManager, OPtr, OlcErrorHandler, PageId};
 
 #[repr(C, align(16))]
-#[allow(dead_code)]
+#[derive(Zeroable)]
 pub struct HashLeaf {
     common: CommonNodeHead,
     heap: HeapNodeInfo,

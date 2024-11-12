@@ -3,7 +3,7 @@ use crate::{
     BufferManageGuardUpgrade, BufferManager, BufferManagerGuard, ExclusiveGuard, OPtr, OlcErrorHandler, OlcVersion,
     OptimisticGuard, PageId, UnwindOlcEh,
 };
-use bytemuck::Pod;
+use bytemuck::{Pod, Zeroable};
 use std::cell::UnsafeCell;
 use std::mem::{forget, MaybeUninit};
 use std::ops::{Deref, DerefMut};
@@ -17,10 +17,9 @@ pub struct SimpleBm<P> {
 
 unsafe impl<P> Sync for SimpleBm<P> {}
 
-impl<P> SimpleBm<P> {
+impl<P: Zeroable> SimpleBm<P> {
     pub fn new(capacity: usize) -> Self {
         unsafe {
-            panic!(); //TODO zeroable
             SimpleBm {
                 pages: Box::<[MaybeUninit<_>]>::assume_init(Box::new_zeroed_slice(capacity)),
                 locks: Box::<[MaybeUninit<_>]>::assume_init(Box::new_zeroed_slice(capacity)),

@@ -210,7 +210,7 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> Drop for Tree<'bm, BM> {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Zeroable)]
 #[repr(C, align(16))]
 pub struct MetadataPage {
     node_head: CommonNodeHead,

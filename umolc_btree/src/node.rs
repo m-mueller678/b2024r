@@ -30,7 +30,7 @@ pub const PAGE_SIZE: usize = 4096;
 
 const NODE_TAIL_SIZE: usize = PAGE_SIZE - size_of::<CommonNodeHead>();
 
-#[derive(Debug)]
+#[derive(Debug, Zeroable)]
 #[repr(C)]
 pub struct CommonNodeHead {
     pub tag: u8,
@@ -40,6 +40,8 @@ pub struct CommonNodeHead {
     pub lower_fence_len: u16,
     pub upper_fence_len: u16,
 }
+
+const NODE_UNSAFE_CELL_HEAD: usize = 2;
 
 #[no_mangle]
 pub unsafe fn print_page(p: *const Page) {
@@ -83,10 +85,6 @@ pub unsafe trait ToFromPage {}
 pub trait ToFromPageExt: ToFromPage + Sized {
     fn as_page(&self) -> &Page {
         page_cast::<Self, Page>(self)
-    }
-
-    fn zeroed() -> Self {
-        unsafe { MaybeUninit::zeroed().assume_init() }
     }
 
     fn as_page_mut(&mut self) -> &mut Page {
@@ -166,7 +164,7 @@ pub trait ToFromPageExt: ToFromPage + Sized {
 
 impl<T: ToFromPage> ToFromPageExt for T {}
 
-pub trait NodeStatic<'bm, BM: BufferManager<'bm, Page = Page>>: NodeDynamic<'bm, BM> {
+pub trait NodeStatic<'bm, BM: BufferManager<'bm, Page = Page>>: NodeDynamic<'bm, BM> + Zeroable {
     const TAG: u8;
     const IS_INNER: bool;
     type TruncatedKey<'a>: SourceSlice + 'a
@@ -305,6 +303,7 @@ pub fn page_id_from_olc_bytes<O: OlcErrorHandler>(x: OPtr<[u8; PAGE_ID_LEN], O>)
 }
 
 #[repr(C, align(16))]
+#[derive(Zeroable)]
 pub struct Page {
     pub common: CommonNodeHead,
     _pad: [u8; NODE_TAIL_SIZE],
@@ -468,5 +467,3 @@ pub fn find_separator<'a, 'bm, BM: BufferManager<'bm, Page = Page>, N: NodeStati
         (best_split, node.as_page().prefix().join(sep))
     }
 }
-
-const NODE_UNSAFE_CELL_HEAD: usize = 2;

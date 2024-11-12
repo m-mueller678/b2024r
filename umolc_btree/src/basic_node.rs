@@ -24,6 +24,7 @@ const MIN_HINT_SPACING: usize = 3;
 const MIN_HINT_COUNT: usize = MIN_HINT_SPACING * (HINT_COUNT + 1);
 
 #[repr(C, align(16))]
+#[derive(Zeroable)]
 pub struct BasicNode<V> {
     common: CommonNodeHead,
     heap: HeapNodeInfo,
