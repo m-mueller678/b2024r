@@ -129,8 +129,8 @@ pub trait HeapNode: ToFromPageExt + Debug {
         let mut dst_bump = heap_end;
         for i in 0..self.as_page().common.count as usize {
             let offset = self.slot(i);
-            let val_len = self.val_len(offset);
-            let record_len = Self::KEY_OFFSET + val_len + self.key_len(offset);
+            let val_len = self.heap_val_len(offset);
+            let record_len = Self::KEY_OFFSET + val_len + self.heap_key_len(offset);
             dst_bump -= record_len;
             buffer[dst_bump..][..record_len].copy_from_slice(self.slice(offset - val_len, record_len));
             self.set_slot(i, dst_bump + val_len);
@@ -159,22 +159,28 @@ pub trait HeapNode: ToFromPageExt + Debug {
 
     fn stored_record_size(&self, slot_index: usize) -> usize {
         let offset = self.slot(slot_index);
-        Self::KEY_OFFSET + self.key_len(offset) + self.val_len(offset)
+        Self::KEY_OFFSET + self.heap_key_len(offset) + self.heap_val_len(offset)
     }
 
-    fn key_len(&self, record_offset: usize) -> usize {
+    fn heap_key_len(&self, record_offset: usize) -> usize {
         Self::KeyLength::load_unaligned(self.as_page(), record_offset)
     }
 
-    fn val_len(&self, record_offset: usize) -> usize {
+    fn heap_val_len(&self, record_offset: usize) -> usize {
         let len_offset = record_offset + Self::VAL_LEN_OFFSET;
         Self::ValLength::load_unaligned(self.as_page(), len_offset)
     }
 
-    fn val(&self, index: usize) -> &[u8] {
+    fn heap_val(&self, index: usize) -> &[u8] {
         let offset = self.slot(index);
-        let len = self.val_len(offset);
+        let len = self.heap_val_len(offset);
         self.slice(offset - len, len)
+    }
+
+    fn heap_key(&self, index: usize) -> &[u8] {
+        let offset = self.slot(index);
+        let len = self.heap_key_len(offset);
+        self.slice(offset + Self::KEY_OFFSET, len)
     }
 
     fn validate(&self);

@@ -85,11 +85,6 @@ impl<V: NodeKind> BasicNode<V> {
         Self::slot_offset(count) + 2 * count
     }
 
-    fn slot(&self, index: usize) -> usize {
-        debug_assert!(index < self.common.count as usize);
-        self.cast_slice::<u16>()[Self::slot_offset(self.common.count as usize) / 2 + index] as usize
-    }
-
     fn key_combined(&self, index: usize) -> SourceSlicePair<u8, HeadSourceSlice, &[u8]> {
         let head = self.heads()[index];
         let offset = self.slot(index);
@@ -98,28 +93,6 @@ impl<V: NodeKind> BasicNode<V> {
         let head = HeadSourceSlice::from_head_len(head, len);
         let tail = self.slice(offset + Self::RECORD_TO_KEY_OFFSET, tail_len);
         head.join(tail)
-    }
-
-    fn record_val_len(&self, offset: usize) -> usize {
-        if V::IS_LEAF {
-            self.u16(offset + 2)
-        } else {
-            PAGE_ID_LEN
-        }
-    }
-
-    fn key_tail(&self, index: usize) -> &[u8] {
-        let offset = self.slot(index);
-        self.slice(offset + Self::RECORD_TO_KEY_OFFSET, self.u16(offset).saturating_sub(4))
-    }
-
-    fn val(&self, index: usize) -> &[u8] {
-        let offset = self.slot(index);
-        let val_len = self.record_val_len(offset);
-        let ret = self.slice(offset - val_len, val_len);
-        let r2 = HeapNode::val(self, index);
-        assert_eq!(ret, r2);
-        ret
     }
 
     fn find<O: OlcErrorHandler>(this: OPtr<Self, O>, key: &[u8]) -> Result<usize, usize>
@@ -203,7 +176,7 @@ impl<V: NodeKind> BasicNode<V> {
         let prefix_grow = dpl.saturating_sub(spl);
         for (src_i, dst_i) in src_range.clone().zip(dst_range.clone()) {
             let key = restore_prefix.join(self.key_combined(src_i).slice(prefix_grow..));
-            dst.heap_write_new(key, self.val(src_i), dst_i);
+            dst.heap_write_new(key, self.heap_val(src_i), dst_i);
             dst.set_head(dst_i, key_head(key));
         }
     }
@@ -368,11 +341,14 @@ impl<V: NodeKind> Debug for BasicNode<V> {
         };
         let records_fmt = (0..self.common.count as usize).format_with(",\n", |i, f| {
             let offset = self.slot(i);
-            let val: &dyn Debug =
-                if V::IS_LEAF { &BStr::new(self.val(i)) } else { &page_id_from_bytes(self.val(i).try_into().unwrap()) };
+            let val: &dyn Debug = if V::IS_LEAF {
+                &BStr::new(self.heap_val(i))
+            } else {
+                &page_id_from_bytes(self.heap_val(i).try_into().unwrap())
+            };
             let head = self.heads()[i];
             let kl = self.u16(offset);
-            let key = BStr::new(self.key_tail(i));
+            let key = BStr::new(self.heap_key(i));
             f(&mut format_args!("{i:4}:{offset:04x}->[0x{head:08x}][{kl:3}] {key:?} -> {val:?}"))
         });
         s.field("records", &format_args!("\n{}", records_fmt));
@@ -388,8 +364,7 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>, V: NodeKind> NodeStatic<'bm, BM> 
     fn iter_children(&self) -> impl Iterator<Item = (Self::TruncatedKey<'_>, PageId)> {
         assert!(<Self as NodeStatic<'bm, BM>>::IS_INNER);
         let lower = std::iter::once((Default::default(), Self::LOWER_OFFSET));
-        let rest =
-            (0..self.common.count as usize).map(|i| (self.key_combined(i), self.slot(i) - self.record_val_len(i)));
+        let rest = (0..self.common.count as usize).map(|i| (self.key_combined(i), self.slot(i) - self.heap_val_len(i)));
         lower.chain(rest).map(|(k, o)| (k, page_id_from_bytes(self.page_id_bytes(o))))
     }
 
@@ -480,7 +455,7 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>, V: NodeKind> NodeDynamic<'bm, BM>
             (0..low_count, low_count..count)
         } else {
             left.init(self.as_page().lower_fence(), sep_key, Some(self.lower()));
-            let mid_child = self.val(low_count).try_into().unwrap();
+            let mid_child = self.heap_val(low_count).try_into().unwrap();
             right.init(sep_key, self.as_page().upper_fence_combined(), Some(mid_child));
             (0..low_count, low_count + 1..count)
         };
@@ -504,7 +479,7 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>, V: NodeKind> NodeDynamic<'bm, BM>
         let values = (0..1)
             .filter(|_| !V::IS_LEAF)
             .map(|_| self.lower().to_vec())
-            .chain(range.map(|i| self.val(i).to_vec()))
+            .chain(range.map(|i| self.heap_val(i).to_vec()))
             .collect();
         DebugNode {
             prefix_len: self.common.prefix_len as usize,
