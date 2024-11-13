@@ -98,7 +98,7 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> Tree<'bm, BM> {
                 let mut node: BM::GuardX = node.upgrade();
                 let mut parent: BM::GuardX = parent.upgrade();
                 self.ensure_parent_not_meta(&mut parent);
-                if self.split_locked_node(node.as_dyn_node_mut(), parent.as_dyn_node_mut()).is_ok() {
+                if self.split_locked_node(&mut node, &mut parent).is_ok() {
                     None
                 } else {
                     Some(parent.page_id())
@@ -141,7 +141,7 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> Tree<'bm, BM> {
                 node.reset_written();
                 let mut parent = parent.upgrade();
                 self.ensure_parent_not_meta(&mut parent);
-                if self.split_locked_node(node.as_dyn_node_mut(), parent.as_dyn_node_mut()).is_err() {
+                if self.split_locked_node(&mut node, &mut parent).is_err() {
                     let parent_id = parent.page_id();
                     drop(parent);
                     drop(node);
@@ -175,13 +175,13 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> Tree<'bm, BM> {
         Some((node, val))
     }
 
-    fn split_locked_node(
-        &self,
-        node: &mut dyn NodeDynamic<'bm, BM>,
-        parent: &mut dyn NodeDynamic<'bm, BM>,
-    ) -> Result<(), ()> {
+    fn split_locked_node(&self, node: &mut Page, parent: &mut Page) -> Result<(), ()> {
         //TODO inline
-        node.split(self.bm, parent)
+        if node.common.count as usize > 1 {
+            node.as_dyn_node_mut().split(self.bm, parent.as_dyn_node_mut())
+        } else {
+            Ok(())
+        }
     }
 
     pub fn lock_path(&self, key: &[u8]) -> Vec<BM::GuardS> {

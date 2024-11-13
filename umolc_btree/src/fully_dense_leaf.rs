@@ -26,6 +26,9 @@ define_node! {
     }
 }
 
+const SPLIT_MODE_HIGH: u8 = 0;
+const SPLIT_MODE_HALF: u8 = 1;
+
 impl FullyDenseLeaf {
     fn key_to_index<O: OlcErrorHandler>(this: OPtr<Self, O>, k: &[u8]) -> Result<usize, ()> {
         let prefix_len = o_project!(this.common.prefix_len).r() as usize;
@@ -199,7 +202,7 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeStatic<'bm, BM> for FullyDens
                 ret
             }
             Resolution::SplitHalf => {
-                self.split_mode = 1;
+                self.split_mode = SPLIT_MODE_HALF;
                 Err(())
             }
             Resolution::SplitHigh => Err(()),
@@ -227,6 +230,17 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeStatic<'bm, BM> for FullyDens
 
 impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeDynamic<'bm, BM> for FullyDenseLeaf {
     fn split(&mut self, bm: BM, parent: &mut dyn NodeDynamic<'bm, BM>) -> Result<(), ()> {
+        let split_at = match self.split_mode {
+            SPLIT_MODE_HALF => {
+                Self::iter_key_indices(self.capacity as usize, |x| self.read_unaligned::<u64>(x))
+                    .skip(self.common.count as usize / 2)
+                    .next()
+                    .unwrap() as u32
+                    + self.reference
+            }
+            SPLIT_MODE_HIGH => self.reference.saturating_add(self.capacity as u32),
+            x => panic!("bad split mode {x}"),
+        };
         todo!();
     }
 
