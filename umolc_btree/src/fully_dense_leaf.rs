@@ -3,7 +3,8 @@ use crate::fully_dense_leaf::insert_resolver::{resolve, Resolution};
 use crate::heap_node::HeapNode;
 use crate::key_source::{common_prefix, HeadSourceSlice, SourceSlice, SourceSlicePair};
 use crate::node::{
-    node_tag, CommonNodeHead, DebugNode, NodeDynamic, NodeDynamicAuto, NodeStatic, ToFromPageExt, PAGE_SIZE,
+    insert_upper_sibling, node_tag, CommonNodeHead, DebugNode, NodeDynamic, NodeDynamicAuto, NodeStatic, ToFromPageExt,
+    PAGE_SIZE,
 };
 use crate::{define_node, Page, MAX_KEY_SIZE};
 use arrayvec::ArrayVec;
@@ -63,8 +64,12 @@ impl FullyDenseLeaf {
         }
     }
 
+    fn bitmap_u64_count(capacity: usize) -> usize {
+        capacity.div_ceil(64)
+    }
+
     fn first_val_start(&self) -> usize {
-        (self.capacity as usize).div_ceil(8) + offset_of!(Self, _data)
+        offset_of!(Self, _data) + Self::bitmap_u64_count(self.capacity as usize) * 8
     }
 
     fn key_from_numeric_part(&self, np: u32) -> SourceSlicePair<u8, &[u8], HeadSourceSlice> {
@@ -88,6 +93,19 @@ impl FullyDenseLeaf {
     }
 
     fn init(&mut self, lf: impl SourceSlice, uf: impl SourceSlice, key_len: usize, val_len: usize) {
+        self.as_page_mut().common_init(node_tag::FULLY_DENSE_LEAF, lf, uf);
+        let space = PAGE_SIZE
+            - (self.common.lower_fence_len as usize)
+            - (self.common.upper_fence_len as usize).max(4)
+            - offset_of!(Self, _data);
+        let mut capacity = space * 8 / (val_len * 8 + 1);
+        let is_ok = |capacity| capacity.next_multiple_of(64) / 8 + capacity * val_len <= space;
+        while !is_ok(capacity) {
+            capacity -= 1;
+        }
+        debug_assert!(!is_ok(capacity + 1));
+        self.capacity = capacity;
+        for i in 0..Self::bitmap_u64_count(capacity) {}
         // TODO include space for 4 byte upper fence
         // TODO pad bitmap to 8 byte multiple
         unimplemented!()
@@ -133,6 +151,14 @@ impl FullyDenseLeaf {
 
     fn val(&self, i: usize) -> &[u8] {
         self.slice(self.first_val_start() + self.val_len as usize * i, self.val_len as usize)
+    }
+
+    fn split_at_wrap<'bm, BM: BufferManager<'bm, Page = Page>>(
+        &mut self,
+        bm: BM,
+        parent: &mut dyn NodeDynamic<'bm, BM>,
+    ) -> Result<(), ()> {
+        todo!()
     }
 }
 
@@ -238,10 +264,29 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeDynamic<'bm, BM> for FullyDen
                     .unwrap() as u32
                     + self.reference
             }
-            SPLIT_MODE_HIGH => self.reference.saturating_add(self.capacity as u32),
+            SPLIT_MODE_HIGH => match self.reference.checked_add(self.capacity as u32) {
+                Some(x) => x,
+                None => return self.split_at_wrap(bm, parent),
+            },
             x => panic!("bad split mode {x}"),
         };
-        todo!();
+        let sep_key = self.key_from_numeric_part(split_at);
+        let mut right = insert_upper_sibling(parent, bm, sep_key)?;
+        let right = right.cast_mut::<Self>();
+        right.init(sep_key, self.upper_fence_combined(), self.key_len as usize, self.val_len as usize);
+        self.as_page_mut().init_upper_fences(sep_key);
+        debug_assert!(self.common.upper_fence_len <= 4);
+        let transfer_from_index = (split_at - self.reference) as usize;
+        debug_assert!(right.reference == self.reference + self.capacity as u32);
+        for i in transfer_from_index..self.capacity as usize {
+            if self.set_bit::<false>(i) {
+                let ri = i - self.capacity as usize;
+                right.set_bit::<true>(ri);
+                right.val_mut(ri).copy_from_slice(self.val(i));
+                self.common.count -= 1;
+                right.common.count += 1;
+            }
+        }
     }
 
     fn to_debug(&self) -> DebugNode {

@@ -38,11 +38,6 @@ pub type BasicInner = BasicNode<KindInner>;
 const BASIC_NODE_DATA_SIZE: usize = (PAGE_SIZE - size_of::<CommonNodeHead>() - 2 * 2 - 16 * 4) / 4;
 
 impl<V: NodeKind> BasicNode<V> {
-    fn u16(&self, offset: usize) -> usize {
-        assert!(offset + 2 <= size_of::<Self>());
-        unsafe { (self as *const Self as *const u8).add(offset).cast::<u16>().read_unaligned() as usize }
-    }
-
     fn lower(&self) -> &[u8; PAGE_ID_LEN] {
         self.page_id_bytes(Self::LOWER_OFFSET)
     }
@@ -66,7 +61,7 @@ impl<V: NodeKind> BasicNode<V> {
     fn key_combined(&self, index: usize) -> SourceSlicePair<u8, HeadSourceSlice, &[u8]> {
         let head = self.heads()[index];
         let offset = self.slot(index);
-        let len = self.u16(offset);
+        let len = self.read_unaligned_u16(offset);
         let tail_len = len.saturating_sub(4);
         let head = HeadSourceSlice::from_head_len(head, len);
         let tail = self.slice(offset + Self::RECORD_TO_KEY_OFFSET, tail_len);
@@ -254,7 +249,7 @@ impl<V: NodeKind> Debug for BasicNode<V> {
                 &page_id_from_bytes(self.heap_val(i).try_into().unwrap())
             };
             let head = self.heads()[i];
-            let kl = self.u16(offset);
+            let kl = self.read_unaligned_u16(offset);
             let key = BStr::new(self.heap_key(i));
             f(&mut format_args!("{i:4}:{offset:04x}->[0x{head:08x}][{kl:3}] {key:?} -> {val:?}"))
         });

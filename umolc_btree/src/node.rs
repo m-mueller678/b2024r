@@ -190,6 +190,16 @@ pub trait ToFromPageExt: ToFromPage + Sized {
             self.slice_mut::<T>(offset - dist, count + dist).copy_within(dist..dist + count, 0);
         }
     }
+
+    fn read_unaligned_u16(&self, offset: usize) -> usize {
+        assert!(offset + 2 <= PAGE_SIZE);
+        unsafe { (self as *const Self as *const u16).byte_add(offset).read_unaligned() as usize }
+    }
+
+    fn store_unaligned_u64(&self, offset: usize, v: u64) {
+        assert!(offset + 8 <= PAGE_SIZE);
+        unsafe { (self as *mut Self as *mut u64).byte_add(offset).write_unaligned(v) }
+    }
 }
 
 impl<T: ToFromPage> ToFromPageExt for T {}
@@ -390,13 +400,18 @@ impl Page {
     pub fn common_init(&mut self, tag: u8, lf: impl SourceSlice, uf: impl SourceSlice) {
         self.common.tag = tag;
         self.common.count = 0;
-        let pl = common_prefix(lf, uf);
         let ll = lf.len();
+        lf.write_to(self.slice_mut(size_of::<Self>() - ll, ll));
+        self.common.lower_fence_len = ll as u16;
+        self.init_upper_fence(uf);
+    }
+
+    pub fn init_upper_fence(&mut self, uf: impl SourceSlice) {
+        let pl = common_prefix(self.lower_fence(), uf);
+        let ll = self.common.lower_fence_len as usize;
         let ul = uf.len() - pl;
         self.common.prefix_len = pl as u16;
-        self.common.lower_fence_len = ll as u16;
         self.common.upper_fence_len = ul as u16;
-        lf.write_to(self.slice_mut(size_of::<Self>() - ll, ll));
         uf.slice_start(self.common.prefix_len as usize).write_to(self.slice_mut(size_of::<Self>() - ll - ul, ul));
     }
 
