@@ -18,6 +18,8 @@ impl<T: ?Sized, O: OlcErrorHandler> Clone for OPtr<'_, T, O> {
     }
 }
 
+// TODO add type parameter that makes OPtr not optimistic
+
 pub struct OPtr<'a, T: ?Sized, O: OlcErrorHandler> {
     p: *const T,
     _p: PhantomData<&'a T>,
@@ -75,6 +77,14 @@ impl<'a, T, O: OlcErrorHandler> OPtr<'a, T, O> {
     pub fn read_unaligned_nonatomic_u16(self, offset: usize) -> usize {
         if offset + 2 <= size_of::<T>() {
             unsafe { ((self.p as *const u8).add(offset) as *const u16).read_unaligned() as usize }
+        } else {
+            O::optimistic_fail()
+        }
+    }
+
+    pub fn read_unaligned_nonatomic_u64(self, offset: usize) -> u64 {
+        if offset + 8 <= size_of::<T>() {
+            unsafe { ((self.p as *const u8).add(offset) as *const u64).read_unaligned() }
         } else {
             O::optimistic_fail()
         }
@@ -154,6 +164,7 @@ macro_rules! o_project {
         {
             let ptr:OPtr<_,_> = $this;
             unsafe{ptr.project(|p|{
+                // TODO make sure you cannot sneak in a union field access here
                 &raw const (*p)$(.$member)+
             })}
         }

@@ -59,7 +59,7 @@ impl<V: NodeKind> BasicNode<V> {
         Self::HEAD_OFFSET + 4 * Self::reserved_head_count(count)
     }
 
-    fn slot_end(count: usize) -> usize {
+    pub fn heap_start_min(count: usize) -> usize {
         Self::slot_offset(count) + 2 * count
     }
 
@@ -151,12 +151,16 @@ impl<V: NodeKind> BasicNode<V> {
         let prefix_grow = dpl.saturating_sub(spl);
         for (src_i, dst_i) in src_range.clone().zip(dst_range.clone()) {
             let key = restore_prefix.join(self.key_combined(src_i).slice(prefix_grow..));
-            dst.heap_write_new(key, self.heap_val(src_i), dst_i);
-            dst.set_head(dst_i, key_head(key));
+            dst.insert_pre_allocated_slot(dst_i, key, self.heap_val(src_i));
         }
     }
 
-    fn update_hints(&mut self, old_count: usize, new_count: usize, mut change_index: usize) {
+    pub fn insert_pre_allocated_slot(&mut self, index: usize, key: impl SourceSlice, val: &[u8]) {
+        self.heap_write_new(key, val, index);
+        self.set_head(index, key_head(key));
+    }
+
+    pub fn update_hints(&mut self, old_count: usize, new_count: usize, mut change_index: usize) {
         debug_assert!(old_count != new_count);
         if new_count < MIN_HINT_COUNT {
             return;
@@ -267,7 +271,7 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>, V: NodeKind> NodeStatic<'bm, BM> 
     fn insert(&mut self, key: &[u8], val: &[u8]) -> Result<Option<()>, ()> {
         let index = Self::find::<BM::OlcEH>(OPtr::from_mut(self), key);
         let count = self.common.count as usize;
-        let new_heap_start = Self::slot_end(count + index.is_err() as usize);
+        let new_heap_start = Self::heap_start_min(count + index.is_err() as usize);
         let key = &key[self.common.prefix_len as usize..];
         HeapNode::insert(self, new_heap_start, key, val, index, |this| {
             let insert_at = index.unwrap_err();

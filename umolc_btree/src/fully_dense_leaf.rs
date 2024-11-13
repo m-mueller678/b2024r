@@ -1,9 +1,17 @@
+use crate::basic_node::{BasicLeaf, BasicNode};
+use crate::fully_dense_leaf::insert_resolver::{resolve, Resolution};
+use crate::heap_node::HeapNode;
 use crate::key_source::{common_prefix, HeadSourceSlice, SourceSlice, SourceSlicePair};
-use crate::node::{node_tag, CommonNodeHead, DebugNode, NodeDynamic, NodeStatic, ToFromPageExt, PAGE_SIZE};
-use crate::{define_node, Page};
+use crate::node::{
+    node_tag, CommonNodeHead, DebugNode, NodeDynamic, NodeDynamicAuto, NodeStatic, ToFromPageExt, PAGE_SIZE,
+};
+use crate::{define_node, Page, MAX_KEY_SIZE};
+use arrayvec::ArrayVec;
 use bytemuck::Zeroable;
+use std::cell::Cell;
 use std::fmt::{Debug, Formatter};
 use std::mem::offset_of;
+use std::usize;
 use umolc::{o_project, BufferManager, OPtr, OlcErrorHandler, PageId};
 
 define_node! {
@@ -13,7 +21,8 @@ define_node! {
         capacity:u16, // if reference is close to u32::MAX or upper fence, capacity will not be lowered
         val_len:u16,
         reference: u32,
-        _data: [u8; PAGE_SIZE-size_of::<CommonNodeHead>()-10],
+        split_mode:u8,
+        _data: [u8; PAGE_SIZE-size_of::<CommonNodeHead>()-11],
     }
 }
 
@@ -51,10 +60,6 @@ impl FullyDenseLeaf {
         }
     }
 
-    fn try_insert_to_basic(&mut self, key: &[u8], val: &[u8]) -> Result<Option<()>, ()> {
-        todo!()
-    }
-
     fn first_val_start(&self) -> usize {
         (self.capacity as usize).div_ceil(8) + offset_of!(Self, _data)
     }
@@ -81,7 +86,50 @@ impl FullyDenseLeaf {
 
     fn init(&mut self, lf: impl SourceSlice, uf: impl SourceSlice, key_len: usize, val_len: usize) {
         // TODO include space for 4 byte upper fence
+        // TODO pad bitmap to 8 byte multiple
         unimplemented!()
+    }
+
+    fn iter_key_indices<'a>(
+        capacity: usize,
+        bit_mask_loader: impl FnMut(usize) -> u64 + 'a,
+    ) -> impl Iterator<Item = usize> + 'a {
+        struct Iter<F: FnMut(usize) -> u64> {
+            bit_mask: F,
+            index: usize,
+            limit: usize,
+            word: u64,
+        }
+
+        impl<F: FnMut(usize) -> u64> Iterator for Iter<F> {
+            type Item = usize;
+
+            fn next(&mut self) -> Option<Self::Item> {
+                loop {
+                    while self.word != 0 {
+                        let tz = self.word.trailing_zeros();
+                        self.index += tz as usize;
+                        self.word >>= tz;
+                        return Some(self.index);
+                    }
+                    self.index = self.index.next_multiple_of(64);
+                    if self.index >= self.limit {
+                        return None;
+                    }
+                    self.word = (self.bit_mask)(offset_of!(FullyDenseLeaf, _data) + self.index / 8);
+                }
+            }
+        }
+
+        Iter { bit_mask: bit_mask_loader, index: 0, limit: capacity, word: 0 }
+    }
+
+    fn val_mut(&mut self, i: usize) -> &mut [u8] {
+        self.slice_mut(self.first_val_start() + self.val_len as usize * i, self.val_len as usize)
+    }
+
+    fn val(&self, i: usize) -> &[u8] {
+        self.slice(self.first_val_start() + self.val_len as usize * i, self.val_len as usize)
     }
 }
 
@@ -94,33 +142,72 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeStatic<'bm, BM> for FullyDens
     = SourceSlicePair<u8, &'a [u8], HeadSourceSlice>;
 
     fn insert(&mut self, key: &[u8], val: &[u8]) -> Result<Option<()>, ()> {
-        let known_outside_range = match Self::key_to_index::<BM::OlcEH>(OPtr::from_mut(self), key) {
-            Ok(i) if self.val_len as usize == val.len() => {
-                let capacity = self.capacity as usize;
-                if i < capacity {
-                    self.slice_mut(self.first_val_start() + self.val_len as usize * i, self.val_len as usize)
-                        .copy_from_slice(val);
-                    let was_present = self.set_bit::<true>(i);
-                    return Ok(if was_present { Some(()) } else { None });
-                } else {
-                    true
+        let mut index = Cell::new(usize::MAX);
+        let resolution = resolve(
+            || {
+                let new_heap_size = BasicLeaf::record_size_after_insert_map(key, val).unwrap();
+                let transfer_count = self.common.count as usize; // for simplicity assume that all existing keys will be transferred (none overwritten)
+                let old_heap_size = transfer_count
+                    * (BasicLeaf::KEY_OFFSET + (self.key_len as usize).saturating_sub(4) + self.val_len as usize);
+                let fence_size = self.common.lower_fence_len as usize + self.common.upper_fence_len as usize;
+                BasicLeaf::heap_start_min(transfer_count + 1) + old_heap_size + new_heap_size + fence_size <= PAGE_SIZE
+            },
+            || self.common.count as usize * 4 <= self.capacity as usize,
+            val.len() == self.val_len as usize && key.len() == self.key_len as usize,
+            || {
+                let res = Self::key_to_index::<BM::OlcEH>(unsafe { OPtr::from_ref(self) }, key);
+                if let Ok(i) = res {
+                    index.set(i);
                 }
+                res.is_ok()
+            },
+            || {
+                let last_key = self.key_from_numeric_part(self.reference.saturating_add(self.capacity as u32 - 1));
+                let first_impossible_key = last_key.join(&[0u8][..]);
+                SourceSlice::cmp(key, first_impossible_key).is_lt()
+            },
+            || index.get() < self.capacity as usize,
+        );
+        let index = index.get();
+        match resolution {
+            Resolution::Ok => {
+                let was_present = self.set_bit::<true>(index);
+                self.common.count += (!was_present) as u16;
+                self.val_mut(index).copy_from_slice(val);
+                Ok(if was_present { Some(()) } else { None })
             }
-            Ok(i) => i >= self.capacity as usize,
-            Err(()) => false,
-        };
-        let reasonably_full = || self.common.count > self.capacity / 4;
-        let outside_range = || {
-            known_outside_range || {
-                let max_numeric_part = self.reference.saturating_add(self.capacity - 1);
-                self.key_from_index(max_numeric_part).cmp(key).is_le()
+            Resolution::Convert => {
+                let mut tmp: BasicLeaf = BasicLeaf::zeroed();
+                NodeStatic::<BM>::init(&mut tmp, self.lower_fence(), self.upper_fence_combined(), None);
+                assert!(self.key_len as usize <= MAX_KEY_SIZE);
+                let mut key_buf = ArrayVec::<u8, { MAX_KEY_SIZE }>::new();
+                let nnp_len = self.key_len.saturating_sub(4) as usize;
+                key_buf.try_extend_from_slice(&self.lower_fence()[..nnp_len]).unwrap();
+                let key_slice_start = 4usize.saturating_sub(self.key_len as usize);
+                key_buf.try_extend_from_slice(&[0, 0, 0, 0]).unwrap();
+                for (sparse_index, dense_index) in
+                    Self::iter_key_indices(self.capacity as usize, |x| self.read_unaligned::<u64>(x)).enumerate()
+                {
+                    let numeric_part = self.reference + index as u32;
+                    key_buf[nnp_len..].copy_from_slice(&numeric_part.to_be_bytes());
+                    tmp.insert_pre_allocated_slot(sparse_index, &key_buf[key_slice_start..], self.val(dense_index));
+                }
+                tmp.update_hints(0, self.common.count as usize, 0);
+                let ret = NodeStatic::<BM>::insert(&mut tmp, key, val);
+                *self.as_page_mut() = tmp.copy_page();
+                debug_assert!(ret.is_ok());
+                ret
             }
-        };
-        if reasonably_full() && outside_range() {
-            Err(())
-        } else {
-            self.try_insert_to_basic(key, val)
+            Resolution::SplitHalf => {
+                self.split_mode = 1;
+                Err(())
+            }
+            Resolution::SplitHigh => Err(()),
         }
+    }
+
+    fn init(&mut self, lf: impl SourceSlice, uf: impl SourceSlice, lower: Option<&[u8; 5]>) {
+        unimplemented!()
     }
 
     fn iter_children(&self) -> impl Iterator<Item = (Self::TruncatedKey<'_>, PageId)> {
@@ -140,36 +227,6 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeStatic<'bm, BM> for FullyDens
 
 impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeDynamic<'bm, BM> for FullyDenseLeaf {
     fn split(&mut self, bm: BM, parent: &mut dyn NodeDynamic<'bm, BM>) -> Result<(), ()> {
-        let split_numeric_part = match self.reference.checked_add(self.capacity as u32) {
-            Some(x) => x,
-            None => {
-                todo!()
-            }
-        };
-        let split_key = self.key_from_numeric_part(split_numeric_part);
-        let mut right: Self = Self::zeroed();
-        let new_pl = common_prefix(split_key, self.lower_fence());
-        debug_assert!(split_key.len() - new_pl <= 4);
-        let new_upper_diff = split_key.slice_start(new_pl);
-        self.common.upper_fence_len = new_upper_diff.len() as u16;
-        new_upper_diff.write_to(self.slice_mut(
-            PAGE_SIZE - self.common.lower_fence_len as usize - self.common.upper_fence_len as usize,
-            self.common.upper_fence_len as usize,
-        ));
-        right.init(split_key, self.upper_fence_combined(), self.key_len as usize, self.val_len as usize);
-        let last_index = self.capacity as usize - 1;
-        if self.reference.checked_add(self.capacity as u32).is_none() && self.set_bit::<false>(last_index) {
-            if cfg!(debug_assertions) {
-                let last_key = self.key_from_numeric_part(u32::MAX).to_stack_buffer(|last_key| {
-                    assert!(Self::key_to_index(OPtr::from_mut(self), last_key) == Ok(last_index));
-                    assert!(Self::key_to_index(OPtr::from_mut(right), last_key) == Ok(0));
-                });
-            }
-            //debug_assert!(Self::key_to_index(OPtr::from_mut(right)))
-            right.set_bit::<true>(0);
-            right.common.count = 1;
-            self.common.count = 0;
-        }
         todo!();
     }
 
@@ -195,3 +252,5 @@ impl Debug for FullyDenseLeaf {
         todo!()
     }
 }
+
+mod insert_resolver;

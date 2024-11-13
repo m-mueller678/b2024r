@@ -107,6 +107,11 @@ pub trait ToFromPageExt: ToFromPage + Sized {
         page_cast::<Self, Page>(self)
     }
 
+    /// take mutable reference to prevent concurrent atomic accesses
+    fn copy_page(&mut self) -> Page {
+        unsafe { (self as *const Self as *const Page).read() }
+    }
+
     fn as_page_mut(&mut self) -> &mut Page {
         page_cast_mut::<Self, Page>(self)
     }
@@ -131,6 +136,11 @@ pub trait ToFromPageExt: ToFromPage + Sized {
         assert!(count_offset * size_of::<T>() >= NODE_UNSAFE_CELL_HEAD);
         assert!((count_offset + len) <= size_of::<Page>() / size_of::<T>());
         unsafe { std::slice::from_raw_parts_mut((self as *mut Self as *mut T).add(count_offset), len) }
+    }
+
+    fn read_unaligned<T: Pod>(&self, offset: usize) -> T {
+        assert!(offset <= const { PAGE_SIZE - size_of::<T>() });
+        unsafe { (self as *const Self as *const T).byte_add(offset).read_unaligned() }
     }
 
     fn page_index<T: Pod>(&self, index: usize) -> &T {

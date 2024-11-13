@@ -74,6 +74,12 @@ pub trait HeapNode: ToFromPageExt + Debug {
 
     fn slot_offset(&self) -> usize;
 
+    fn record_size_after_insert_map(key: &[u8], val: &[u8]) -> Result<usize, HeapLengthError> {
+        Ok(Self::KEY_OFFSET
+            + Self::KeyLength::from_slice(key)?.to_usize()
+            + Self::ValLength::from_slice(val)?.to_usize())
+    }
+
     fn insert(
         &mut self,
         new_heap_start: usize,
@@ -83,9 +89,7 @@ pub trait HeapNode: ToFromPageExt + Debug {
         do_shift: impl FnOnce(&mut Self),
     ) -> Result<Option<()>, HeapInsertError> {
         self.validate();
-        let record_size = Self::KEY_OFFSET
-            + Self::KeyLength::from_slice(key).map_err(|_| HeapInsertError::BadKeyLen)?.to_usize()
-            + Self::ValLength::from_slice(val).map_err(|_| HeapInsertError::BadValLen)?.to_usize();
+        let record_size = Self::record_size_after_insert_map(key, val).map_err(|_| HeapInsertError::BadKeyLen)?;
         loop {
             let info = self.heap_info_mut();
             match index {
