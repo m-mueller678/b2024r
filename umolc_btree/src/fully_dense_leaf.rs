@@ -99,7 +99,7 @@ impl FullyDenseLeaf {
             - (self.common.upper_fence_len as usize).max(4)
             - offset_of!(Self, _data);
         let mut capacity = space * 8 / (val_len * 8 + 1);
-        let is_ok = |capacity| capacity.next_multiple_of(64) / 8 + capacity * val_len <= space;
+        let is_ok = |capacity: usize| capacity.next_multiple_of(64) / 8 + capacity * val_len <= space;
         while !is_ok(capacity) {
             capacity -= 1;
         }
@@ -289,8 +289,11 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeDynamic<'bm, BM> for FullyDen
         }
     }
 
-    fn to_debug(&self) -> DebugNode {
-        todo!()
+    fn to_debug_kv(&self) -> (Vec<Vec<u8>>, Vec<Vec<u8>>) {
+        let indices = || Self::iter_key_indices(self.capacity as usize, |x| self.read_unaligned::<u64>(x));
+        let keys = indices().map(|i| Self::key_from_numeric_part(self.reference + i as u32).to_vec()).collect();
+        let values = indices.map(|i| self.val(i).to_vec()).collect();
+        (keys, values)
     }
 
     fn merge(&mut self, right: &mut Page) {

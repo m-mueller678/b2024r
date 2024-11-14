@@ -400,7 +400,7 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>, V: NodeKind> NodeDynamic<'bm, BM>
         Ok(())
     }
 
-    fn to_debug(&self) -> DebugNode {
+    fn to_debug_kv(&self) -> (Vec<Vec<u8>>, Vec<Vec<u8>>) {
         let range = 0..self.common.count as usize;
         let keys = range.clone().map(|i| self.key_combined(i).to_vec()).collect();
         let values = (0..1)
@@ -408,13 +408,7 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>, V: NodeKind> NodeDynamic<'bm, BM>
             .map(|_| self.lower().to_vec())
             .chain(range.map(|i| self.heap_val(i).to_vec()))
             .collect();
-        DebugNode {
-            prefix_len: self.common.prefix_len as usize,
-            lf: self.lower_fence().to_vec(),
-            uf: self.upper_fence_combined().to_vec(),
-            keys,
-            values,
-        }
+        (keys, values)
     }
 
     fn leaf_remove(&mut self, k: &[u8]) -> Option<()> {

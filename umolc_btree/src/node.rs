@@ -225,7 +225,18 @@ pub trait NodeDynamic<'bm, BM: BufferManager<'bm, Page = Page>>: ToFromPage + No
     /// fails iff parent_insert fails.
     /// if node is near empty, no split is performed and parent_insert is not called.
     fn split(&mut self, bm: BM, parent: &mut dyn NodeDynamic<'bm, BM>) -> Result<(), ()>;
-    fn to_debug(&self) -> DebugNode;
+    fn to_debug_kv(&self) -> (Vec<Vec<u8>>, Vec<Vec<u8>>);
+    fn to_debug(&self) -> DebugNode {
+        let (keys, values) = self.to_debug_kv();
+        let p = self.as_page();
+        DebugNode {
+            prefix_len: p.common.prefix_len as usize,
+            lf: p.lower_fence().to_vec(),
+            uf: p.upper_fence_combined().to_vec(),
+            keys,
+            values,
+        }
+    }
     fn merge(&mut self, right: &mut Page);
     fn validate(&self);
     fn leaf_remove(&mut self, k: &[u8]) -> Option<()>;

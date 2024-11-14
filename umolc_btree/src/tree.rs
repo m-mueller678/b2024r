@@ -261,14 +261,8 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeDynamic<'bm, BM> for Metadata
         unimplemented!()
     }
 
-    fn to_debug(&self) -> DebugNode {
-        DebugNode {
-            prefix_len: 0,
-            lf: Vec::new(),
-            uf: Vec::new(),
-            keys: Vec::new(),
-            values: vec![page_id_to_bytes(self.root).to_vec()],
-        }
+    fn to_debug_kv(&self) -> (Vec<Vec<u8>>, Vec<Vec<u8>>) {
+        (Vec::new(), vec![page_id_to_bytes(self.root).to_vec()])
     }
 
     fn merge(&mut self, _right: &mut Page) {
