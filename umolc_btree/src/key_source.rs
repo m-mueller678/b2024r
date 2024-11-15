@@ -21,7 +21,9 @@ pub fn key_head(k: impl SourceSlice) -> u32 {
     u32::from_be_bytes(buffer)
 }
 
-pub trait SourceSlice<T: Pod = u8>: Default + Copy {
+/// # Safety
+/// slice returned from write_to_uninit must fill entire slice and return it or diverge
+pub unsafe trait SourceSlice<T: Pod = u8>: Default + Copy {
     fn index_ss(self, i: usize) -> T {
         self.slice_start(i).iter().next().unwrap()
     }
@@ -29,17 +31,13 @@ pub trait SourceSlice<T: Pod = u8>: Default + Copy {
         SourceSlicePair(self, b, PhantomData)
     }
     fn to_mut_buffer<const SIZE: usize, R>(self, f: impl FnOnce(&mut [T]) -> R) -> R {
-        // SAFETY: T is pod, so it can be initialized to zeros
         let mut buffer: [MaybeUninit<T>; SIZE] = MaybeUninit::uninit_array();
-        self.write_to(&mut buffer[..self.len()]);
-        f(&mut buffer[..self.len()])
+        f(self.write_to_uninit(&mut buffer[..self.len()]))
     }
 
     fn to_ref_buffer<const SIZE: usize, R>(self, f: impl FnOnce(&[T]) -> R) -> R {
-        // SAFETY: T is pod, so it can be initialized to zeros
-        let mut buffer: [T; SIZE] = unsafe { MaybeUninit::zeroed().assume_init() };
-        self.write_to(&mut buffer[..self.len()]);
-        f(&mut buffer[..self.len()])
+        let mut buffer: [MaybeUninit<T>; SIZE] = MaybeUninit::uninit_array();
+        f(self.write_to_uninit(&mut buffer[..self.len()]))
     }
 
     fn to_vec(self) -> Vec<T> {
@@ -54,6 +52,15 @@ pub trait SourceSlice<T: Pod = u8>: Default + Copy {
             dst[i] = b;
         }
     }
+
+    fn write_to_uninit(self, dst: &mut [MaybeUninit<T>]) -> &mut [T] {
+        assert_eq!(self.len(), dst.len());
+        for (i, b) in self.iter().enumerate() {
+            dst[i].write(b);
+        }
+        unsafe { MaybeUninit::slice_assume_init_mut(dst) }
+    }
+
     fn slice(mut self, b: impl RangeBounds<usize>) -> Self {
         let start = match b.start_bound() {
             Bound::Unbounded => None,
@@ -91,7 +98,7 @@ pub trait SourceSlice<T: Pod = u8>: Default + Copy {
     }
 }
 
-impl<T: Pod> SourceSlice<T> for &'_ [T] {
+unsafe impl<T: Pod> SourceSlice<T> for &'_ [T] {
     fn write_to(self, dst: &mut [T]) {
         dst.copy_from_slice(self)
     }
@@ -116,7 +123,7 @@ impl<T: Pod> SourceSlice<T> for &'_ [T] {
 #[derive(Copy, Clone, Default)]
 pub struct SourceSlicePair<T: Pod, A: SourceSlice<T>, B: SourceSlice<T>>(A, B, PhantomData<[T]>);
 
-impl<T: Pod + Default, A: SourceSlice<T>, B: SourceSlice<T>> SourceSlice<T> for SourceSlicePair<T, A, B> {
+unsafe impl<T: Pod + Default, A: SourceSlice<T>, B: SourceSlice<T>> SourceSlice<T> for SourceSlicePair<T, A, B> {
     fn write_to(self, dst: &mut [T]) {
         let a_len = self.0.len();
         self.0.write_to(&mut dst[..a_len]);
@@ -167,7 +174,7 @@ impl HeadSourceSlice {
     }
 }
 
-impl SourceSlice<u8> for HeadSourceSlice {
+unsafe impl SourceSlice<u8> for HeadSourceSlice {
     fn write_to(self, dst: &mut [u8]) {
         dst.copy_from_slice(&self.array.to_be_bytes()[self.start..self.end])
     }
@@ -216,7 +223,7 @@ impl ZeroKey {
     }
 }
 
-impl SourceSlice for ZeroKey {
+unsafe impl SourceSlice for ZeroKey {
     fn len(self) -> usize {
         self.len
     }

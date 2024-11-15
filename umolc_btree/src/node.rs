@@ -196,7 +196,7 @@ pub trait ToFromPageExt: ToFromPage + Sized {
         unsafe { (self as *const Self as *const u16).byte_add(offset).read_unaligned() as usize }
     }
 
-    fn store_unaligned_u64(&self, offset: usize, v: u64) {
+    fn store_unaligned_u64(&mut self, offset: usize, v: u64) {
         assert!(offset + 8 <= PAGE_SIZE);
         unsafe { (self as *mut Self as *mut u64).byte_add(offset).write_unaligned(v) }
     }
@@ -219,24 +219,13 @@ pub trait NodeStatic<'bm, BM: BufferManager<'bm, Page = Page>>: NodeDynamic<'bm,
 
     fn lookup_leaf<'a>(this: OPtr<'a, Self, BM::OlcEH>, key: &[u8]) -> Option<OPtr<'a, [u8], BM::OlcEH>>;
     fn lookup_inner(this: OPtr<'_, Self, BM::OlcEH>, key: &[u8], high_on_equal: bool) -> PageId;
+    fn to_debug_kv(&self) -> (Vec<Vec<u8>>, Vec<Vec<u8>>);
 }
 
 pub trait NodeDynamic<'bm, BM: BufferManager<'bm, Page = Page>>: ToFromPage + NodeDynamicAuto<'bm, BM> + Debug {
     /// fails iff parent_insert fails.
     /// if node is near empty, no split is performed and parent_insert is not called.
     fn split(&mut self, bm: BM, parent: &mut dyn NodeDynamic<'bm, BM>) -> Result<(), ()>;
-    fn to_debug_kv(&self) -> (Vec<Vec<u8>>, Vec<Vec<u8>>);
-    fn to_debug(&self) -> DebugNode {
-        let (keys, values) = self.to_debug_kv();
-        let p = self.as_page();
-        DebugNode {
-            prefix_len: p.common.prefix_len as usize,
-            lf: p.lower_fence().to_vec(),
-            uf: p.upper_fence_combined().to_vec(),
-            keys,
-            values,
-        }
-    }
     fn merge(&mut self, right: &mut Page);
     fn validate(&self);
     fn leaf_remove(&mut self, k: &[u8]) -> Option<()>;
@@ -252,7 +241,7 @@ pub trait NodeDynamicAuto<'bm, BM: BufferManager<'bm, Page = Page>> {
         ll: usize,
         hl: usize,
     );
-
+    fn to_debug(&self) -> DebugNode;
     fn is_inner(&self) -> bool;
 
     #[allow(clippy::result_unit_err)]
@@ -270,6 +259,18 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>, N: NodeStatic<'bm, BM>> NodeDynam
         for (_key, child) in self.iter_children() {
             let mut child = bm.lock_exclusive(child);
             child.as_dyn_node_mut().free_children(bm);
+        }
+    }
+
+    fn to_debug(&self) -> DebugNode {
+        let (keys, values) = self.to_debug_kv();
+        let p = self.as_page();
+        DebugNode {
+            prefix_len: p.common.prefix_len as usize,
+            lf: p.lower_fence().to_vec(),
+            uf: p.upper_fence_combined().to_vec(),
+            keys,
+            values,
         }
     }
 
@@ -391,7 +392,7 @@ pub fn insert_upper_sibling<'bm, BM: BufferManager<'bm, Page = Page>>(
     separator: impl SourceSlice,
 ) -> Result<BM::GuardX, ()> {
     let new_guard = bm.alloc();
-    separator.to_mut_buffer::<MAX_KEY_SIZE, _>(|sep| {
+    separator.to_ref_buffer::<MAX_KEY_SIZE, _>(|sep| {
         if let Ok(()) = parent.insert_inner(sep, new_guard.page_id()) {
             Ok(new_guard)
         } else {

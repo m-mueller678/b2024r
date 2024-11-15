@@ -11,7 +11,7 @@ use arrayvec::ArrayVec;
 use bytemuck::Zeroable;
 use std::cell::Cell;
 use std::fmt::{Debug, Formatter};
-use std::mem::offset_of;
+use std::mem::{offset_of, MaybeUninit};
 use std::usize;
 use umolc::{o_project, BufferManager, OPtr, OlcErrorHandler, PageId};
 
@@ -31,12 +31,15 @@ const SPLIT_MODE_HIGH: u8 = 0;
 const SPLIT_MODE_HALF: u8 = 1;
 
 impl FullyDenseLeaf {
+    // may optimistic fail if key outside fence range
+    // otherwise returns Err(()) if length mismatch or nnp mismatch
+    // otherwise returns offset from reference, which may be out of bounds
     fn key_to_index<O: OlcErrorHandler>(this: OPtr<Self, O>, k: &[u8]) -> Result<usize, ()> {
         let prefix_len = o_project!(this.common.prefix_len).r() as usize;
         let lower_fence_start = PAGE_SIZE - o_project!(this.common.lower_fence_len).r() as usize;
         let key_len = o_project!(this.key_len).r() as usize;
         if key_len != k.len() {
-            O::optimistic_fail();
+            return Err(());
         }
         let numeric_start = key_len.saturating_sub(4);
         if numeric_start > prefix_len {
@@ -74,8 +77,8 @@ impl FullyDenseLeaf {
         capacity.div_ceil(64)
     }
 
-    fn first_val_start(&self) -> usize {
-        offset_of!(Self, _data) + Self::bitmap_u64_count(self.capacity as usize) * 8
+    fn first_val_start(capacity: usize) -> usize {
+        offset_of!(Self, _data) + Self::bitmap_u64_count(capacity) * 8
     }
 
     fn key_from_numeric_part(&self, np: u32) -> SourceSlicePair<u8, &[u8], HeadSourceSlice> {
@@ -84,6 +87,11 @@ impl FullyDenseLeaf {
         let numeric_part = HeadSourceSlice::from_head_len(np, 4);
         let last_key = self.lower_fence()[..nnp_len].join(numeric_part.slice(4 - np_len..));
         last_key
+    }
+
+    fn get_bit<O: OlcErrorHandler>(this: OPtr<Self, O>, i: usize) -> bool {
+        let mask = 1 << (i % 8);
+        o_project!(this._data).i(i / 8).r() & mask != 0;
     }
 
     fn set_bit<const SET: bool>(&mut self, i: usize) -> bool {
@@ -98,6 +106,7 @@ impl FullyDenseLeaf {
         ret
     }
 
+    /// returns Err(()) if there are no keys that could be inserted with given lower fence and key_len
     fn init(&mut self, lf: impl SourceSlice, uf: impl SourceSlice, key_len: usize, val_len: usize) -> Result<(), ()> {
         self.as_page_mut().common_init(node_tag::FULLY_DENSE_LEAF, lf, uf);
         let space = PAGE_SIZE
@@ -118,11 +127,12 @@ impl FullyDenseLeaf {
         self.key_len = key_len as u16;
         self.split_mode = 0;
         self.reference = if lf.len() < key_len {
-            lf.join(ZeroKey::new(key_len - lf.len())).to_mut_buffer(|k| Self::extract_numeric_part(k))
+            lf.join(ZeroKey::new(key_len - lf.len()))
+                .to_ref_buffer::<MAX_KEY_SIZE, _>(|k| Self::extract_numeric_part(k))
         } else if lf.len() == key_len {
-            lf.to_mut_buffer(|k| Self::extract_numeric_part(k))
+            lf.to_ref_buffer::<MAX_KEY_SIZE, _>(|k| Self::extract_numeric_part(k))
         } else {
-            let l = lf.slice(..key_len).to_mut_buffer(|lf| Self::extract_numeric_part(&lf));
+            let l = lf.slice(..key_len).to_ref_buffer::<MAX_KEY_SIZE, _>(|lf| Self::extract_numeric_part(&lf));
             if l == u32::MAX {
                 return Err(());
             } else {
@@ -172,6 +182,12 @@ impl FullyDenseLeaf {
 
     fn val(&self, i: usize) -> &[u8] {
         self.slice(self.first_val_start() + self.val_len as usize * i, self.val_len as usize)
+    }
+
+    fn val_opt<O: OlcErrorHandler>(this: OPtr<Self, O>, i: usize) -> OPtr<[u8], O> {
+        let val_len = o_project!(this.val_len).r() as usize;
+        let first_val_start = Self::first_val_start(o_project!(this.capacity).r() as usize);
+        this.slice(first_val_start + val_len * i, val_len);
     }
 
     fn split_at_wrap<'bm, BM: BufferManager<'bm, Page = Page>>(
@@ -267,11 +283,26 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeStatic<'bm, BM> for FullyDens
     }
 
     fn lookup_leaf<'a>(this: OPtr<'a, Self, BM::OlcEH>, key: &[u8]) -> Option<OPtr<'a, [u8], BM::OlcEH>> {
-        todo!()
+        let i = Self::key_to_index(this, key).ok()?;
+        if i >= o_project!(this.capacity).r() as usize {
+            return None;
+        }
+        if Self::get_bit(i) {
+            Some(Self::val_opt(this, i))
+        } else {
+            None
+        }
     }
 
     fn lookup_inner(this: OPtr<'_, Self, BM::OlcEH>, key: &[u8], high_on_equal: bool) -> PageId {
         unimplemented!()
+    }
+
+    fn to_debug_kv(&self) -> (Vec<Vec<u8>>, Vec<Vec<u8>>) {
+        let indices = || Self::iter_key_indices(self.capacity as usize, |x| self.read_unaligned::<u64>(x));
+        let keys = indices().map(|i| Self::key_from_numeric_part(self, self.reference + i as u32).to_vec()).collect();
+        let values = indices().map(|i| self.val(i).to_vec()).collect();
+        (keys, values)
     }
 }
 
@@ -291,11 +322,13 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeDynamic<'bm, BM> for FullyDen
             },
             x => panic!("bad split mode {x}"),
         };
-        let sep_key = self.key_from_numeric_part(split_at);
+        let mut sep_key_buffer = MaybeUninit::uninit_array::<MAX_KEY_SIZE>();
+        let sep_key = &*self.key_from_numeric_part(split_at).write_to_uninit(&mut sep_key_buffer);
         let mut right = insert_upper_sibling(parent, bm, sep_key)?;
         let right = right.cast_mut::<Self>();
-        right.init(sep_key, self.upper_fence_combined(), self.key_len as usize, self.val_len as usize);
-        self.as_page_mut().init_upper_fences(sep_key);
+        // sep_key has same length as key_len, so is a valid key in right
+        right.init(sep_key, self.upper_fence_combined(), self.key_len as usize, self.val_len as usize).unwrap();
+        self.as_page_mut().init_upper_fence(sep_key);
         debug_assert!(self.common.upper_fence_len <= 4);
         let transfer_from_index = (split_at - self.reference) as usize;
         debug_assert!(right.reference == self.reference + self.capacity as u32);
@@ -308,13 +341,7 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeDynamic<'bm, BM> for FullyDen
                 right.common.count += 1;
             }
         }
-    }
-
-    fn to_debug_kv(&self) -> (Vec<Vec<u8>>, Vec<Vec<u8>>) {
-        let indices = || Self::iter_key_indices(self.capacity as usize, |x| self.read_unaligned::<u64>(x));
-        let keys = indices().map(|i| Self::key_from_numeric_part(self.reference + i as u32).to_vec()).collect();
-        let values = indices.map(|i| self.val(i).to_vec()).collect();
-        (keys, values)
+        Ok(())
     }
 
     fn merge(&mut self, right: &mut Page) {
@@ -326,7 +353,15 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeDynamic<'bm, BM> for FullyDen
     }
 
     fn leaf_remove(&mut self, k: &[u8]) -> Option<()> {
-        todo!()
+        let i = Self::key_to_index(OPtr::from_mut(self), k).ok()?;
+        if i >= self.capacity as usize {
+            return None;
+        }
+        if self.set_bit::<false>(i) {
+            Some(())
+        } else {
+            None
+        }
     }
 }
 

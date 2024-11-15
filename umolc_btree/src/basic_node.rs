@@ -331,6 +331,16 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>, V: NodeKind> NodeStatic<'bm, BM> 
         };
         page_id_from_olc_bytes(this.array_slice(lower_offset))
     }
+    fn to_debug_kv(&self) -> (Vec<Vec<u8>>, Vec<Vec<u8>>) {
+        let range = 0..self.common.count as usize;
+        let keys = range.clone().map(|i| self.key_combined(i).to_vec()).collect();
+        let values = (0..1)
+            .filter(|_| !V::IS_LEAF)
+            .map(|_| self.lower().to_vec())
+            .chain(range.map(|i| self.heap_val(i).to_vec()))
+            .collect();
+        (keys, values)
+    }
 }
 
 impl<'bm, BM: BufferManager<'bm, Page = Page>, V: NodeKind> NodeDynamic<'bm, BM> for BasicNode<V> {
@@ -398,17 +408,6 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>, V: NodeKind> NodeDynamic<'bm, BM>
         right.validate();
         *self = left;
         Ok(())
-    }
-
-    fn to_debug_kv(&self) -> (Vec<Vec<u8>>, Vec<Vec<u8>>) {
-        let range = 0..self.common.count as usize;
-        let keys = range.clone().map(|i| self.key_combined(i).to_vec()).collect();
-        let values = (0..1)
-            .filter(|_| !V::IS_LEAF)
-            .map(|_| self.lower().to_vec())
-            .chain(range.map(|i| self.heap_val(i).to_vec()))
-            .collect();
-        (keys, values)
     }
 
     fn leaf_remove(&mut self, k: &[u8]) -> Option<()> {

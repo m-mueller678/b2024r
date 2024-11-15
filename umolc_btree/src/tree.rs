@@ -254,15 +254,15 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeStatic<'bm, BM> for MetadataP
     fn lookup_inner(this: OPtr<'_, Self, BM::OlcEH>, _key: &[u8], _high_on_equal: bool) -> PageId {
         PageId { x: o_project!(this.root.x).r() }
     }
+
+    fn to_debug_kv(&self) -> (Vec<Vec<u8>>, Vec<Vec<u8>>) {
+        (Vec::new(), vec![page_id_to_bytes(self.root).to_vec()])
+    }
 }
 
 impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeDynamic<'bm, BM> for MetadataPage {
     fn split(&mut self, _bm: BM, _parent: &mut dyn NodeDynamic<'bm, BM>) -> Result<(), ()> {
         unimplemented!()
-    }
-
-    fn to_debug_kv(&self) -> (Vec<Vec<u8>>, Vec<Vec<u8>>) {
-        (Vec::new(), vec![page_id_to_bytes(self.root).to_vec()])
     }
 
     fn merge(&mut self, _right: &mut Page) {

@@ -203,6 +203,13 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeStatic<'bm, BM> for HashLeaf 
         )
         .map_err(|_| ())
     }
+
+    fn to_debug_kv(&self) -> (Vec<Vec<u8>>, Vec<Vec<u8>>) {
+        let range = 0..self.common.count as usize;
+        let keys = range.clone().map(|i| self.heap_key(i).to_vec()).collect();
+        let values = range.map(|i| self.heap_val(i).to_vec()).collect();
+        (keys, values)
+    }
 }
 
 impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeDynamic<'bm, BM> for HashLeaf {
@@ -233,13 +240,6 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeDynamic<'bm, BM> for HashLeaf
         right.validate();
         *self = left;
         Ok(())
-    }
-
-    fn to_debug_kv(&self) -> (Vec<Vec<u8>>, Vec<Vec<u8>>) {
-        let range = 0..self.common.count as usize;
-        let keys = range.clone().map(|i| self.heap_key(i).to_vec()).collect();
-        let values = range.map(|i| self.heap_val(i).to_vec()).collect();
-        (keys, values)
     }
 
     fn merge(&mut self, right: &mut Page) {
