@@ -391,7 +391,7 @@ pub fn insert_upper_sibling<'bm, BM: BufferManager<'bm, Page = Page>>(
     separator: impl SourceSlice,
 ) -> Result<BM::GuardX, ()> {
     let new_guard = bm.alloc();
-    separator.to_stack_buffer::<MAX_KEY_SIZE, _>(|sep| {
+    separator.to_mut_buffer::<MAX_KEY_SIZE, _>(|sep| {
         if let Ok(()) = parent.insert_inner(sep, new_guard.page_id()) {
             Ok(new_guard)
         } else {

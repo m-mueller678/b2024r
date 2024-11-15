@@ -1,7 +1,7 @@
 use crate::basic_node::{BasicLeaf, BasicNode};
 use crate::fully_dense_leaf::insert_resolver::{resolve, Resolution};
 use crate::heap_node::HeapNode;
-use crate::key_source::{common_prefix, HeadSourceSlice, SourceSlice, SourceSlicePair};
+use crate::key_source::{common_prefix, HeadSourceSlice, SourceSlice, SourceSlicePair, ZeroKey};
 use crate::node::{
     insert_upper_sibling, node_tag, CommonNodeHead, DebugNode, NodeDynamic, NodeDynamicAuto, NodeStatic, ToFromPageExt,
     PAGE_SIZE,
@@ -45,6 +45,17 @@ impl FullyDenseLeaf {
                 return Err(());
             }
         }
+        let numeric_part = Self::extract_numeric_part(&k);
+        let reference = o_project!(this.reference).r();
+        if numeric_part < reference {
+            O::optimistic_fail();
+        } else {
+            Ok((numeric_part - reference) as usize)
+        }
+    }
+
+    fn extract_numeric_part(k: &[u8]) -> u32 {
+        let numeric_start = k.len().saturating_sub(4);
         let numeric_part = if k.len() < 4 {
             let mut acc = 0;
             for b in &k[numeric_start..] {
@@ -56,12 +67,7 @@ impl FullyDenseLeaf {
             let numeric_part: &[u8; 4] = k[numeric_start..].try_into().unwrap();
             u32::from_be_bytes(*numeric_part)
         };
-        let reference = o_project!(this.reference).r();
-        if numeric_part < reference {
-            O::optimistic_fail();
-        } else {
-            Ok((numeric_part - reference) as usize)
-        }
+        numeric_part
     }
 
     fn bitmap_u64_count(capacity: usize) -> usize {
@@ -92,7 +98,7 @@ impl FullyDenseLeaf {
         ret
     }
 
-    fn init(&mut self, lf: impl SourceSlice, uf: impl SourceSlice, key_len: usize, val_len: usize) {
+    fn init(&mut self, lf: impl SourceSlice, uf: impl SourceSlice, key_len: usize, val_len: usize) -> Result<(), ()> {
         self.as_page_mut().common_init(node_tag::FULLY_DENSE_LEAF, lf, uf);
         let space = PAGE_SIZE
             - (self.common.lower_fence_len as usize)
@@ -104,11 +110,26 @@ impl FullyDenseLeaf {
             capacity -= 1;
         }
         debug_assert!(!is_ok(capacity + 1));
-        self.capacity = capacity;
-        for i in 0..Self::bitmap_u64_count(capacity) {}
-        // TODO include space for 4 byte upper fence
-        // TODO pad bitmap to 8 byte multiple
-        unimplemented!()
+        self.capacity = capacity as u16;
+        for i in 0..Self::bitmap_u64_count(capacity) {
+            self.store_unaligned_u64(offset_of!(Self, _data) + i * 8, 0);
+        }
+        self.val_len = val_len as u16;
+        self.key_len = key_len as u16;
+        self.split_mode = 0;
+        self.reference = if lf.len() < key_len {
+            lf.join(ZeroKey::new(key_len - lf.len())).to_mut_buffer(|k| Self::extract_numeric_part(k))
+        } else if lf.len() == key_len {
+            lf.to_mut_buffer(|k| Self::extract_numeric_part(k))
+        } else {
+            let l = lf.slice(..key_len).to_mut_buffer(|lf| Self::extract_numeric_part(&lf));
+            if l == u32::MAX {
+                return Err(());
+            } else {
+                l + 1
+            }
+        };
+        Ok(())
     }
 
     fn iter_key_indices<'a>(

@@ -28,7 +28,14 @@ pub trait SourceSlice<T: Pod = u8>: Default + Copy {
     fn join<B: SourceSlice<T>>(self, b: B) -> SourceSlicePair<T, Self, B> {
         SourceSlicePair(self, b, PhantomData)
     }
-    fn to_stack_buffer<const SIZE: usize, R>(self, f: impl FnOnce(&mut [T]) -> R) -> R {
+    fn to_mut_buffer<const SIZE: usize, R>(self, f: impl FnOnce(&mut [T]) -> R) -> R {
+        // SAFETY: T is pod, so it can be initialized to zeros
+        let mut buffer: [MaybeUninit<T>; SIZE] = MaybeUninit::uninit_array();
+        self.write_to(&mut buffer[..self.len()]);
+        f(&mut buffer[..self.len()])
+    }
+
+    fn to_ref_buffer<const SIZE: usize, R>(self, f: impl FnOnce(&[T]) -> R) -> R {
         // SAFETY: T is pod, so it can be initialized to zeros
         let mut buffer: [T; SIZE] = unsafe { MaybeUninit::zeroed().assume_init() };
         self.write_to(&mut buffer[..self.len()]);
@@ -195,5 +202,38 @@ impl Iterator for HeadSourceSlice {
             self.start += 1;
             Some(v as u8)
         }
+    }
+}
+
+#[derive(Clone, Copy, Default)]
+pub struct ZeroKey {
+    len: usize,
+}
+
+impl ZeroKey {
+    pub fn new(len: usize) -> Self {
+        ZeroKey { len }
+    }
+}
+
+impl SourceSlice for ZeroKey {
+    fn len(self) -> usize {
+        self.len
+    }
+
+    fn iter(self) -> impl Iterator<Item = u8> {
+        std::iter::repeat(0).take(self.len)
+    }
+
+    fn slice_start(mut self, start: usize) -> Self {
+        assert!(start <= self.len);
+        self.len -= start;
+        self
+    }
+
+    fn slice_end(mut self, end: usize) -> Self {
+        assert!(end <= self.len);
+        self.len = end;
+        self
     }
 }
