@@ -1,6 +1,3 @@
-#![feature(inline_const_pat)]
-#![feature(maybe_uninit_uninit_array)]
-
 use dev_utils::mixed_test_keys;
 use rand::distributions::{Distribution, Uniform, WeightedIndex};
 use rand::rngs::SmallRng;
@@ -98,15 +95,19 @@ fn batch_ops(threads: u32, batches: u32, key_count: usize, op_weights: (impl Fn(
         let weights = op_weights(tid, bid);
         let op_dist = &WeightedIndex::new(weights).unwrap();
         let batch_rng_seed = SmallRng::from_rng(rng).unwrap();
+
         let ops = |phase_label: &'static str| {
             let mut brng = batch_rng_seed.clone();
             let total_ops = weights.iter().sum::<u32>();
             (0..total_ops)
                 .map(move |_| {
+                    const OP_LOOKUP: usize = Op::Lookup as usize;
+                    const OP_INSERT: usize = Op::Insert as usize;
+                    const OP_REMOVE: usize = Op::Remove as usize;
                     let op = match op_dist.sample(&mut brng) {
-                        const { Op::Lookup as usize } => Op::Lookup,
-                        const { Op::Insert as usize } => Op::Insert,
-                        const { Op::Remove as usize } => Op::Remove,
+                        OP_LOOKUP => Op::Lookup,
+                        OP_INSERT => Op::Insert,
+                        OP_REMOVE => Op::Remove,
                         _ => unreachable!(),
                     };
                     let index = key_dist.sample(&mut brng);
@@ -142,8 +143,8 @@ fn batch_ops(threads: u32, batches: u32, key_count: usize, op_weights: (impl Fn(
         for (_k_op, (op, _index, ks, key)) in ops("run") {
             match op {
                 Op::Lookup => {
-                    let buffer = &mut MaybeUninit::uninit_array();
-                    let val = tree.lookup_to_buffer(key, buffer);
+                    let mut buffer: [MaybeUninit<u8>; 512] = unsafe { MaybeUninit::uninit().assume_init() };
+                    let val = tree.lookup_to_buffer(key, &mut buffer);
                     match val {
                         Some(val) => {
                             let old_match =
@@ -230,8 +231,8 @@ fn batch_ops(threads: u32, batches: u32, key_count: usize, op_weights: (impl Fn(
             let range_start = |i0| if i0 == threads { keys.len() } else { i0 as usize * keys.len() / threads as usize };
             let range = range_start(tid - 1)..range_start(tid);
             for i in range {
-                let buffer = &mut MaybeUninit::uninit_array();
-                let found = tree.lookup_to_buffer(&keys[i], buffer).map(|x| &*x);
+                let mut buffer: [MaybeUninit<u8>; 512] = unsafe { MaybeUninit::uninit().assume_init() };
+                let found = tree.lookup_to_buffer(&keys[i], &mut buffer).map(|x| &*x);
                 let write_batch = key_states[i].old_write_batch.load(Relaxed).to_le_bytes();
                 let expected = Some(&write_batch[..]).filter(|_| key_states[i].old_present.load(Relaxed));
                 assert_eq!(found, expected);
