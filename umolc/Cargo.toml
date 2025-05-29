@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-radium = "1.1.0"
+radium = { git = "https://github.com/Vayion/radium" }
 bytemuck = { version = "1.19.0",features = ["derive","zeroable_atomics"] }
 libc = "0.2.161"
 memmap2="0.9.5"
