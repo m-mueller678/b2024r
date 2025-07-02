@@ -31,12 +31,12 @@ pub unsafe trait SourceSlice<T: Pod = u8>: Default + Copy {
         SourceSlicePair(self, b, PhantomData)
     }
     fn to_mut_buffer<const SIZE: usize, R>(self, f: impl FnOnce(&mut [T]) -> R) -> R {
-        let mut buffer: [MaybeUninit<T>; SIZE] = MaybeUninit::uninit_array();
+        let mut buffer: [MaybeUninit<T>; SIZE] = unsafe { MaybeUninit::uninit().assume_init() };
         f(self.write_to_uninit(&mut buffer[..self.len()]))
     }
 
     fn to_ref_buffer<const SIZE: usize, R>(self, f: impl FnOnce(&[T]) -> R) -> R {
-        let mut buffer: [MaybeUninit<T>; SIZE] = MaybeUninit::uninit_array();
+        let mut buffer: [MaybeUninit<T>; SIZE] = unsafe { MaybeUninit::uninit().assume_init() };
         f(self.write_to_uninit(&mut buffer[..self.len()]))
     }
 

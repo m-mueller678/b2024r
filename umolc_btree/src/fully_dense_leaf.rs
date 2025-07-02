@@ -78,6 +78,7 @@ impl FullyDenseLeaf {
     }
 
     fn first_val_start(capacity: usize) -> usize {
+        // This used to use an external capacity, which I don't know where it should be taken from. TODO: look at this again, otherwise use internal value.
         offset_of!(Self, _data) + Self::bitmap_u64_count(capacity) * 8
     }
 
@@ -91,7 +92,7 @@ impl FullyDenseLeaf {
 
     fn get_bit<O: OlcErrorHandler>(this: OPtr<Self, O>, i: usize) -> bool {
         let mask = 1 << (i % 8);
-        o_project!(this._data).i(i / 8).r() & mask != 0;
+        o_project!(this._data).unsize().i(i / 8).r() & mask != 0
     }
 
     fn set_bit<const SET: bool>(&mut self, i: usize) -> bool {
@@ -177,19 +178,21 @@ impl FullyDenseLeaf {
     }
 
     fn val_mut(&mut self, i: usize) -> &mut [u8] {
-        self.slice_mut(self.first_val_start() + self.val_len as usize * i, self.val_len as usize)
+        //self.slice_mut(self.first_val_start() + self.val_len as usize * i, self.val_len as usize)
+        unimplemented!()
     }
 
     fn val(&self, i: usize) -> &[u8] {
-        self.slice(self.first_val_start() + self.val_len as usize * i, self.val_len as usize)
+        //self.slice(self.first_val_start() + self.val_len as usize * i, self.val_len as usize)
+        unimplemented!()
     }
-
+/*
     fn val_opt<O: OlcErrorHandler>(this: OPtr<Self, O>, i: usize) -> OPtr<[u8], O> {
         let val_len = o_project!(this.val_len).r() as usize;
         let first_val_start = Self::first_val_start(o_project!(this.capacity).r() as usize);
         this.slice(first_val_start + val_len * i, val_len);
     }
-
+*/
     fn split_at_wrap<'bm, BM: BufferManager<'bm, Page = Page>>(
         &mut self,
         bm: BM,
@@ -287,11 +290,14 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeStatic<'bm, BM> for FullyDens
         if i >= o_project!(this.capacity).r() as usize {
             return None;
         }
-        if Self::get_bit(i) {
+
+        //TODO: fix pointer issues with get_bit
+        /*if Self::get_bit(i) {
             Some(Self::val_opt(this, i))
         } else {
             None
-        }
+        }*/
+        None
     }
 
     fn lookup_inner(this: OPtr<'_, Self, BM::OlcEH>, key: &[u8], high_on_equal: bool) -> PageId {
@@ -322,7 +328,11 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeDynamic<'bm, BM> for FullyDen
             },
             x => panic!("bad split mode {x}"),
         };
-        let mut sep_key_buffer = MaybeUninit::uninit_array::<MAX_KEY_SIZE>();
+
+        // TODO: check if this is actually a valid implementation of new MaybeUninit
+        let mut sep_key_buffer: [MaybeUninit<u8>; 512] = unsafe { MaybeUninit::uninit().assume_init() };
+
+
         let sep_key = &*self.key_from_numeric_part(split_at).write_to_uninit(&mut sep_key_buffer);
         let mut right = insert_upper_sibling(parent, bm, sep_key)?;
         let right = right.cast_mut::<Self>();
@@ -353,6 +363,8 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeDynamic<'bm, BM> for FullyDen
     }
 
     fn leaf_remove(&mut self, k: &[u8]) -> Option<()> {
+        //TODO: fix pointer issues
+        /*
         let i = Self::key_to_index(OPtr::from_mut(self), k).ok()?;
         if i >= self.capacity as usize {
             return None;
@@ -361,7 +373,7 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeDynamic<'bm, BM> for FullyDen
             Some(())
         } else {
             None
-        }
+        }*/
     }
 }
 
