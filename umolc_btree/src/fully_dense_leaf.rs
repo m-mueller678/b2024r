@@ -200,6 +200,22 @@ impl FullyDenseLeaf {
     ) -> Result<(), ()> {
         todo!()
     }
+
+
+    fn can_demote(&self) -> bool {
+        let count = self.common.count as usize;
+        let mut req_size = 2 * size_of(usize)
+            + self.val_len as usize
+            + self.key_len as usize;
+        req_size*=count;
+
+        let fences_size = self.common.lower_fence_len as usize * 2;
+        let hints_size =
+
+        false
+
+    }
+
 }
 
 impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeStatic<'bm, BM> for FullyDenseLeaf {
@@ -354,7 +370,15 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeDynamic<'bm, BM> for FullyDen
         Ok(())
     }
 
+
     fn merge(&mut self, right: &mut Page) {
+        if(right.common.tag == node_tag::FULLY_DENSE_LEAF) {
+            // check if highest value would fit into current capacity
+            // otherwise check if you can demote both values
+        }
+        else {
+            // demote own node
+        }
         todo!()
     }
 
@@ -363,9 +387,7 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeDynamic<'bm, BM> for FullyDen
     }
 
     fn leaf_remove(&mut self, k: &[u8]) -> Option<()> {
-        //TODO: fix pointer issues
-        /*
-        let i = Self::key_to_index(OPtr::from_mut(self), k).ok()?;
+        let i = Self::key_to_index::<BM::OlcEH>(OPtr::from_mut(self), k).ok()?;
         if i >= self.capacity as usize {
             return None;
         }
@@ -373,7 +395,7 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeDynamic<'bm, BM> for FullyDen
             Some(())
         } else {
             None
-        }*/
+        }
     }
 }
 
