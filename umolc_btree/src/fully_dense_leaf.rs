@@ -77,8 +77,14 @@ impl FullyDenseLeaf {
         capacity.div_ceil(64)
     }
 
-    fn first_val_start(capacity: usize) -> usize {
-        // This used to use an external capacity, which I don't know where it should be taken from. TODO: look at this again, otherwise use internal value.
+
+    fn first_val_start(&self, capacity: usize) -> usize {
+        offset_of!(Self, _data) + Self::bitmap_u64_count(capacity) * 8
+    }
+
+
+    // specific static call for usage in val_opt
+    fn first_val_start_static(capacity: usize) -> usize {
         offset_of!(Self, _data) + Self::bitmap_u64_count(capacity) * 8
     }
 
@@ -93,6 +99,15 @@ impl FullyDenseLeaf {
     fn get_bit<O: OlcErrorHandler>(this: OPtr<Self, O>, i: usize) -> bool {
         let mask = 1 << (i % 8);
         o_project!(this._data).unsize().i(i / 8).r() & mask != 0
+    }
+
+    fn get_bit_direct(&self, i: usize) -> bool {
+        let mask: u8 = 1 << (i % 8);
+        let byte_index = i / 8;
+        let byte_ptr = unsafe {
+            std::slice::from_raw_parts(self._data.as_ptr() as *const u8, self._data.len() * 2)
+        };
+        byte_ptr[byte_index] & mask != 0
     }
 
     fn set_bit<const SET: bool>(&mut self, i: usize) -> bool {
@@ -178,21 +193,20 @@ impl FullyDenseLeaf {
     }
 
     fn val_mut(&mut self, i: usize) -> &mut [u8] {
-        //self.slice_mut(self.first_val_start() + self.val_len as usize * i, self.val_len as usize)
-        unimplemented!()
+        self.slice_mut(self.first_val_start(self.capacity as usize) + self.val_len as usize * i, self.val_len as usize)
     }
 
     fn val(&self, i: usize) -> &[u8] {
-        //self.slice(self.first_val_start() + self.val_len as usize * i, self.val_len as usize)
-        unimplemented!()
+        self.slice(self.first_val_start(self.capacity as usize) + self.val_len as usize * i, self.val_len as usize)
     }
-/*
+
     fn val_opt<O: OlcErrorHandler>(this: OPtr<Self, O>, i: usize) -> OPtr<[u8], O> {
         let val_len = o_project!(this.val_len).r() as usize;
-        let first_val_start = Self::first_val_start(o_project!(this.capacity).r() as usize);
-        this.slice(first_val_start + val_len * i, val_len);
+        let capacity = o_project!(this.capacity).r() as usize;
+        let first_val_start = Self::first_val_start_static(capacity);
+        this.as_slice().i(first_val_start + val_len * i..first_val_start + val_len * (i + 1))
     }
-*/
+
     fn split_at_wrap<'bm, BM: BufferManager<'bm, Page = Page>>(
         &mut self,
         bm: BM,
@@ -204,13 +218,13 @@ impl FullyDenseLeaf {
 
     fn can_demote(&self) -> bool {
         let count = self.common.count as usize;
-        let mut req_size = 2 * size_of(usize)
+        let mut req_size = 2
             + self.val_len as usize
             + self.key_len as usize;
         req_size*=count;
 
         let fences_size = self.common.lower_fence_len as usize * 2;
-        let hints_size =
+        //TODO:
 
         false
 
@@ -308,12 +322,11 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeStatic<'bm, BM> for FullyDens
         }
 
         //TODO: fix pointer issues with get_bit
-        /*if Self::get_bit(i) {
+        if Self::get_bit(this, i) {
             Some(Self::val_opt(this, i))
         } else {
             None
-        }*/
-        None
+        }
     }
 
     fn lookup_inner(this: OPtr<'_, Self, BM::OlcEH>, key: &[u8], high_on_equal: bool) -> PageId {
@@ -345,7 +358,6 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeDynamic<'bm, BM> for FullyDen
             x => panic!("bad split mode {x}"),
         };
 
-        // TODO: check if this is actually a valid implementation of new MaybeUninit
         let mut sep_key_buffer: [MaybeUninit<u8>; 512] = unsafe { MaybeUninit::uninit().assume_init() };
 
 
@@ -374,6 +386,7 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeDynamic<'bm, BM> for FullyDen
     fn merge(&mut self, right: &mut Page) {
         if(right.common.tag == node_tag::FULLY_DENSE_LEAF) {
             // check if highest value would fit into current capacity
+
             // otherwise check if you can demote both values
         }
         else {
@@ -383,7 +396,30 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeDynamic<'bm, BM> for FullyDen
     }
 
     fn validate(&self) {
-        todo!()
+        assert!(self.key_len >= 4, "Bad key length");
+        assert!(self.val_len > 0, "Bad val length");
+
+
+        let val_len = self.val_len as usize;
+        let space = PAGE_SIZE
+            - (self.common.lower_fence_len as usize)
+            - (self.common.upper_fence_len as usize).max(4)
+            - offset_of!(Self, _data);
+        let mut capacity = space * 8 / (val_len * 8 + 1);
+        let is_ok = |capacity: usize| capacity.next_multiple_of(64) / 8 + capacity * val_len <= space;
+        while !is_ok(capacity) {
+            capacity -= 1;
+        }
+        assert_eq!(capacity, self.capacity as usize, "Bad capacity");
+
+
+        let mut count = 0;
+        for i in 0..capacity {
+            count += if self.get_bit_direct(i) { 1 } else { 0 };
+        }
+        assert_eq!(count, self.common.count as usize, "Bad count");
+
+        //TODO: add more checks regarding the fences
     }
 
     fn leaf_remove(&mut self, k: &[u8]) -> Option<()> {
