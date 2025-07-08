@@ -35,6 +35,19 @@ const SPLIT_MODE_HIGH: u8 = 0;
 const SPLIT_MODE_HALF: u8 = 1;
 
 impl FullyDenseLeaf {
+
+    pub fn get_capacity_fdl(lf_len: usize, uf_len: usize, key_len: usize, val_len: usize) -> usize{
+        let header_size = size_of::<CommonNodeHead>() + 2 + 2 + 2 + 4 + 1;
+        let space = PAGE_SIZE - header_size - lf_len - uf_len;
+        let mut capacity = space * 8 / (val_len * 8 + 1);
+        let is_ok = |capacity: usize| capacity.next_multiple_of(64) / 8 + capacity * val_len <= space;
+        while !is_ok(capacity) {
+            capacity -= 1;
+        }
+        capacity
+    }
+
+
     // may optimistic fail if key outside fence range
     // otherwise returns Err(()) if length mismatch or nnp mismatch
     // otherwise returns offset from reference, which may be out of bounds

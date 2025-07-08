@@ -5,15 +5,18 @@ use crate::node::{
     PAGE_SIZE,
 };
 use crate::util::Supreme;
+use crate::fully_dense_leaf::FullyDenseLeaf;
 use crate::{define_node, Page};
 use arrayvec::ArrayVec;
 use bstr::{BStr, BString};
 use bytemuck::{Pod, Zeroable};
 use itertools::Itertools;
 use std::fmt::{Debug, Formatter};
+use std::fmt;
 use std::mem::offset_of;
 use std::ops::Range;
 use umolc::{o_project, BufferManager, OPtr, OlcErrorHandler, PageId};
+use crate::hash_leaf::PromoteError::{Capacity, Keys, ValueLen};
 
 define_node! {
     pub struct HashLeaf {
@@ -23,6 +26,31 @@ define_node! {
     pub _data: [u16; HASH_LEAF_DATA_SIZE / 2],
     }
 }
+
+pub enum PromoteError {
+    ValueLen,
+    Keys,
+    Capacity,
+}
+
+impl fmt::Display for PromoteError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        use PromoteError::*;
+        let msg = match self {
+            Keys => "Not all keys share the same prefix.",
+            ValueLen => "Not all values have the same length.",
+            Capacity => "Dense capacity exceeds limit.",
+        };
+        write!(f, "{}", msg)
+    }
+}
+
+impl Debug for PromoteError {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        std::fmt::Display::fmt(self, f)
+    }
+}
+impl std::error::Error for PromoteError {}
 
 const HASH_LEAF_DATA_SIZE: usize = PAGE_SIZE - 16;
 const SLOT_RESERVATION: usize = 8;
@@ -130,33 +158,37 @@ impl HashLeaf {
         dst_hashes.copy_from_slice(self_hashes);
     }
 
-    fn can_promote(&self) -> bool {
+    fn can_promote(&self) -> Result<(), PromoteError> {
         let count = self.common.count as usize;
         if count == 0 {
-            return false;
+            panic!("A hashleaf was empty and should have been deleted");
         }
 
         let prefix_len = self.common.prefix_len as usize;
         let first_key = self.heap_key(0);
+        let first_val = self.heap_val(0);
         let key_len = first_key.len();
-        let val_len = first_key.len();
+        let val_len = first_val.len();
 
         let mut min_suffix = u32::MAX;
         let mut max_suffix = 0u32;
 
+        let mut key_error: bool = false;
+        let mut val_error: bool = false;
+        let mut capacity_error: bool = false;
         for i in 0..count {
             let key = self.heap_key(i);
             let val = self.heap_val(i);
 
             if key.len()!= key_len {
-                return false;
+                key_error = true;
             }
             if &key[..prefix_len] != &first_key[..prefix_len] {
-                return false;
+                key_error = true;
             }
 
             if val.len() != val_len {
-                return false;
+                val_error = true;
             }
 
             let suffix = &key[key_len - 4..];
@@ -166,12 +198,27 @@ impl HashLeaf {
             max_suffix = max_suffix.max(index);
         }
 
+        if(key_error) {
+            return Result::Err(Keys);
+        }
+        if val_error {
+            return Result::Err(ValueLen);
+        }
+
         let capacity = max_suffix - min_suffix + 1;
+        if capacity as usize <=
+            FullyDenseLeaf::get_capacity_fdl(self.lower_fence().len(),
+                                             self.upper_fence_tail().len(),
+                                             first_key.len(),
+                                             first_val.len()) {
+            return Result::Err(Capacity);
 
-        //TODO: check if capacity is actually fine, too tired
+        }
 
-        true
+
+        Result::Ok(())
     }
+    
 }
 
 impl Debug for HashLeaf {
