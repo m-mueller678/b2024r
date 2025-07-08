@@ -1,6 +1,7 @@
 use crate::basic_node::{BasicLeaf, BasicNode};
 use crate::fully_dense_leaf::insert_resolver::{resolve, Resolution};
 use crate::heap_node::HeapNode;
+use crate::hash_leaf::{HashLeaf};
 use crate::key_source::{common_prefix, HeadSourceSlice, SourceSlice, SourceSlicePair, ZeroKey};
 use crate::node::{
     insert_upper_sibling, node_tag, CommonNodeHead, DebugNode, NodeDynamic, NodeDynamicAuto, NodeStatic, ToFromPageExt,
@@ -13,6 +14,9 @@ use std::cell::Cell;
 use std::fmt::{Debug, Formatter};
 use std::mem::{offset_of, MaybeUninit};
 use std::usize;
+use bstr::{BStr, BString};
+use indxvec::Printing;
+use itertools::Itertools;
 use umolc::{o_project, BufferManager, OPtr, OlcErrorHandler, PageId};
 
 define_node! {
@@ -111,7 +115,7 @@ impl FullyDenseLeaf {
     }
 
     fn set_bit<const SET: bool>(&mut self, i: usize) -> bool {
-        debug_assert!(i < self.common.count as usize);
+        debug_assert!(i < self.capacity as usize, "{i}");
         let mask = 1 << (i % 8);
         let ret = self._data[i / 8] & mask != 0;
         if SET {
@@ -217,17 +221,19 @@ impl FullyDenseLeaf {
 
 
     fn can_demote(&self) -> bool {
+        let data_bytes = HashLeaf::get_hash_leaf_data_size();
         let count = self.common.count as usize;
-        let mut req_size = 2
-            + self.val_len as usize
-            + self.key_len as usize;
-        req_size*=count;
 
-        let fences_size = self.common.lower_fence_len as usize * 2;
-        //TODO:
+        let key_len = self.key_len as usize;
+        let val_len = self.val_len as usize;
 
-        false
+        let reserved_slots = count.next_multiple_of(8);
+        let slot_bytes = reserved_slots * 2;
+        let hash_bytes = count;
+        let heap_bytes = count * (8+key_len+val_len);
+        let required_bytes = slot_bytes + hash_bytes + heap_bytes;
 
+        required_bytes <= data_bytes
     }
 
 }
@@ -437,7 +443,23 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeDynamic<'bm, BM> for FullyDen
 
 impl Debug for FullyDenseLeaf {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        todo!()
+        let mut s = f.debug_struct(std::any::type_name::<Self>());
+        macro_rules! fields {
+            ($base:expr => $($f:ident),*) => {$(s.field(std::stringify!($f),&$base.$f);)*};
+        }
+        fields!(self.common => count, lower_fence_len, upper_fence_len, prefix_len);
+        s.field("lf", &BStr::new(self.lower_fence()));
+        s.field("uf", &BString::new(self.upper_fence_combined().to_vec()));
+        let records_fmt =
+            (0..self.common.count as usize)
+                .filter(|&i| self.get_bit_direct(i))
+                .format_with(",\n", |i, f| {
+                    let val: &dyn Debug = &self.val(i);
+                    let key = self.key_from_numeric_part(self.reference + i as u32).to_vec().to_str();
+                    f(&mut format_args!("{i:4} -> key:{:?} , val: {:?}", key, val))
+                });
+        s.field("records", &format_args!("\n{}", records_fmt));
+        s.finish()
     }
 }
 

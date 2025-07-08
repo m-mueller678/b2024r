@@ -31,6 +31,10 @@ impl HashLeaf {
     const SLOT_OFFSET: usize = offset_of!(Self, _data);
     const RECORD_TO_KEY_OFFSET: usize = 4;
 
+    pub fn get_hash_leaf_data_size() -> usize {
+        HASH_LEAF_DATA_SIZE
+    }
+
     fn hash_offset(count: usize) -> usize {
         Self::SLOT_OFFSET + Self::slot_reservation(count) * 2
     }
@@ -124,6 +128,49 @@ impl HashLeaf {
         let self_hashes =
             self.slice::<u8>(Self::hash_offset(self.common.count as usize) + src_range.start, src_range.len());
         dst_hashes.copy_from_slice(self_hashes);
+    }
+
+    fn can_promote(&self) -> bool {
+        let count = self.common.count as usize;
+        if count == 0 {
+            return false;
+        }
+
+        let prefix_len = self.common.prefix_len as usize;
+        let first_key = self.heap_key(0);
+        let key_len = first_key.len();
+        let val_len = first_key.len();
+
+        let mut min_suffix = u32::MAX;
+        let mut max_suffix = 0u32;
+
+        for i in 0..count {
+            let key = self.heap_key(i);
+            let val = self.heap_val(i);
+
+            if key.len()!= key_len {
+                return false;
+            }
+            if &key[..prefix_len] != &first_key[..prefix_len] {
+                return false;
+            }
+
+            if val.len() != val_len {
+                return false;
+            }
+
+            let suffix = &key[key_len - 4..];
+            let index = u32::from_le_bytes(suffix.try_into().unwrap());
+
+            min_suffix = min_suffix.min(index);
+            max_suffix = max_suffix.max(index);
+        }
+
+        let capacity = max_suffix - min_suffix + 1;
+
+        //TODO: check if capacity is actually fine, too tired
+
+        true
     }
 }
 
