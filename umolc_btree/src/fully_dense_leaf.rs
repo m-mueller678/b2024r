@@ -47,6 +47,10 @@ impl FullyDenseLeaf {
         capacity
     }
 
+    pub fn get_reference(&self) -> u32 {
+        self.reference
+    }
+
 
     // may optimistic fail if key outside fence range
     // otherwise returns Err(()) if length mismatch or nnp mismatch
@@ -137,6 +141,10 @@ impl FullyDenseLeaf {
             self._data[i / 8] &= !mask;
         }
         ret
+    }
+
+    pub fn init_wrapper(&mut self, lf: impl SourceSlice, uf: impl SourceSlice, key_len: usize, val_len: usize) -> Result<(), ()> {
+        self.init(lf, uf, key_len, val_len)
     }
 
     /// returns Err(()) if there are no keys that could be inserted with given lower fence and key_len

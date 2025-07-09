@@ -1,4 +1,4 @@
-use crate::heap_node::{HeapNode, HeapNodeInfo};
+use crate::heap_node::{HeapNode, HeapNodeInfo, HeapLength};
 use crate::key_source::SourceSlice;
 use crate::node::{
     find_separator, insert_upper_sibling, node_tag, page_cast_mut, DebugNode, NodeDynamic, NodeStatic, ToFromPageExt,
@@ -211,12 +211,49 @@ impl HashLeaf {
                                              self.upper_fence_tail().len(),
                                              first_key.len(),
                                              first_val.len()) {
-            return Result::Err(Capacity);
+            return Err(Capacity);
 
         }
 
 
-        Result::Ok(())
+        Ok(())
+    }
+
+    pub fn promote(&self) -> FullyDenseLeaf {
+        let count = self.common.count as usize;
+        let prefix_len = self.common.prefix_len as usize;
+
+        let first_key = self.heap_key(0);
+        let first_val = self.heap_val(0);
+        let key_len = first_key.len();
+        let val_len = first_val.len();
+
+        let mut min_suffix = u32::MAX;
+        let mut max_suffix = 0u32;
+
+        for i in 0..count {
+            let key = self.heap_key(i);
+            let suffix = &key[key_len - 4..];
+            let index = u32::from_le_bytes(suffix.try_into().unwrap());
+            min_suffix = min_suffix.min(index);
+            max_suffix = max_suffix.max(index);
+        }
+
+        let mut fdl = FullyDenseLeaf::zeroed();
+
+        fdl.init_wrapper(self.lower_fence(), self.upper_fence_combined(), key_len, val_len);
+
+        let ref_base = fdl.get_reference();
+
+        for i in 0..count {
+            let key = self.heap_key(i);
+            let val = self.heap_val(i);
+
+            fdl.insert(key, val).expect("FDL promote insert failed (should never happen)");
+        }
+
+
+        fdl
     }
     
 }
