@@ -302,7 +302,8 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeDynamic<'bm, BM> for HashLeaf
     fn can_promote(&self) -> Result<(), PromoteError> {
         let count = self.common.count as usize;
         if count == 0 {
-            panic!("A hashleaf was empty and should have been deleted");
+            //panic!("A hashleaf was empty and should have been deleted");
+            return Err(Capacity);
         }
 
         let prefix_len = self.common.prefix_len as usize;
@@ -316,7 +317,6 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeDynamic<'bm, BM> for HashLeaf
 
         let mut key_error: bool = false;
         let mut val_error: bool = false;
-        let mut capacity_error: bool = false;
         for i in 0..count {
             let key = self.heap_key(i);
             let val = self.heap_val(i);

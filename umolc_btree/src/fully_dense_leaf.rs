@@ -15,6 +15,7 @@ use bstr::{BStr, BString};
 use indxvec::Printing;
 use itertools::Itertools;
 use umolc::{o_project, BufferManager, OPtr, OlcErrorHandler, PageId};
+use crate::node::PromoteError::Node;
 
 define_node! {
     pub struct FullyDenseLeaf {
@@ -459,7 +460,7 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeDynamic<'bm, BM> for FullyDen
     }
 
     fn can_promote(&self) -> Result<(), PromoteError> {
-        unimplemented!()
+        Err(Node)
     }
 
     fn promote(&self, bm: BM) -> FullyDenseLeaf {

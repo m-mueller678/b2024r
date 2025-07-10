@@ -12,6 +12,7 @@ use std::mem::{offset_of, size_of};
 use std::ops::Range;
 use umolc::{o_project, BufferManager, OPtr, OlcErrorHandler, PageId};
 use crate::fully_dense_leaf::FullyDenseLeaf;
+use crate::node::PromoteError::Node;
 
 const HINT_COUNT: usize = 16;
 const MIN_HINT_SPACING: usize = 3;
@@ -412,7 +413,7 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>, V: NodeKind> NodeDynamic<'bm, BM>
     }
 
     fn can_promote(&self) -> Result<(), PromoteError> {
-        unimplemented!()
+        Err(Node)
     }
 
     fn promote(&self, bm: BM) -> FullyDenseLeaf {

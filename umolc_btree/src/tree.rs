@@ -5,10 +5,12 @@ use crate::node::{node_tag, o_ptr_is_inner, o_ptr_lookup_inner, o_ptr_lookup_lea
                   CommonNodeHead, DebugNode, NodeDynamic, NodeDynamicAuto, NodeStatic, Page, PromoteError, ToFromPageExt,
                   PAGE_SIZE};
 use crate::{define_node, MAX_KEY_SIZE, MAX_VAL_SIZE};
+use std::panic::{catch_unwind, AssertUnwindSafe};
 use bytemuck::{Pod, Zeroable};
 use std::fmt::{Debug, Formatter};
 use std::marker::PhantomData;
 use std::mem::{size_of, MaybeUninit};
+use indxvec::Printing;
 use umolc::{
     o_project, BufferManageGuardUpgrade, BufferManager, BufferManagerExt, BufferManagerGuard, ExclusiveGuard, OPtr,
     OlcErrorHandler, OptimisticGuard, PageId,
@@ -141,7 +143,38 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> Tree<'bm, BM> {
                 node.reset_written();
                 let mut parent = parent.upgrade();
                 self.ensure_parent_not_meta(&mut parent);
-                if self.split_locked_node(&mut node, &mut parent).is_err() {
+                println!("can_promote fires");
+
+
+                let result = catch_unwind(AssertUnwindSafe(|| {
+                    node.as_dyn_node::<BM>().can_promote()
+                }));
+
+                match result {
+                    Ok(Ok(_)) => {
+                        println!("promotion possible");
+                        // You can try to promote here, if safe
+                    }
+                    Ok(Err(e)) => {
+                        println!("promotion failed: {:?}", e);
+                    }
+                    Err(payload) => {
+                        println!("🥀 panic caught during can_promote()!");
+                        if let Some(s) = payload.downcast_ref::<&str>() {
+                            println!("panic message: {}", s);
+                        } else if let Some(s) = payload.downcast_ref::<String>() {
+                            println!("panic message: {}", s);
+                        } else {
+                            println!("panic payload is not a string.");
+                        }
+                    }
+                }
+                /*if can_promote.is_ok(){
+                    let fdl = node.as_dyn_node::<BM>().promote(self.bm);
+
+                    *node = fdl.as_page();
+                }
+                else*/ if self.split_locked_node(&mut node, &mut parent).is_err() {
                     let parent_id = parent.page_id();
                     drop(parent);
                     drop(node);
@@ -282,4 +315,10 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeDynamic<'bm, BM> for Metadata
     fn promote(&self, bm: BM) -> FullyDenseLeaf {
         unimplemented!()
     }
+}
+
+
+mod test {
+    use super::*;
+
 }
