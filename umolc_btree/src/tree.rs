@@ -1,10 +1,9 @@
 use crate::basic_node::BasicInner;
 use crate::hash_leaf::HashLeaf;
 use crate::key_source::SourceSlice;
-use crate::node::{
-    node_tag, o_ptr_is_inner, o_ptr_lookup_inner, o_ptr_lookup_leaf, page_cast, page_cast_mut, page_id_to_bytes,
-    CommonNodeHead, DebugNode, NodeDynamic, NodeDynamicAuto, NodeStatic, Page, ToFromPageExt, PAGE_SIZE,
-};
+use crate::node::{node_tag, o_ptr_is_inner, o_ptr_lookup_inner, o_ptr_lookup_leaf, page_cast, page_cast_mut, page_id_to_bytes,
+                  CommonNodeHead, DebugNode, NodeDynamic, NodeDynamicAuto, NodeStatic, Page, PromoteError, ToFromPageExt,
+                  PAGE_SIZE};
 use crate::{define_node, MAX_KEY_SIZE, MAX_VAL_SIZE};
 use bytemuck::{Pod, Zeroable};
 use std::fmt::{Debug, Formatter};
@@ -14,6 +13,7 @@ use umolc::{
     o_project, BufferManageGuardUpgrade, BufferManager, BufferManagerExt, BufferManagerGuard, ExclusiveGuard, OPtr,
     OlcErrorHandler, OptimisticGuard, PageId,
 };
+use crate::fully_dense_leaf::FullyDenseLeaf;
 
 pub struct Tree<'bm, BM: BufferManager<'bm, Page = Page>> {
     meta: PageId,
@@ -273,5 +273,13 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeDynamic<'bm, BM> for Metadata
 
     fn leaf_remove(&mut self, _k: &[u8]) -> Option<()> {
         todo!()
+    }
+
+    fn can_promote(&self) -> Result<(), PromoteError> {
+        unimplemented!()
+    }
+
+    fn promote(&self, bm: BM) -> FullyDenseLeaf {
+        unimplemented!()
     }
 }

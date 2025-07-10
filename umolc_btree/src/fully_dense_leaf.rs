@@ -3,10 +3,7 @@ use crate::fully_dense_leaf::insert_resolver::{resolve, Resolution};
 use crate::heap_node::HeapNode;
 use crate::hash_leaf::{HashLeaf};
 use crate::key_source::{common_prefix, HeadSourceSlice, SourceSlice, SourceSlicePair, ZeroKey};
-use crate::node::{
-    insert_upper_sibling, node_tag, CommonNodeHead, DebugNode, NodeDynamic, NodeDynamicAuto, NodeStatic, ToFromPageExt,
-    PAGE_SIZE,
-};
+use crate::node::{insert_upper_sibling, node_tag, CommonNodeHead, DebugNode, NodeDynamic, NodeDynamicAuto, NodeStatic, PromoteError, ToFromPageExt, PAGE_SIZE};
 use crate::{define_node, Page, MAX_KEY_SIZE};
 use arrayvec::ArrayVec;
 use bytemuck::Zeroable;
@@ -459,6 +456,14 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeDynamic<'bm, BM> for FullyDen
         } else {
             None
         }
+    }
+
+    fn can_promote(&self) -> Result<(), PromoteError> {
+        unimplemented!()
+    }
+
+    fn promote(&self, bm: BM) -> FullyDenseLeaf {
+        unimplemented!()
     }
 }
 

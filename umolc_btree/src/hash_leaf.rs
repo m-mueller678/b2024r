@@ -2,7 +2,7 @@ use crate::heap_node::{HeapNode, HeapNodeInfo, HeapLength};
 use crate::key_source::SourceSlice;
 use crate::node::{
     find_separator, insert_upper_sibling, node_tag, page_cast_mut, DebugNode, NodeDynamic, NodeStatic, ToFromPageExt,
-    PAGE_SIZE,
+    PAGE_SIZE, PromoteError,
 };
 use crate::util::Supreme;
 use crate::fully_dense_leaf::FullyDenseLeaf;
@@ -27,30 +27,6 @@ define_node! {
     }
 }
 
-pub enum PromoteError {
-    ValueLen,
-    Keys,
-    Capacity,
-}
-
-impl fmt::Display for PromoteError {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        use PromoteError::*;
-        let msg = match self {
-            Keys => "Not all keys share the same prefix.",
-            ValueLen => "Not all values have the same length.",
-            Capacity => "Dense capacity exceeds limit.",
-        };
-        write!(f, "{}", msg)
-    }
-}
-
-impl Debug for PromoteError {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        std::fmt::Display::fmt(self, f)
-    }
-}
-impl std::error::Error for PromoteError {}
 
 const HASH_LEAF_DATA_SIZE: usize = PAGE_SIZE - 16;
 const SLOT_RESERVATION: usize = 8;
@@ -157,105 +133,6 @@ impl HashLeaf {
             self.slice::<u8>(Self::hash_offset(self.common.count as usize) + src_range.start, src_range.len());
         dst_hashes.copy_from_slice(self_hashes);
     }
-
-    fn can_promote(&self) -> Result<(), PromoteError> {
-        let count = self.common.count as usize;
-        if count == 0 {
-            panic!("A hashleaf was empty and should have been deleted");
-        }
-
-        let prefix_len = self.common.prefix_len as usize;
-        let first_key = self.heap_key(0);
-        let first_val = self.heap_val(0);
-        let key_len = first_key.len();
-        let val_len = first_val.len();
-
-        let mut min_suffix = u32::MAX;
-        let mut max_suffix = 0u32;
-
-        let mut key_error: bool = false;
-        let mut val_error: bool = false;
-        let mut capacity_error: bool = false;
-        for i in 0..count {
-            let key = self.heap_key(i);
-            let val = self.heap_val(i);
-
-            if key.len()!= key_len {
-                key_error = true;
-            }
-            if &key[..prefix_len] != &first_key[..prefix_len] {
-                key_error = true;
-            }
-
-            if val.len() != val_len {
-                val_error = true;
-            }
-
-            let suffix = &key[key_len - 4..];
-            let index = u32::from_le_bytes(suffix.try_into().unwrap());
-
-            min_suffix = min_suffix.min(index);
-            max_suffix = max_suffix.max(index);
-        }
-
-        if(key_error) {
-            return Result::Err(Keys);
-        }
-        if val_error {
-            return Result::Err(ValueLen);
-        }
-
-        let capacity = max_suffix - min_suffix + 1;
-        if capacity as usize <=
-            FullyDenseLeaf::get_capacity_fdl(self.lower_fence().len(),
-                                             self.upper_fence_tail().len(),
-                                             first_key.len(),
-                                             first_val.len()) {
-            return Err(Capacity);
-
-        }
-
-
-        Ok(())
-    }
-
-    pub fn promote(&self) -> FullyDenseLeaf {
-        let count = self.common.count as usize;
-        let prefix_len = self.common.prefix_len as usize;
-
-        let first_key = self.heap_key(0);
-        let first_val = self.heap_val(0);
-        let key_len = first_key.len();
-        let val_len = first_val.len();
-
-        let mut min_suffix = u32::MAX;
-        let mut max_suffix = 0u32;
-
-        for i in 0..count {
-            let key = self.heap_key(i);
-            let suffix = &key[key_len - 4..];
-            let index = u32::from_le_bytes(suffix.try_into().unwrap());
-            min_suffix = min_suffix.min(index);
-            max_suffix = max_suffix.max(index);
-        }
-
-        let mut fdl = FullyDenseLeaf::zeroed();
-
-        fdl.init_wrapper(self.lower_fence(), self.upper_fence_combined(), key_len, val_len);
-
-        let ref_base = fdl.get_reference();
-
-        for i in 0..count {
-            let key = self.heap_key(i);
-            let val = self.heap_val(i);
-
-            fdl.insert(key, val).expect("FDL promote insert failed (should never happen)");
-        }
-
-
-        fdl
-    }
-    
 }
 
 impl Debug for HashLeaf {
@@ -420,6 +297,105 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeDynamic<'bm, BM> for HashLeaf
         self.common.count -= 1;
         HeapNode::validate(self);
         Some(())
+    }
+
+    fn can_promote(&self) -> Result<(), PromoteError> {
+        let count = self.common.count as usize;
+        if count == 0 {
+            panic!("A hashleaf was empty and should have been deleted");
+        }
+
+        let prefix_len = self.common.prefix_len as usize;
+        let first_key = self.heap_key(0);
+        let first_val = self.heap_val(0);
+        let key_len = first_key.len();
+        let val_len = first_val.len();
+
+        let mut min_suffix = u32::MAX;
+        let mut max_suffix = 0u32;
+
+        let mut key_error: bool = false;
+        let mut val_error: bool = false;
+        let mut capacity_error: bool = false;
+        for i in 0..count {
+            let key = self.heap_key(i);
+            let val = self.heap_val(i);
+
+            if key.len()!= key_len {
+                key_error = true;
+            }
+            if &key[..prefix_len] != &first_key[..prefix_len] {
+                key_error = true;
+            }
+
+            if val.len() != val_len {
+                val_error = true;
+            }
+
+            let suffix = &key[key_len - 4..];
+            let index = u32::from_le_bytes(suffix.try_into().unwrap());
+
+            min_suffix = min_suffix.min(index);
+            max_suffix = max_suffix.max(index);
+        }
+
+        if(key_error) {
+            return Result::Err(Keys);
+        }
+        if val_error {
+            return Result::Err(ValueLen);
+        }
+
+        let capacity = max_suffix - min_suffix + 1;
+        if capacity as usize <=
+            FullyDenseLeaf::get_capacity_fdl(self.lower_fence().len(),
+                                             self.upper_fence_tail().len(),
+                                             first_key.len(),
+                                             first_val.len()) {
+            return Err(Capacity);
+
+        }
+
+
+        Ok(())
+    }
+
+    fn promote(&self, bm: BM) -> FullyDenseLeaf {
+        let count = self.common.count as usize;
+        let prefix_len = self.common.prefix_len as usize;
+
+        let first_key = self.heap_key(0);
+        let first_val = self.heap_val(0);
+        let key_len = first_key.len();
+        let val_len = first_val.len();
+
+        let mut min_suffix = u32::MAX;
+        let mut max_suffix = 0u32;
+
+        for i in 0..count {
+            let key = self.heap_key(i);
+            let suffix = &key[key_len - 4..];
+            let index = u32::from_le_bytes(suffix.try_into().unwrap());
+            min_suffix = min_suffix.min(index);
+            max_suffix = max_suffix.max(index);
+        }
+
+        let mut fdl = FullyDenseLeaf::zeroed();
+
+        fdl.init_wrapper(self.lower_fence(), self.upper_fence_combined(), key_len, val_len);
+
+        let ref_base = fdl.get_reference();
+
+        for i in 0..count {
+            let key = self.heap_key(i);
+            let val = self.heap_val(i);
+
+            <FullyDenseLeaf as NodeStatic<'bm, BM>>::insert(&mut fdl, key, val)
+                .expect("FDL promote insert failed (should never happen)");
+        }
+
+
+        fdl
     }
 }
 

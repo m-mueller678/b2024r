@@ -7,13 +7,14 @@ use crate::MAX_KEY_SIZE;
 use bstr::BStr;
 use bytemuck::{Pod, Zeroable};
 use static_assertions::const_assert_eq;
-use std::assert;
-use std::fmt::Debug;
+use std::{assert, fmt};
+use std::fmt::{Debug, Formatter};
 use std::mem::{swap, transmute};
 use std::sync::atomic::AtomicU8;
 use umolc::{
     o_project, BufferManager, BufferManagerExt, BufferManagerGuard, ExclusiveGuard, OPtr, OlcErrorHandler, PageId,
 };
+use crate::fully_dense_leaf::FullyDenseLeaf;
 
 pub mod node_tag {
     pub const METADATA_MARKER: u8 = 43;
@@ -91,6 +92,32 @@ macro_rules! define_node {
         unsafe impl$(<$($generic_param),*>)? $crate::node::ToFromPage for $struct_name$(<$($generic_param),*>)? {}
     };
 }
+pub enum PromoteError {
+    ValueLen,
+    Keys,
+    Capacity,
+    Node,
+}
+
+impl fmt::Display for PromoteError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        use PromoteError::*;
+        let msg = match self {
+            Keys => "Not all keys share the same prefix.",
+            ValueLen => "Not all values have the same length.",
+            Capacity => "Dense capacity exceeds limit.",
+            Node => "This node cannot be promoted."
+        };
+        write!(f, "{}", msg)
+    }
+}
+
+impl Debug for PromoteError {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        std::fmt::Display::fmt(self, f)
+    }
+}
+impl std::error::Error for PromoteError {}
 
 pub fn page_cast<A: ToFromPage, B: ToFromPage>(a: &A) -> &B {
     unsafe { transmute::<&A, &B>(a) }
@@ -229,6 +256,10 @@ pub trait NodeDynamic<'bm, BM: BufferManager<'bm, Page = Page>>: ToFromPage + No
     fn merge(&mut self, right: &mut Page);
     fn validate(&self);
     fn leaf_remove(&mut self, k: &[u8]) -> Option<()>;
+
+    fn can_promote(&self) -> Result<(), PromoteError>;
+
+    fn promote(&self, bm: BM) -> FullyDenseLeaf;
 }
 
 pub trait NodeDynamicAuto<'bm, BM: BufferManager<'bm, Page = Page>> {

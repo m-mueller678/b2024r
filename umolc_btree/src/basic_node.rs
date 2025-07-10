@@ -1,11 +1,7 @@
 use crate::define_node;
 use crate::heap_node::{HeapLength, HeapLengthError, HeapNode, HeapNodeInfo};
 use crate::key_source::{key_head, HeadSourceSlice, SourceSlice, SourceSlicePair};
-use crate::node::{
-    find_separator, insert_upper_sibling, node_tag, page_cast_mut, page_id_from_bytes, page_id_from_olc_bytes,
-    CommonNodeHead, DebugNode, KindInner, KindLeaf, NodeDynamic, NodeKind, NodeStatic, Page, ToFromPageExt,
-    PAGE_ID_LEN, PAGE_SIZE,
-};
+use crate::node::{find_separator, insert_upper_sibling, node_tag, page_cast_mut, page_id_from_bytes, page_id_from_olc_bytes, CommonNodeHead, DebugNode, KindInner, KindLeaf, NodeDynamic, NodeKind, NodeStatic, Page, PromoteError, ToFromPageExt, PAGE_ID_LEN, PAGE_SIZE};
 use crate::util::Supreme;
 use bstr::{BStr, BString};
 use bytemuck::{Pod, Zeroable};
@@ -15,6 +11,7 @@ use std::fmt::{Debug, Formatter};
 use std::mem::{offset_of, size_of};
 use std::ops::Range;
 use umolc::{o_project, BufferManager, OPtr, OlcErrorHandler, PageId};
+use crate::fully_dense_leaf::FullyDenseLeaf;
 
 const HINT_COUNT: usize = 16;
 const MIN_HINT_SPACING: usize = 3;
@@ -412,6 +409,14 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>, V: NodeKind> NodeDynamic<'bm, BM>
 
     fn leaf_remove(&mut self, k: &[u8]) -> Option<()> {
         self.remove::<BM::OlcEH>(k)
+    }
+
+    fn can_promote(&self) -> Result<(), PromoteError> {
+        unimplemented!()
+    }
+
+    fn promote(&self, bm: BM) -> FullyDenseLeaf {
+        unimplemented!()
     }
 }
 
