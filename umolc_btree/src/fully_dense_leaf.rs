@@ -8,7 +8,7 @@ use crate::{define_node, Page, MAX_KEY_SIZE};
 use arrayvec::ArrayVec;
 use bytemuck::Zeroable;
 use std::cell::Cell;
-use std::fmt::{Debug, Formatter};
+use std::fmt::{Debug, Display, Formatter};
 use std::mem::{offset_of, MaybeUninit};
 use std::usize;
 use bstr::{BStr, BString};
@@ -33,6 +33,10 @@ const SPLIT_MODE_HIGH: u8 = 0;
 const SPLIT_MODE_HALF: u8 = 1;
 
 impl FullyDenseLeaf {
+
+    pub fn into_page(self) -> Page {
+        unsafe { std::mem::transmute(self) }
+    }
 
     pub fn get_capacity_fdl(lf_len: usize, uf_len: usize, key_len: usize, val_len: usize) -> usize{
         let header_size = size_of::<CommonNodeHead>() + 2 + 2 + 2 + 4 + 1;
@@ -60,6 +64,7 @@ impl FullyDenseLeaf {
         if key_len != k.len() {
             return Err(());
         }
+
         let numeric_start = key_len.saturating_sub(4);
         if numeric_start > prefix_len {
             let nnp = this.as_slice().i(lower_fence_start + prefix_len..lower_fence_start + numeric_start);
@@ -102,6 +107,15 @@ impl FullyDenseLeaf {
     }
 
 
+    pub fn force_insert<O: OlcErrorHandler>(&mut self, key: &[u8], val: &[u8]) {
+        let index = Self::key_to_index::<O>(unsafe { OPtr::from_ref(self) }, key)
+            .expect("Index computation failed");
+
+        let was_present = self.set_bit::<true>(index);
+        self.common.count += (!was_present) as u16;
+        self.val_mut(index).copy_from_slice(val);
+    }
+
     // specific static call for usage in val_opt
     fn first_val_start_static(capacity: usize) -> usize {
         offset_of!(Self, _data) + Self::bitmap_u64_count(capacity) * 8
@@ -142,6 +156,7 @@ impl FullyDenseLeaf {
     }
 
     pub fn init_wrapper(&mut self, lf: impl SourceSlice, uf: impl SourceSlice, key_len: usize, val_len: usize) -> Result<(), ()> {
+        println!("Called with arguments: lf: {:?}, uf: {:?}, key_len: {key_len}, val_len: {val_len}", lf.to_vec(), uf.to_vec());
         self.init(lf, uf, key_len, val_len)
     }
 
@@ -274,16 +289,28 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeStatic<'bm, BM> for FullyDens
                 let old_heap_size = transfer_count
                     * (BasicLeaf::KEY_OFFSET + (self.key_len as usize).saturating_sub(4) + self.val_len as usize);
                 let fence_size = self.common.lower_fence_len as usize + self.common.upper_fence_len as usize;
-                BasicLeaf::heap_start_min(transfer_count + 1) + old_heap_size + new_heap_size + fence_size <= PAGE_SIZE
+                let result = BasicLeaf::heap_start_min(transfer_count + 1) + old_heap_size + new_heap_size + fence_size <= PAGE_SIZE;
+                //println!("can_convert {:?}", result);
+                result
             },
-            || self.common.count as usize * 4 <= self.capacity as usize,
-            val.len() == self.val_len as usize && key.len() == self.key_len as usize,
+            || {
+                let result = self.common.count as usize * 4 <= self.capacity as usize;
+                //println!("is_low {:?}", result);
+                result
+            },
+            {
+                let result = val.len() == self.val_len as usize && key.len() == self.key_len as usize;
+                //println!("len_is_ok {:?}", result);
+                result
+            },
             || {
                 let res = Self::key_to_index::<BM::OlcEH>(unsafe { OPtr::from_ref(self) }, key);
                 if let Ok(i) = res {
                     index.set(i);
                 }
-                res.is_ok()
+                let result = res.is_ok();
+                //println!("nnp_is_ok: {:?}", result);
+                result
             },
             || {
                 let last_key = self.key_from_numeric_part(self.reference.saturating_add(self.capacity as u32 - 1));
@@ -292,6 +319,7 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeStatic<'bm, BM> for FullyDens
             },
             || index.get() < self.capacity as usize,
         );
+
         let index = index.get();
         match resolution {
             Resolution::Ok => {
@@ -301,6 +329,7 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeStatic<'bm, BM> for FullyDens
                 Ok(if was_present { Some(()) } else { None })
             }
             Resolution::Convert => {
+                unimplemented!();
                 let mut tmp: BasicLeaf = BasicLeaf::zeroed();
                 NodeStatic::<BM>::init(&mut tmp, self.lower_fence(), self.upper_fence_combined(), None);
                 assert!(self.key_len as usize <= MAX_KEY_SIZE);
@@ -323,10 +352,14 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeStatic<'bm, BM> for FullyDens
                 ret
             }
             Resolution::SplitHalf => {
+                unimplemented!();
                 self.split_mode = SPLIT_MODE_HALF;
                 Err(())
             }
-            Resolution::SplitHigh => Err(()),
+            Resolution::SplitHigh => {
+                unimplemented!();
+                Err(())
+            },
         }
     }
 
@@ -487,6 +520,12 @@ impl Debug for FullyDenseLeaf {
                 });
         s.field("records", &format_args!("\n{}", records_fmt));
         s.finish()
+    }
+}
+
+impl Display for FullyDenseLeaf {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:#?}", self)
     }
 }
 

@@ -139,42 +139,34 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> Tree<'bm, BM> {
                 parent.release_unchecked();
                 x
             }
-            Err(()) => {
+            Err((error)) => {
                 node.reset_written();
                 let mut parent = parent.upgrade();
                 self.ensure_parent_not_meta(&mut parent);
-                println!("can_promote fires");
 
 
-                let result = catch_unwind(AssertUnwindSafe(|| {
-                    node.as_dyn_node::<BM>().can_promote()
-                }));
+                let can_promote = node.as_dyn_node::<BM>().can_promote();
 
-                match result {
-                    Ok(Ok(_)) => {
-                        println!("promotion possible");
-                        // You can try to promote here, if safe
+
+                match &can_promote {
+                    Ok(_) => println!("promotion possible"),
+
+                    Err(e) => println!("🥀 promotion failed: {:?}", e),
+                };
+                if can_promote.is_ok() {
+
+                    println!("Parent: {:?}", parent.as_dyn_node::<BM>());
+                    let fdl = node.as_dyn_node::<BM>().promote(self.bm).into_page();
+                    println!("Yo, the cast into a page worked!");
+                    let dst: *mut Page = &mut *node;
+
+                    unsafe {
+                        std::ptr::write(dst, fdl);
                     }
-                    Ok(Err(e)) => {
-                        println!("promotion failed: {:?}", e);
-                    }
-                    Err(payload) => {
-                        println!("🥀 panic caught during can_promote()!");
-                        if let Some(s) = payload.downcast_ref::<&str>() {
-                            println!("panic message: {}", s);
-                        } else if let Some(s) = payload.downcast_ref::<String>() {
-                            println!("panic message: {}", s);
-                        } else {
-                            println!("panic payload is not a string.");
-                        }
-                    }
+
                 }
-                /*if can_promote.is_ok(){
-                    let fdl = node.as_dyn_node::<BM>().promote(self.bm);
 
-                    *node = fdl.as_page();
-                }
-                else*/ if self.split_locked_node(&mut node, &mut parent).is_err() {
+                else if self.split_locked_node(&mut node, &mut parent).is_err() {
                     let parent_id = parent.page_id();
                     drop(parent);
                     drop(node);
@@ -315,10 +307,4 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeDynamic<'bm, BM> for Metadata
     fn promote(&self, bm: BM) -> FullyDenseLeaf {
         unimplemented!()
     }
-}
-
-
-mod test {
-    use super::*;
-
 }

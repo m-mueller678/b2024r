@@ -1,9 +1,10 @@
-use crate::heap_node::{HeapNode, HeapNodeInfo, HeapLength};
+use crate::heap_node::{HeapNode, HeapNodeInfo, HeapLength, ConstHeapLength};
 use crate::key_source::SourceSlice;
 use crate::node::{
     find_separator, insert_upper_sibling, node_tag, page_cast_mut, DebugNode, NodeDynamic, NodeStatic, ToFromPageExt,
     PAGE_SIZE, PromoteError,
 };
+use crate::key_source::common_prefix;
 use crate::util::Supreme;
 use crate::fully_dense_leaf::FullyDenseLeaf;
 use crate::{define_node, Page};
@@ -11,10 +12,12 @@ use arrayvec::ArrayVec;
 use bstr::{BStr, BString};
 use bytemuck::{Pod, Zeroable};
 use itertools::Itertools;
-use std::fmt::{Debug, Formatter};
+use std::fmt::{Debug, Display, Formatter};
 use std::fmt;
+use std::vec::Vec;
 use std::mem::offset_of;
 use std::ops::Range;
+use indxvec::Printing;
 use umolc::{o_project, BufferManager, OPtr, OlcErrorHandler, PageId};
 use crate::hash_leaf::PromoteError::{Capacity, Keys, ValueLen};
 
@@ -300,23 +303,28 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeDynamic<'bm, BM> for HashLeaf
     }
 
     fn can_promote(&self) -> Result<(), PromoteError> {
+        println!("Trying to promote");
         let count = self.common.count as usize;
         if count == 0 {
             //panic!("A hashleaf was empty and should have been deleted");
             return Err(Capacity);
         }
 
-        let prefix_len = self.common.prefix_len as usize;
+        if self.lower_fence().is_empty() {
+            return Err(PromoteError::Fences);
+        }
+
         let first_key = self.heap_key(0);
         let first_val = self.heap_val(0);
+        let last_key = self.heap_key(count - 1);
+
         let key_len = first_key.len();
         let val_len = first_val.len();
-
-        let mut min_suffix = u32::MAX;
-        let mut max_suffix = 0u32;
+        let prefix_len = self.common.prefix_len as usize;
 
         let mut key_error: bool = false;
         let mut val_error: bool = false;
+
         for i in 0..count {
             let key = self.heap_key(i);
             let val = self.heap_val(i);
@@ -324,21 +332,14 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeDynamic<'bm, BM> for HashLeaf
             if key.len()!= key_len {
                 key_error = true;
             }
-            if &key[..prefix_len] != &first_key[..prefix_len] {
-                key_error = true;
-            }
 
             if val.len() != val_len {
                 val_error = true;
             }
-
-            let suffix = &key[key_len - 4..];
-            let index = u32::from_le_bytes(suffix.try_into().unwrap());
-
-            min_suffix = min_suffix.min(index);
-            max_suffix = max_suffix.max(index);
         }
 
+        // we don't return immediately but just here, in case there would be a hierachy of errors.
+        // if there is none, we can just remove these if-cases and return on finding an error.
         if(key_error) {
             return Result::Err(Keys);
         }
@@ -346,8 +347,35 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeDynamic<'bm, BM> for HashLeaf
             return Result::Err(ValueLen);
         }
 
-        let capacity = max_suffix - min_suffix + 1;
-        if capacity as usize <=
+
+        let prefix = self.prefix();
+
+        let mut min_suffix = u32::MAX;
+        let mut max_suffix = 0;
+
+        for i in 0..count {
+            let suffix = self.heap_key(i);
+
+
+            let mut full_key = Vec::with_capacity(self.common.prefix_len as usize + suffix.len());
+            full_key.extend_from_slice(self.prefix());
+            full_key.extend_from_slice(suffix);
+
+            let full_len = full_key.len();
+            let numeric_slice = &full_key[full_len.saturating_sub(4)..];
+
+            let mut padded = [0u8; 4];
+            padded[..full_len.min(4)].copy_from_slice(&numeric_slice);
+
+            let index = u32::from_be_bytes(padded.try_into().unwrap());
+
+            min_suffix = min_suffix.min(index);
+            max_suffix = max_suffix.max(index);
+        }
+        let area = max_suffix - min_suffix + 1;
+
+
+        if area as usize >
             FullyDenseLeaf::get_capacity_fdl(self.lower_fence().len(),
                                              self.upper_fence_tail().len(),
                                              first_key.len(),
@@ -369,31 +397,24 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeDynamic<'bm, BM> for HashLeaf
         let key_len = first_key.len();
         let val_len = first_val.len();
 
-        let mut min_suffix = u32::MAX;
-        let mut max_suffix = 0u32;
-
-        for i in 0..count {
-            let key = self.heap_key(i);
-            let suffix = &key[key_len - 4..];
-            let index = u32::from_le_bytes(suffix.try_into().unwrap());
-            min_suffix = min_suffix.min(index);
-            max_suffix = max_suffix.max(index);
-        }
-
         let mut fdl = FullyDenseLeaf::zeroed();
 
-        fdl.init_wrapper(self.lower_fence(), self.upper_fence_combined(), key_len, val_len);
 
-        let ref_base = fdl.get_reference();
+        fdl.init_wrapper(self.lower_fence(), self.upper_fence_combined(), key_len+prefix_len, val_len)
+            .expect("FDL init_wrapper failed in promote()");
+
+
+
 
         for i in 0..count {
-            let key = self.heap_key(i);
+            let suffix = self.heap_key(i);
             let val = self.heap_val(i);
 
-            <FullyDenseLeaf as NodeStatic<'bm, BM>>::insert(&mut fdl, key, val)
-                .expect("FDL promote insert failed (should never happen)");
+            let mut full_key = Vec::with_capacity(self.common.prefix_len as usize + suffix.len());
+            full_key.extend_from_slice(self.prefix());
+            full_key.extend_from_slice(suffix);
+            fdl.force_insert::<BM::OlcEH>(full_key.as_slice(), val);
         }
-
 
         fdl
     }
@@ -417,5 +438,54 @@ impl HeapNode for HashLeaf {
 
     fn validate(&self) {
         self.validate();
+    }
+}
+
+impl Display for HashLeaf {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:#?}", self)
+    }
+}
+mod tests {
+    #[test]
+    fn test_fdl_promotion() {
+        use crate::Tree; // Adjust this import as per your crate/module layout
+        use crate::Page;
+        use umolc::SimpleBm;
+
+        const PAGE_COUNT: usize = 512;
+        let bm = SimpleBm::<Page>::new(PAGE_COUNT);
+        let tree = Tree::new(&bm);
+
+        let mut insert_key = |prefix: &[u8], i: u32| {
+            let mut key = prefix.to_vec();
+            key.extend_from_slice(&i.to_be_bytes()); // or to_le_bytes(), depending on FDL expectation
+            let value = 80085u64.to_le_bytes().to_vec();
+            tree.insert(&key, &value);
+        };
+        for i in 0..=100 {
+            insert_key(b"Test", i);
+        }
+        for i in 900..=999 {
+            insert_key(b"Test", i);
+        }
+        for i in 100..=300 {
+            insert_key(b"Test", i);
+        }
+
+        for i in 600..=900 {
+            insert_key(b"Test", i);
+        }
+
+        for i in 300..=600 {
+            insert_key(b"Test", i);
+        }
+
+        for i in 0..999 {
+            match tree.remove(&format!("Test{0:3}", i).into_bytes()) {
+                Some(_) => {}
+                None => panic!("Failed to remove Test{:03}", i),
+            }
+        }
     }
 }

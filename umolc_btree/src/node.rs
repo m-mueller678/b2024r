@@ -97,12 +97,14 @@ pub enum PromoteError {
     Keys,
     Capacity,
     Node,
+    Fences,
 }
 
 impl fmt::Display for PromoteError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         use PromoteError::*;
         let msg = match self {
+            Fences => "Not all fences exist.",
             Keys => "Not all keys share the same prefix.",
             ValueLen => "Not all values have the same length.",
             Capacity => "Dense capacity exceeds limit.",
@@ -435,7 +437,7 @@ pub fn insert_upper_sibling<'bm, BM: BufferManager<'bm, Page = Page>>(
 
 macro_rules! invoke_all_nodes {
     ($m:ident) => {
-        $m!(BasicInner, BasicLeaf, HashLeaf, MetadataPage)
+        $m!(BasicInner, BasicLeaf, HashLeaf, MetadataPage, FullyDenseLeaf)
     };
 }
 
