@@ -417,7 +417,7 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>, V: NodeKind> NodeDynamic<'bm, BM>
     }
 
 
-    fn promote(&mut self, _to: u8, _bm: BM) {
+    fn promote(&mut self, _to: u8) {
         unreachable!()
     }
 }

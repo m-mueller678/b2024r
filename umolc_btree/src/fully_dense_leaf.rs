@@ -318,8 +318,6 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeStatic<'bm, BM> for FullyDens
                 Ok(if was_present { Some(()) } else { None })
             }
             Resolution::Convert => {
-                unimplemented!();
-                //TODO: Why are we using a Basic Leaf here? Why no hash leaf?
                 let mut tmp: BasicLeaf = BasicLeaf::zeroed();
                 NodeStatic::<BM>::init(&mut tmp, self.lower_fence(), self.upper_fence_combined(), None);
                 assert!(self.key_len as usize <= MAX_KEY_SIZE);
@@ -336,8 +334,11 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeStatic<'bm, BM> for FullyDens
                     tmp.insert_pre_allocated_slot(sparse_index, &key_buf[key_slice_start..], self.val(dense_index));
                 }
                 tmp.update_hints(0, self.common.count as usize, 0);
-                let ret = NodeStatic::<BM>::insert(&mut tmp, key, val);
                 *self.as_page_mut() = tmp.copy_page();
+                //self.as_page_mut().as_dyn_node_mut::<BM>().promote(node_tag::BASIC_LEAF);
+
+                // this insertion should work after copying over. We need to seperate it out for the promotion logic
+                let ret = NodeStatic::<BM>::insert(self, key, val);
                 debug_assert!(ret.is_ok());
                 ret
             }
@@ -498,8 +499,32 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeDynamic<'bm, BM> for FullyDen
         }
     }
 
-    fn promote(&mut self, _to: u8, _bm: BM) {
-        unimplemented!()
+    fn promote(&mut self, to: u8) {
+        match to {
+            node_tag::BASIC_LEAF => {
+                let mut tmp: BasicLeaf = BasicLeaf::zeroed();
+                NodeStatic::<BM>::init(&mut tmp, self.lower_fence(), self.upper_fence_combined(), None);
+                assert!(self.key_len as usize <= MAX_KEY_SIZE);
+                let mut key_buf = ArrayVec::<u8, { MAX_KEY_SIZE }>::new();
+                let nnp_len = self.key_len.saturating_sub(4) as usize;
+                key_buf.try_extend_from_slice(&self.lower_fence()[..nnp_len]).unwrap();
+                let key_slice_start = 4usize.saturating_sub(self.key_len as usize);
+                key_buf.try_extend_from_slice(&[0, 0, 0, 0]).unwrap();
+                for (sparse_index, dense_index) in
+                    Self::iter_key_indices(self.capacity as usize, |x| self.read_unaligned::<u64>(x)).enumerate()
+                {
+
+                    //TODO: so it compiles for now
+                    let index: usize = 0;
+                    let numeric_part = self.reference + index as u32;
+                    key_buf[nnp_len..].copy_from_slice(&numeric_part.to_be_bytes());
+                    tmp.insert_pre_allocated_slot(sparse_index, &key_buf[key_slice_start..], self.val(dense_index));
+                }
+                tmp.update_hints(0, self.common.count as usize, 0);
+                *self.as_page_mut() = tmp.copy_page();
+            },
+            _ => unimplemented!(),
+        }
     }
 }
 

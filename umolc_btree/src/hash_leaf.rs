@@ -390,7 +390,7 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeDynamic<'bm, BM> for HashLeaf
         }
     }
 
-    fn promote(&mut self, to: u8, _bm: BM) {
+    fn promote(&mut self, to: u8) {
         match to {
             node_tag::FULLY_DENSE_LEAF => {
 

@@ -156,7 +156,7 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> Tree<'bm, BM> {
                 if can_promote.is_ok() {
 
                     println!("Parent: {:?}", parent.as_dyn_node::<BM>());
-                    node.as_dyn_node_mut::<BM>().promote(node_tag::FULLY_DENSE_LEAF, self.bm);
+                    node.as_dyn_node_mut::<BM>().promote(node_tag::FULLY_DENSE_LEAF);
                     println!("Yo, the cast into a page worked!");
 
 
@@ -300,7 +300,7 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeDynamic<'bm, BM> for Metadata
         unimplemented!()
     }
 
-    fn promote(&mut self, _to: u8, _bm: BM) {
+    fn promote(&mut self, _to: u8) {
         unimplemented!()
     }
 }
