@@ -259,9 +259,9 @@ pub trait NodeDynamic<'bm, BM: BufferManager<'bm, Page = Page>>: ToFromPage + No
     fn validate(&self);
     fn leaf_remove(&mut self, k: &[u8]) -> Option<()>;
 
-    fn can_promote(&self) -> Result<(), PromoteError>;
+    fn can_promote(&self, to: u8) -> Result<(), PromoteError>;
 
-    fn promote(&self, bm: BM) -> FullyDenseLeaf;
+    fn promote(&mut self, to: u8, bm: BM);
 }
 
 pub trait NodeDynamicAuto<'bm, BM: BufferManager<'bm, Page = Page>> {

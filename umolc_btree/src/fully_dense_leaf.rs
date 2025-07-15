@@ -1,21 +1,24 @@
-use crate::basic_node::{BasicLeaf, BasicNode};
+use crate::basic_node::BasicLeaf;
 use crate::fully_dense_leaf::insert_resolver::{resolve, Resolution};
+use crate::hash_leaf::HashLeaf;
 use crate::heap_node::HeapNode;
-use crate::hash_leaf::{HashLeaf};
-use crate::key_source::{common_prefix, HeadSourceSlice, SourceSlice, SourceSlicePair, ZeroKey};
-use crate::node::{insert_upper_sibling, node_tag, CommonNodeHead, DebugNode, NodeDynamic, NodeDynamicAuto, NodeStatic, PromoteError, ToFromPageExt, PAGE_SIZE};
+use crate::key_source::{HeadSourceSlice, SourceSlice, SourceSlicePair, ZeroKey};
+use crate::node::PromoteError::Node;
+use crate::node::{
+    insert_upper_sibling, node_tag, CommonNodeHead, NodeDynamic, NodeDynamicAuto, NodeStatic, PromoteError,
+    ToFromPageExt, PAGE_SIZE,
+};
 use crate::{define_node, Page, MAX_KEY_SIZE};
 use arrayvec::ArrayVec;
+use bstr::{BStr, BString};
 use bytemuck::Zeroable;
+use indxvec::Printing;
+use itertools::Itertools;
 use std::cell::Cell;
 use std::fmt::{Debug, Display, Formatter};
 use std::mem::{offset_of, MaybeUninit};
 use std::usize;
-use bstr::{BStr, BString};
-use indxvec::Printing;
-use itertools::Itertools;
 use umolc::{o_project, BufferManager, OPtr, OlcErrorHandler, PageId};
-use crate::node::PromoteError::Node;
 
 define_node! {
     pub struct FullyDenseLeaf {
@@ -33,12 +36,11 @@ const SPLIT_MODE_HIGH: u8 = 0;
 const SPLIT_MODE_HALF: u8 = 1;
 
 impl FullyDenseLeaf {
-
     pub fn into_page(self) -> Page {
         unsafe { std::mem::transmute(self) }
     }
 
-    pub fn get_capacity_fdl(lf_len: usize, uf_len: usize, key_len: usize, val_len: usize) -> usize{
+    pub fn get_capacity_fdl(lf_len: usize, uf_len: usize, key_len: usize, val_len: usize) -> usize {
         let header_size = size_of::<CommonNodeHead>() + 2 + 2 + 2 + 4 + 1;
         let space = PAGE_SIZE - header_size - lf_len - uf_len;
         let mut capacity = space * 8 / (val_len * 8 + 1);
@@ -52,7 +54,6 @@ impl FullyDenseLeaf {
     pub fn get_reference(&self) -> u32 {
         self.reference
     }
-
 
     // may optimistic fail if key outside fence range
     // otherwise returns Err(()) if length mismatch or nnp mismatch
@@ -101,15 +102,12 @@ impl FullyDenseLeaf {
         capacity.div_ceil(64)
     }
 
-
     fn first_val_start(&self, capacity: usize) -> usize {
         offset_of!(Self, _data) + Self::bitmap_u64_count(capacity) * 8
     }
 
-
     pub fn force_insert<O: OlcErrorHandler>(&mut self, key: &[u8], val: &[u8]) {
-        let index = Self::key_to_index::<O>(unsafe { OPtr::from_ref(self) }, key)
-            .expect("Index computation failed");
+        let index = Self::key_to_index::<O>(unsafe { OPtr::from_ref(self) }, key).expect("Index computation failed");
 
         let was_present = self.set_bit::<true>(index);
         self.common.count += (!was_present) as u16;
@@ -137,9 +135,7 @@ impl FullyDenseLeaf {
     fn get_bit_direct(&self, i: usize) -> bool {
         let mask: u8 = 1 << (i % 8);
         let byte_index = i / 8;
-        let byte_ptr = unsafe {
-            std::slice::from_raw_parts(self._data.as_ptr() as *const u8, self._data.len() * 2)
-        };
+        let byte_ptr = unsafe { std::slice::from_raw_parts(self._data.as_ptr() as *const u8, self._data.len() * 2) };
         byte_ptr[byte_index] & mask != 0
     }
 
@@ -155,8 +151,18 @@ impl FullyDenseLeaf {
         ret
     }
 
-    pub fn init_wrapper(&mut self, lf: impl SourceSlice, uf: impl SourceSlice, key_len: usize, val_len: usize) -> Result<(), ()> {
-        println!("Called with arguments: lf: {:?}, uf: {:?}, key_len: {key_len}, val_len: {val_len}", lf.to_vec(), uf.to_vec());
+    pub fn init_wrapper(
+        &mut self,
+        lf: impl SourceSlice,
+        uf: impl SourceSlice,
+        key_len: usize,
+        val_len: usize,
+    ) -> Result<(), ()> {
+        println!(
+            "Called with arguments: lf: {:?}, uf: {:?}, key_len: {key_len}, val_len: {val_len}",
+            lf.to_vec(),
+            uf.to_vec()
+        );
         self.init(lf, uf, key_len, val_len)
     }
 
@@ -252,24 +258,6 @@ impl FullyDenseLeaf {
     ) -> Result<(), ()> {
         todo!()
     }
-
-
-    fn can_demote(&self) -> bool {
-        let data_bytes = HashLeaf::get_hash_leaf_data_size();
-        let count = self.common.count as usize;
-
-        let key_len = self.key_len as usize;
-        let val_len = self.val_len as usize;
-
-        let reserved_slots = count.next_multiple_of(8);
-        let slot_bytes = reserved_slots * 2;
-        let hash_bytes = count;
-        let heap_bytes = count * (8+key_len+val_len);
-        let required_bytes = slot_bytes + hash_bytes + heap_bytes;
-
-        required_bytes <= data_bytes
-    }
-
 }
 
 impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeStatic<'bm, BM> for FullyDenseLeaf {
@@ -289,7 +277,8 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeStatic<'bm, BM> for FullyDens
                 let old_heap_size = transfer_count
                     * (BasicLeaf::KEY_OFFSET + (self.key_len as usize).saturating_sub(4) + self.val_len as usize);
                 let fence_size = self.common.lower_fence_len as usize + self.common.upper_fence_len as usize;
-                let result = BasicLeaf::heap_start_min(transfer_count + 1) + old_heap_size + new_heap_size + fence_size <= PAGE_SIZE;
+                let result = BasicLeaf::heap_start_min(transfer_count + 1) + old_heap_size + new_heap_size + fence_size
+                    <= PAGE_SIZE;
                 //println!("can_convert {:?}", result);
                 result
             },
@@ -356,9 +345,7 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeStatic<'bm, BM> for FullyDens
                 self.split_mode = SPLIT_MODE_HALF;
                 Err(())
             }
-            Resolution::SplitHigh => {
-                Err(())
-            },
+            Resolution::SplitHigh => Err(()),
         }
     }
 
@@ -415,10 +402,8 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeDynamic<'bm, BM> for FullyDen
             x => panic!("bad split mode {x}"),
         };
 
-
         // TODO: The uninit array is declared at length 512, but the assertion in write_to_uninit will fail because of that. Change the assert or switch from uninit
         let mut sep_key_buffer: [MaybeUninit<u8>; 512] = unsafe { MaybeUninit::uninit().assume_init() };
-
 
         let sep_key = &*self.key_from_numeric_part(split_at).write_to_uninit(&mut sep_key_buffer);
         let mut right = insert_upper_sibling(parent, bm, sep_key)?;
@@ -441,14 +426,12 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeDynamic<'bm, BM> for FullyDen
         Ok(())
     }
 
-
     fn merge(&mut self, right: &mut Page) {
-        if(right.common.tag == node_tag::FULLY_DENSE_LEAF) {
+        if (right.common.tag == node_tag::FULLY_DENSE_LEAF) {
             // check if highest value would fit into current capacity
 
             // otherwise check if you can demote both values
-        }
-        else {
+        } else {
             // demote own node
         }
         todo!()
@@ -457,7 +440,6 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeDynamic<'bm, BM> for FullyDen
     fn validate(&self) {
         assert!(self.key_len >= 4, "Bad key length");
         assert!(self.val_len > 0, "Bad val length");
-
 
         let val_len = self.val_len as usize;
         let space = PAGE_SIZE
@@ -470,7 +452,6 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeDynamic<'bm, BM> for FullyDen
             capacity -= 1;
         }
         assert_eq!(capacity, self.capacity as usize, "Bad capacity");
-
 
         let mut count = 0;
         for i in 0..capacity {
@@ -493,11 +474,31 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeDynamic<'bm, BM> for FullyDen
         }
     }
 
-    fn can_promote(&self) -> Result<(), PromoteError> {
-        Err(Node)
+    fn can_promote(&self, to: u8) -> Result<(), PromoteError> {
+        match to {
+            node_tag::HASH_LEAF => {
+                let data_bytes = HashLeaf::get_hash_leaf_data_size();
+                let count = self.common.count as usize;
+
+                let key_len = self.key_len as usize;
+                let val_len = self.val_len as usize;
+
+                let reserved_slots = count.next_multiple_of(8);
+                let slot_bytes = reserved_slots * 2;
+                let hash_bytes = count;
+                let heap_bytes = count * (8 + key_len + val_len);
+                let required_bytes = slot_bytes + hash_bytes + heap_bytes;
+
+                if required_bytes > data_bytes {
+                    return Err(PromoteError::Capacity);
+                }
+                Ok(())
+            }
+            _ => Err(Node),
+        }
     }
 
-    fn promote(&self, bm: BM) -> FullyDenseLeaf {
+    fn promote(&mut self, to: u8, bm: BM) {
         unimplemented!()
     }
 }
@@ -512,13 +513,11 @@ impl Debug for FullyDenseLeaf {
         s.field("lf", &BStr::new(self.lower_fence()));
         s.field("uf", &BString::new(self.upper_fence_combined().to_vec()));
         let records_fmt =
-            (0..self.common.count as usize)
-                .filter(|&i| self.get_bit_direct(i))
-                .format_with(",\n", |i, f| {
-                    let val: &dyn Debug = &self.val(i);
-                    let key = self.key_from_numeric_part(self.reference + i as u32).to_vec().to_str();
-                    f(&mut format_args!("{i:4} -> key:{:?} , val: {:?}", key, val))
-                });
+            (0..self.common.count as usize).filter(|&i| self.get_bit_direct(i)).format_with(",\n", |i, f| {
+                let val: &dyn Debug = &self.val(i);
+                let key = self.key_from_numeric_part(self.reference + i as u32).to_vec().to_str();
+                f(&mut format_args!("{i:4} -> key:{:?} , val: {:?}", key, val))
+            });
         s.field("records", &format_args!("\n{}", records_fmt));
         s.finish()
     }

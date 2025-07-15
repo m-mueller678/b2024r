@@ -412,11 +412,12 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>, V: NodeKind> NodeDynamic<'bm, BM>
         self.remove::<BM::OlcEH>(k)
     }
 
-    fn can_promote(&self) -> Result<(), PromoteError> {
+    fn can_promote(&self, to: u8) -> Result<(), PromoteError> {
         Err(Node)
     }
 
-    fn promote(&self, bm: BM) -> FullyDenseLeaf {
+
+    fn promote(&mut self, to: u8, bm: BM) {
         unimplemented!()
     }
 }

@@ -145,7 +145,7 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> Tree<'bm, BM> {
                 self.ensure_parent_not_meta(&mut parent);
 
 
-                let can_promote = node.as_dyn_node::<BM>().can_promote();
+                let can_promote = node.as_dyn_node::<BM>().can_promote(node_tag::FULLY_DENSE_LEAF);
 
 
                 match &can_promote {
@@ -156,13 +156,9 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> Tree<'bm, BM> {
                 if can_promote.is_ok() {
 
                     println!("Parent: {:?}", parent.as_dyn_node::<BM>());
-                    let fdl = node.as_dyn_node::<BM>().promote(self.bm).into_page();
+                    node.as_dyn_node_mut::<BM>().promote(node_tag::FULLY_DENSE_LEAF, self.bm);
                     println!("Yo, the cast into a page worked!");
-                    let dst: *mut Page = &mut *node;
 
-                    unsafe {
-                        std::ptr::write(dst, fdl);
-                    }
 
                 }
 
@@ -300,11 +296,11 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeDynamic<'bm, BM> for Metadata
         todo!()
     }
 
-    fn can_promote(&self) -> Result<(), PromoteError> {
+    fn can_promote(&self, to: u8) -> Result<(), PromoteError> {
         unimplemented!()
     }
 
-    fn promote(&self, bm: BM) -> FullyDenseLeaf {
+    fn promote(&mut self, to: u8, bm: BM) {
         unimplemented!()
     }
 }

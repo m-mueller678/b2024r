@@ -302,121 +302,133 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeDynamic<'bm, BM> for HashLeaf
         Some(())
     }
 
-    fn can_promote(&self) -> Result<(), PromoteError> {
-        println!("Trying to promote");
-        let count = self.common.count as usize;
-        if count == 0 {
-            //panic!("A hashleaf was empty and should have been deleted");
-            return Err(Capacity);
+    fn can_promote(&self, to: u8) -> Result<(), PromoteError> {
+        match to {
+            node_tag::FULLY_DENSE_LEAF => {
+
+                println!("Trying to promote");
+                let count = self.common.count as usize;
+                if count == 0 {
+                    //panic!("A hashleaf was empty and should have been deleted");
+                    return Err(Capacity);
+                }
+
+                if self.lower_fence().is_empty() {
+                    return Err(PromoteError::Fences);
+                }
+
+                let first_key = self.heap_key(0);
+                let first_val = self.heap_val(0);
+                let last_key = self.heap_key(count - 1);
+
+                let key_len = first_key.len();
+                let val_len = first_val.len();
+                let prefix_len = self.common.prefix_len as usize;
+
+                let mut key_error: bool = false;
+                let mut val_error: bool = false;
+
+                for i in 0..count {
+                    let key = self.heap_key(i);
+                    let val = self.heap_val(i);
+
+                    if key.len()!= key_len {
+                        key_error = true;
+                    }
+
+                    if val.len() != val_len {
+                        val_error = true;
+                    }
+                }
+
+                // we don't return immediately but just here, in case there would be a hierachy of errors.
+                // if there is none, we can just remove these if-cases and return on finding an error.
+                if(key_error) {
+                    return Result::Err(Keys);
+                }
+                if val_error {
+                    return Result::Err(ValueLen);
+                }
+
+
+                let prefix = self.prefix();
+
+                let mut min_suffix = u32::MAX;
+                let mut max_suffix = 0;
+
+                for i in 0..count {
+                    let suffix = self.heap_key(i);
+
+
+                    let mut full_key = Vec::with_capacity(self.common.prefix_len as usize + suffix.len());
+                    full_key.extend_from_slice(self.prefix());
+                    full_key.extend_from_slice(suffix);
+
+                    let full_len = full_key.len();
+                    let numeric_slice = &full_key[full_len.saturating_sub(4)..];
+
+                    let mut padded = [0u8; 4];
+                    padded[..full_len.min(4)].copy_from_slice(&numeric_slice);
+
+                    let index = u32::from_be_bytes(padded.try_into().unwrap());
+
+                    min_suffix = min_suffix.min(index);
+                    max_suffix = max_suffix.max(index);
+                }
+                let area = max_suffix - min_suffix + 1;
+
+
+                if area as usize >
+                    FullyDenseLeaf::get_capacity_fdl(self.lower_fence().len(),
+                                                     self.upper_fence_tail().len(),
+                                                     first_key.len(),
+                                                     first_val.len()) {
+                    return Err(Capacity);
+
+                }
+
+
+                Ok(())
+            },
+            _ => Err(PromoteError::Node),
         }
-
-        if self.lower_fence().is_empty() {
-            return Err(PromoteError::Fences);
-        }
-
-        let first_key = self.heap_key(0);
-        let first_val = self.heap_val(0);
-        let last_key = self.heap_key(count - 1);
-
-        let key_len = first_key.len();
-        let val_len = first_val.len();
-        let prefix_len = self.common.prefix_len as usize;
-
-        let mut key_error: bool = false;
-        let mut val_error: bool = false;
-
-        for i in 0..count {
-            let key = self.heap_key(i);
-            let val = self.heap_val(i);
-
-            if key.len()!= key_len {
-                key_error = true;
-            }
-
-            if val.len() != val_len {
-                val_error = true;
-            }
-        }
-
-        // we don't return immediately but just here, in case there would be a hierachy of errors.
-        // if there is none, we can just remove these if-cases and return on finding an error.
-        if(key_error) {
-            return Result::Err(Keys);
-        }
-        if val_error {
-            return Result::Err(ValueLen);
-        }
-
-
-        let prefix = self.prefix();
-
-        let mut min_suffix = u32::MAX;
-        let mut max_suffix = 0;
-
-        for i in 0..count {
-            let suffix = self.heap_key(i);
-
-
-            let mut full_key = Vec::with_capacity(self.common.prefix_len as usize + suffix.len());
-            full_key.extend_from_slice(self.prefix());
-            full_key.extend_from_slice(suffix);
-
-            let full_len = full_key.len();
-            let numeric_slice = &full_key[full_len.saturating_sub(4)..];
-
-            let mut padded = [0u8; 4];
-            padded[..full_len.min(4)].copy_from_slice(&numeric_slice);
-
-            let index = u32::from_be_bytes(padded.try_into().unwrap());
-
-            min_suffix = min_suffix.min(index);
-            max_suffix = max_suffix.max(index);
-        }
-        let area = max_suffix - min_suffix + 1;
-
-
-        if area as usize >
-            FullyDenseLeaf::get_capacity_fdl(self.lower_fence().len(),
-                                             self.upper_fence_tail().len(),
-                                             first_key.len(),
-                                             first_val.len()) {
-            return Err(Capacity);
-
-        }
-
-
-        Ok(())
     }
 
-    fn promote(&self, bm: BM) -> FullyDenseLeaf {
-        let count = self.common.count as usize;
-        let prefix_len = self.common.prefix_len as usize;
+    fn promote(&mut self, to: u8, bm: BM) {
+        match to {
+            node_tag::FULLY_DENSE_LEAF => {
 
-        let first_key = self.heap_key(0);
-        let first_val = self.heap_val(0);
-        let key_len = first_key.len();
-        let val_len = first_val.len();
+                let count = self.common.count as usize;
+                let prefix_len = self.common.prefix_len as usize;
 
-        let mut fdl = FullyDenseLeaf::zeroed();
+                let first_key = self.heap_key(0);
+                let first_val = self.heap_val(0);
+                let key_len = first_key.len();
+                let val_len = first_val.len();
 
-
-        fdl.init_wrapper(self.lower_fence(), self.upper_fence_combined(), key_len+prefix_len, val_len)
-            .expect("FDL init_wrapper failed in promote()");
-
+                let mut fdl = FullyDenseLeaf::zeroed();
 
 
+                fdl.init_wrapper(self.lower_fence(), self.upper_fence_combined(), key_len+prefix_len, val_len)
+                    .expect("FDL init_wrapper failed in promote()");
 
-        for i in 0..count {
-            let suffix = self.heap_key(i);
-            let val = self.heap_val(i);
 
-            let mut full_key = Vec::with_capacity(self.common.prefix_len as usize + suffix.len());
-            full_key.extend_from_slice(self.prefix());
-            full_key.extend_from_slice(suffix);
-            fdl.force_insert::<BM::OlcEH>(full_key.as_slice(), val);
+
+
+                for i in 0..count {
+                    let suffix = self.heap_key(i);
+                    let val = self.heap_val(i);
+
+                    let mut full_key = Vec::with_capacity(self.common.prefix_len as usize + suffix.len());
+                    full_key.extend_from_slice(self.prefix());
+                    full_key.extend_from_slice(suffix);
+                    fdl.force_insert::<BM::OlcEH>(full_key.as_slice(), val);
+                }
+
+                *self.as_page_mut() = fdl.copy_page();
+            },
+            _=> unreachable!()
         }
-
-        fdl
     }
 }
 

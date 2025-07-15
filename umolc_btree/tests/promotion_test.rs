@@ -1,3 +1,5 @@
+use std::io::Read;
+use bstr::ByteSlice;
 use umolc_btree::{Page, Tree};
 
 #[test]
@@ -19,9 +21,12 @@ fn test_fdl_promotion() {
         }
         else {
             let res = tree.lookup_to_vec(&key);
-            assert_eq!(res, Some(value));
+            assert_eq!(res, Some(value), "Key is not present in HashMap");
             tree.remove(&key);
-            assert_eq!(tree.lookup_to_vec(&key), None);
+            let index_bytes: [u8; 4] = key[(b"Test").len()..].try_into().expect("Key does not contain valid u32 suffix");
+            let key_index = u32::from_be_bytes(index_bytes);
+            println!("Successfully removed key: {:?}", key_index);
+            assert_eq!(tree.lookup_to_vec(&key), None, "KKey is still present and hasn't been removed");
         }
     };
     for i in 0..=100 {
