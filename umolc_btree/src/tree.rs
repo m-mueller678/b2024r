@@ -139,7 +139,7 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> Tree<'bm, BM> {
                 parent.release_unchecked();
                 x
             }
-            Err((error)) => {
+            Err(error) => {
                 node.reset_written();
                 let mut parent = parent.upgrade();
                 self.ensure_parent_not_meta(&mut parent);
@@ -296,11 +296,11 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeDynamic<'bm, BM> for Metadata
         todo!()
     }
 
-    fn can_promote(&self, to: u8) -> Result<(), PromoteError> {
+    fn can_promote(&self, _to: u8) -> Result<(), PromoteError> {
         unimplemented!()
     }
 
-    fn promote(&mut self, to: u8, bm: BM) {
+    fn promote(&mut self, _to: u8, _bm: BM) {
         unimplemented!()
     }
 }

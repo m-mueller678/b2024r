@@ -319,11 +319,9 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeDynamic<'bm, BM> for HashLeaf
 
                 let first_key = self.heap_key(0);
                 let first_val = self.heap_val(0);
-                let last_key = self.heap_key(count - 1);
 
                 let key_len = first_key.len();
                 let val_len = first_val.len();
-                let prefix_len = self.common.prefix_len as usize;
 
                 let mut key_error: bool = false;
                 let mut val_error: bool = false;
@@ -351,7 +349,6 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeDynamic<'bm, BM> for HashLeaf
                 }
 
 
-                let prefix = self.prefix();
 
                 let mut min_suffix = u32::MAX;
                 let mut max_suffix = 0;
@@ -381,7 +378,6 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeDynamic<'bm, BM> for HashLeaf
                 if area as usize >
                     FullyDenseLeaf::get_capacity_fdl(self.lower_fence().len(),
                                                      self.upper_fence_tail().len(),
-                                                     first_key.len(),
                                                      first_val.len()) {
                     return Err(Capacity);
 
@@ -394,7 +390,7 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeDynamic<'bm, BM> for HashLeaf
         }
     }
 
-    fn promote(&mut self, to: u8, bm: BM) {
+    fn promote(&mut self, to: u8, _bm: BM) {
         match to {
             node_tag::FULLY_DENSE_LEAF => {
 

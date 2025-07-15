@@ -412,13 +412,13 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>, V: NodeKind> NodeDynamic<'bm, BM>
         self.remove::<BM::OlcEH>(k)
     }
 
-    fn can_promote(&self, to: u8) -> Result<(), PromoteError> {
+    fn can_promote(&self, _to: u8) -> Result<(), PromoteError> {
         Err(Node)
     }
 
 
-    fn promote(&mut self, to: u8, bm: BM) {
-        unimplemented!()
+    fn promote(&mut self, _to: u8, _bm: BM) {
+        unreachable!()
     }
 }
 

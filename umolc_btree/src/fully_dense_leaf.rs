@@ -40,7 +40,7 @@ impl FullyDenseLeaf {
         unsafe { std::mem::transmute(self) }
     }
 
-    pub fn get_capacity_fdl(lf_len: usize, uf_len: usize, key_len: usize, val_len: usize) -> usize {
+    pub fn get_capacity_fdl(lf_len: usize, uf_len: usize, val_len: usize) -> usize {
         let header_size = size_of::<CommonNodeHead>() + 2 + 2 + 2 + 4 + 1;
         let space = PAGE_SIZE - header_size - lf_len - uf_len;
         let mut capacity = space * 8 / (val_len * 8 + 1);
@@ -349,7 +349,7 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeStatic<'bm, BM> for FullyDens
         }
     }
 
-    fn init(&mut self, lf: impl SourceSlice, uf: impl SourceSlice, lower: Option<&[u8; 5]>) {
+    fn init(&mut self, _lf: impl SourceSlice, _uf: impl SourceSlice, _lower: Option<&[u8; 5]>) {
         unimplemented!()
     }
 
@@ -427,7 +427,7 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeDynamic<'bm, BM> for FullyDen
     }
 
     fn merge(&mut self, right: &mut Page) {
-        if (right.common.tag == node_tag::FULLY_DENSE_LEAF) {
+        if right.common.tag == node_tag::FULLY_DENSE_LEAF {
             // check if highest value would fit into current capacity
 
             // otherwise check if you can demote both values
@@ -498,7 +498,7 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeDynamic<'bm, BM> for FullyDen
         }
     }
 
-    fn promote(&mut self, to: u8, bm: BM) {
+    fn promote(&mut self, _to: u8, _bm: BM) {
         unimplemented!()
     }
 }
