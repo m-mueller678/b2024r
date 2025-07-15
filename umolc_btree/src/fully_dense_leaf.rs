@@ -330,6 +330,7 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeStatic<'bm, BM> for FullyDens
             }
             Resolution::Convert => {
                 unimplemented!();
+                //TODO: Why are we using a Basic Leaf here? Why no hash leaf?
                 let mut tmp: BasicLeaf = BasicLeaf::zeroed();
                 NodeStatic::<BM>::init(&mut tmp, self.lower_fence(), self.upper_fence_combined(), None);
                 assert!(self.key_len as usize <= MAX_KEY_SIZE);
@@ -352,12 +353,10 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeStatic<'bm, BM> for FullyDens
                 ret
             }
             Resolution::SplitHalf => {
-                unimplemented!();
                 self.split_mode = SPLIT_MODE_HALF;
                 Err(())
             }
             Resolution::SplitHigh => {
-                unimplemented!();
                 Err(())
             },
         }
