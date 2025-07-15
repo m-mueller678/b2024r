@@ -415,6 +415,8 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeDynamic<'bm, BM> for FullyDen
             x => panic!("bad split mode {x}"),
         };
 
+
+        // TODO: The uninit array is declared at length 512, but the assertion in write_to_uninit will fail because of that. Change the assert or switch from uninit
         let mut sep_key_buffer: [MaybeUninit<u8>; 512] = unsafe { MaybeUninit::uninit().assume_init() };
 
 

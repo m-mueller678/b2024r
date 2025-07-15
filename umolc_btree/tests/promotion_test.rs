@@ -1,4 +1,3 @@
-use indxvec::Printing;
 use umolc_btree::{Page, Tree};
 
 #[test]
