@@ -65,12 +65,8 @@ fn test_fdl_demotion() {
         let mut key = prefix.to_vec();
         key.extend_from_slice(&i.to_be_bytes());
         if !valid_length {
-            let correct_length = key.len();
             let tmp: u32 = 0;
-            key.extend_from_slice(tmp.to_le_bytes().as_slice());
-            let incorrect_length = key.len();
-
-            println!("Correct length: {}, incorrect length: {}", correct_length, incorrect_length);
+            key.extend_from_slice(&tmp.to_be_bytes().as_slice());
         }
         let value = 80085u64.to_le_bytes().to_vec();
         if(insert) {

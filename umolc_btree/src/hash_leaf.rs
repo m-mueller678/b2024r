@@ -326,6 +326,12 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeDynamic<'bm, BM> for HashLeaf
                 let mut key_error: bool = false;
                 let mut val_error: bool = false;
 
+
+                let prefix_len = self.prefix().len();
+                if key_len > 4 {
+                    return Result::Err(Keys);
+                }
+
                 for i in 0..count {
                     let key = self.heap_key(i);
                     let val = self.heap_val(i);
@@ -341,7 +347,7 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeDynamic<'bm, BM> for HashLeaf
 
                 // we don't return immediately but just here, in case there would be a hierachy of errors.
                 // if there is none, we can just remove these if-cases and return on finding an error.
-                if(key_error) {
+                if key_error {
                     return Result::Err(Keys);
                 }
                 if val_error {
@@ -391,6 +397,7 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeDynamic<'bm, BM> for HashLeaf
     }
 
     fn promote(&mut self, to: u8) {
+        println!("Promoting \n {self}");
         match to {
             node_tag::FULLY_DENSE_LEAF => {
 

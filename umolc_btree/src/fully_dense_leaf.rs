@@ -463,7 +463,6 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeDynamic<'bm, BM> for FullyDen
         match to {
             node_tag::HASH_LEAF => {
 
-                //TODO: This calculation cannot be correct. Fix it
                 let data_bytes = HashLeaf::get_hash_leaf_data_size();
                 let count = self.common.count as usize;
 
@@ -474,16 +473,21 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeDynamic<'bm, BM> for FullyDen
                 let reserved_slots = count.next_multiple_of(8);
                 let slot_bytes = reserved_slots * 2;
                 let hash_bytes = count;
-                let heap_bytes = count * (8 + key_len + val_len);
+
+                // key is only the offset, so it should be like max 400, so barely more than a byte in size.
+                // 2+2 are the lengths that we store in the hash leaf
+                let heap_bytes = count * (2 + 2 + key_len + val_len);
+
+
                 let required_bytes = slot_bytes + hash_bytes + heap_bytes;
 
-                println!("count: {count}, required_bytes: {required_bytes}, data_bytes: {data_bytes}, heap_bytes: {heap_bytes}, slot_bytes: {slot_bytes}, hash_bytes: {hash_bytes}, key_len: {key_len}, val_len: {val_len}");
+                //println!("count: {count}, required_bytes: {required_bytes}, data_bytes: {data_bytes}, heap_bytes: {heap_bytes}, slot_bytes: {slot_bytes}, hash_bytes: {hash_bytes}, key_len: {key_len}, val_len: {val_len}");
 
                 if required_bytes > data_bytes {
                     return Err(PromoteError::Capacity);
                 }
                 Ok(())
-            }
+            },
             /*
             node_tag::BASIC_LEAF => {
                 let new_heap_size = BasicLeaf::record_size_after_insert_map(key, val).unwrap();
@@ -498,7 +502,7 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeDynamic<'bm, BM> for FullyDen
                 else {
                     Err(PromoteError::Capacity)
                 }
-            }
+            },
              */
             _ => Err(Node),
         }
