@@ -36,7 +36,6 @@ fn resolve_eager(len_match: bool, fill: FillDegree, range: KeyRange) -> Resoluti
         (false, KeyRange::Coverable, FillDegree::Low | FillDegree::Mid) => Resolution::Convert,
     }
 }
-
 pub fn resolve(
     can_convert: impl FnOnce() -> bool,
     is_low: impl FnOnce() -> bool,
@@ -48,30 +47,41 @@ pub fn resolve(
     if len_is_ok {
         if nnp_is_ok() {
             if is_in_bounds() {
-                Resolution::Ok
+                return Resolution::Ok;
             } else {
-                if is_low() {
+                let is_low_result = is_low();
+                println!("🧪 resolve: len_is_ok=true, nnp_is_ok=true, is_in_bounds=false");
+                println!("    └─ is_low: {}", is_low_result);
+                return if is_low_result {
                     Resolution::Convert
                 } else {
                     Resolution::SplitHigh
-                }
+                };
             }
         } else {
-            if can_convert() {
+            let can_convert_result = can_convert();
+            println!("🧪 resolve: len_is_ok=true, nnp_is_ok=false");
+            println!("    └─ can_convert: {}", can_convert_result);
+            return if can_convert_result {
                 Resolution::Convert
             } else {
                 Resolution::SplitHigh
-            }
+            };
         }
     } else {
-        if bad_len_is_coverable() {
-            if can_convert() {
+        let bad_len_result = bad_len_is_coverable();
+        if bad_len_result {
+            let can_convert_result = can_convert();
+            println!("🧪 resolve: len_is_ok=false, bad_len_is_coverable=true");
+            println!("    └─ can_convert: {}", can_convert_result);
+            return if can_convert_result {
                 Resolution::Convert
             } else {
                 Resolution::SplitHalf
-            }
+            };
         } else {
-            Resolution::SplitHigh
+            println!("🧪 resolve: len_is_ok=false, bad_len_is_coverable=false");
+            return Resolution::SplitHigh;
         }
     }
 }

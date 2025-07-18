@@ -7,7 +7,7 @@ use crate::node::{node_tag, o_ptr_is_inner, o_ptr_lookup_inner, o_ptr_lookup_lea
 use crate::{define_node, MAX_KEY_SIZE, MAX_VAL_SIZE};
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use bytemuck::{Pod, Zeroable};
-use std::fmt::{Debug, Formatter};
+use std::fmt::{Binary, Debug, Formatter};
 use std::marker::PhantomData;
 use std::mem::{size_of, MaybeUninit};
 use indxvec::Printing;
@@ -154,10 +154,8 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> Tree<'bm, BM> {
                     Err(e) => println!("🥀 promotion failed: {:?}", e),
                 };
                 if can_promote.is_ok() {
-
-                    println!("Parent: {:?}", parent.as_dyn_node::<BM>());
                     node.as_dyn_node_mut::<BM>().promote(node_tag::FULLY_DENSE_LEAF);
-                    println!("Yo, the cast into a page worked!");
+
 
 
                 }

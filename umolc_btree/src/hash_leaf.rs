@@ -9,7 +9,7 @@ use crate::util::Supreme;
 use crate::fully_dense_leaf::FullyDenseLeaf;
 use crate::{define_node, Page};
 use arrayvec::ArrayVec;
-use bstr::{BStr, BString};
+use bstr::{BStr, BString, ByteSlice};
 use bytemuck::{Pod, Zeroable};
 use itertools::Itertools;
 use std::fmt::{Debug, Display, Formatter};
@@ -401,6 +401,7 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeDynamic<'bm, BM> for HashLeaf
                 let first_val = self.heap_val(0);
                 let key_len = first_key.len();
                 let val_len = first_val.len();
+
 
                 let mut fdl = FullyDenseLeaf::zeroed();
 

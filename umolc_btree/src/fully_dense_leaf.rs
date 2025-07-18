@@ -4,10 +4,7 @@ use crate::hash_leaf::HashLeaf;
 use crate::heap_node::HeapNode;
 use crate::key_source::{HeadSourceSlice, SourceSlice, SourceSlicePair, ZeroKey};
 use crate::node::PromoteError::Node;
-use crate::node::{
-    insert_upper_sibling, node_tag, CommonNodeHead, NodeDynamic, NodeDynamicAuto, NodeStatic, PromoteError,
-    ToFromPageExt, PAGE_SIZE,
-};
+use crate::node::{insert_upper_sibling, node_tag, page_cast_mut, CommonNodeHead, NodeDynamic, NodeDynamicAuto, NodeStatic, PromoteError, ToFromPageExt, PAGE_SIZE};
 use crate::{define_node, Page, MAX_KEY_SIZE};
 use arrayvec::ArrayVec;
 use bstr::{BStr, BString};
@@ -272,15 +269,7 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeStatic<'bm, BM> for FullyDens
         let mut index = Cell::new(usize::MAX);
         let resolution = resolve(
             || {
-                let new_heap_size = BasicLeaf::record_size_after_insert_map(key, val).unwrap();
-                let transfer_count = self.common.count as usize; // for simplicity assume that all existing keys will be transferred (none overwritten)
-                let old_heap_size = transfer_count
-                    * (BasicLeaf::KEY_OFFSET + (self.key_len as usize).saturating_sub(4) + self.val_len as usize);
-                let fence_size = self.common.lower_fence_len as usize + self.common.upper_fence_len as usize;
-                let result = BasicLeaf::heap_start_min(transfer_count + 1) + old_heap_size + new_heap_size + fence_size
-                    <= PAGE_SIZE;
-                //println!("can_convert {:?}", result);
-                result
+                (NodeDynamic::<BM>::can_promote)(self, node_tag::HASH_LEAF).is_ok()
             },
             || {
                 let result = self.common.count as usize * 4 <= self.capacity as usize;
@@ -308,7 +297,9 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeStatic<'bm, BM> for FullyDens
             },
             || index.get() < self.capacity as usize,
         );
-
+        if resolution != Resolution::Ok {
+            println!("Resolution: {:?}", resolution);
+        }
         let index = index.get();
         match resolution {
             Resolution::Ok => {
@@ -318,29 +309,21 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeStatic<'bm, BM> for FullyDens
                 Ok(if was_present { Some(()) } else { None })
             }
             Resolution::Convert => {
-                let mut tmp: BasicLeaf = BasicLeaf::zeroed();
-                NodeStatic::<BM>::init(&mut tmp, self.lower_fence(), self.upper_fence_combined(), None);
-                assert!(self.key_len as usize <= MAX_KEY_SIZE);
-                let mut key_buf = ArrayVec::<u8, { MAX_KEY_SIZE }>::new();
-                let nnp_len = self.key_len.saturating_sub(4) as usize;
-                key_buf.try_extend_from_slice(&self.lower_fence()[..nnp_len]).unwrap();
-                let key_slice_start = 4usize.saturating_sub(self.key_len as usize);
-                key_buf.try_extend_from_slice(&[0, 0, 0, 0]).unwrap();
-                for (sparse_index, dense_index) in
-                    Self::iter_key_indices(self.capacity as usize, |x| self.read_unaligned::<u64>(x)).enumerate()
-                {
-                    let numeric_part = self.reference + index as u32;
-                    key_buf[nnp_len..].copy_from_slice(&numeric_part.to_be_bytes());
-                    tmp.insert_pre_allocated_slot(sparse_index, &key_buf[key_slice_start..], self.val(dense_index));
-                }
-                tmp.update_hints(0, self.common.count as usize, 0);
-                *self.as_page_mut() = tmp.copy_page();
-                //self.as_page_mut().as_dyn_node_mut::<BM>().promote(node_tag::BASIC_LEAF);
+
+                println!("Converting to hash leaf");
+                NodeDynamic::<BM>::promote(self, node_tag::HASH_LEAF);
+
+                println!("Successfully promoted to {:?}", self.common.tag);
 
                 // this insertion should work after copying over. We need to seperate it out for the promotion logic
-                let ret = NodeStatic::<BM>::insert(self, key, val);
+
+
+                let hash_leaf = page_cast_mut::<FullyDenseLeaf, HashLeaf>(self);
+
+                let ret = NodeStatic::<BM>::insert(hash_leaf, key, val);
                 debug_assert!(ret.is_ok());
                 ret
+
             }
             Resolution::SplitHalf => {
                 self.split_mode = SPLIT_MODE_HALF;
@@ -469,6 +452,7 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeDynamic<'bm, BM> for FullyDen
             return None;
         }
         if self.set_bit::<false>(i) {
+            self.common.count -= 1;
             Some(())
         } else {
             None
@@ -478,8 +462,11 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeDynamic<'bm, BM> for FullyDen
     fn can_promote(&self, to: u8) -> Result<(), PromoteError> {
         match to {
             node_tag::HASH_LEAF => {
+
+                //TODO: This calculation cannot be correct. Fix it
                 let data_bytes = HashLeaf::get_hash_leaf_data_size();
                 let count = self.common.count as usize;
+
 
                 let key_len = self.key_len as usize;
                 let val_len = self.val_len as usize;
@@ -490,11 +477,29 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeDynamic<'bm, BM> for FullyDen
                 let heap_bytes = count * (8 + key_len + val_len);
                 let required_bytes = slot_bytes + hash_bytes + heap_bytes;
 
+                println!("count: {count}, required_bytes: {required_bytes}, data_bytes: {data_bytes}, heap_bytes: {heap_bytes}, slot_bytes: {slot_bytes}, hash_bytes: {hash_bytes}, key_len: {key_len}, val_len: {val_len}");
+
                 if required_bytes > data_bytes {
                     return Err(PromoteError::Capacity);
                 }
                 Ok(())
             }
+            /*
+            node_tag::BASIC_LEAF => {
+                let new_heap_size = BasicLeaf::record_size_after_insert_map(key, val).unwrap();
+                let transfer_count = self.common.count as usize; // for simplicity assume that all existing keys will be transferred (none overwritten)
+                let old_heap_size = transfer_count
+                    * (BasicLeaf::KEY_OFFSET + (self.key_len as usize).saturating_sub(4) + self.val_len as usize);
+                let fence_size = self.common.lower_fence_len as usize + self.common.upper_fence_len as usize;
+                if(BasicLeaf::heap_start_min(transfer_count + 1) + old_heap_size + new_heap_size + fence_size
+                    <= PAGE_SIZE) {
+                    Ok(())
+                }
+                else {
+                    Err(PromoteError::Capacity)
+                }
+            }
+             */
             _ => Err(Node),
         }
     }
@@ -516,11 +521,29 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeDynamic<'bm, BM> for FullyDen
 
                     //TODO: so it compiles for now
                     let index: usize = 0;
+
+
                     let numeric_part = self.reference + index as u32;
                     key_buf[nnp_len..].copy_from_slice(&numeric_part.to_be_bytes());
                     tmp.insert_pre_allocated_slot(sparse_index, &key_buf[key_slice_start..], self.val(dense_index));
                 }
                 tmp.update_hints(0, self.common.count as usize, 0);
+                *self.as_page_mut() = tmp.copy_page();
+            },
+            node_tag::HASH_LEAF => {
+                //println!("Self: {:?}", self);
+                let mut tmp: HashLeaf = HashLeaf::zeroed();
+                NodeStatic::<BM>::init(&mut tmp, self.lower_fence(), self.upper_fence_combined(), None);
+                for i in 0..self.capacity as usize {
+                    if self.get_bit_direct(i) {
+                        let val = self.val(i);
+                        let key = self.key_from_numeric_part(self.reference + i as u32);
+
+                        NodeStatic::<BM>::insert(&mut tmp, key.to_vec().as_slice(), val).unwrap();
+                    }
+
+                }
+                //println!("Temp {:?}", tmp);
                 *self.as_page_mut() = tmp.copy_page();
             },
             _ => unimplemented!(),
@@ -537,11 +560,13 @@ impl Debug for FullyDenseLeaf {
         fields!(self.common => count, lower_fence_len, upper_fence_len, prefix_len);
         s.field("lf", &BStr::new(self.lower_fence()));
         s.field("uf", &BString::new(self.upper_fence_combined().to_vec()));
+        let mut count = 0;
         let records_fmt =
-            (0..self.common.count as usize).filter(|&i| self.get_bit_direct(i)).format_with(",\n", |i, f| {
+            (0..self.capacity as usize).filter(|&i| self.get_bit_direct(i)).format_with(",\n", |i, f| {
                 let val: &dyn Debug = &self.val(i);
                 let key = self.key_from_numeric_part(self.reference + i as u32).to_vec().to_str();
-                f(&mut format_args!("{i:4} -> key:{:?} , val: {:?}", key, val))
+                count+=1;
+                f(&mut format_args!("{:?} - index:{i:4} -> key:{:?} , val: {:?}", count-1, key, val))
             });
         s.field("records", &format_args!("\n{}", records_fmt));
         s.finish()
