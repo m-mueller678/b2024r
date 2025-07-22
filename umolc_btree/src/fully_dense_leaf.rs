@@ -290,11 +290,6 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeStatic<'bm, BM> for FullyDens
                 //println!("nnp_is_ok: {:?}", result);
                 result
             },
-            || {
-                let last_key = self.key_from_numeric_part(self.reference.saturating_add(self.capacity as u32 - 1));
-                let first_impossible_key = last_key.join(&[0u8][..]);
-                SourceSlice::cmp(key, first_impossible_key).is_lt()
-            },
             || index.get() < self.capacity as usize,
         );
         if resolution != Resolution::Ok {
@@ -387,9 +382,14 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeDynamic<'bm, BM> for FullyDen
         };
 
         // TODO: The uninit array is declared at length 512, but the assertion in write_to_uninit will fail because of that. Change the assert or switch from uninit
+        let key_len = self.key_len as usize;
         let mut sep_key_buffer: [MaybeUninit<u8>; 512] = unsafe { MaybeUninit::uninit().assume_init() };
 
-        let sep_key = &*self.key_from_numeric_part(split_at).write_to_uninit(&mut sep_key_buffer);
+        let sep_key = &*self
+            .key_from_numeric_part(split_at)
+            .write_to_uninit(&mut sep_key_buffer[..key_len]);
+
+
         let mut right = insert_upper_sibling(parent, bm, sep_key)?;
         let right = right.cast_mut::<Self>();
         // sep_key has same length as key_len, so is a valid key in right

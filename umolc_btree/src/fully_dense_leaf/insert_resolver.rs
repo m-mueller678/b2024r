@@ -41,47 +41,40 @@ pub fn resolve(
     is_low: impl FnOnce() -> bool,
     len_is_ok: bool,
     nnp_is_ok: impl FnOnce() -> bool,
-    bad_len_is_coverable: impl FnOnce() -> bool,
     is_in_bounds: impl FnOnce() -> bool,
 ) -> Resolution {
     if len_is_ok {
         if nnp_is_ok() {
             if is_in_bounds() {
-                return Resolution::Ok;
+                Resolution::Ok
             } else {
                 let is_low_result = is_low();
                 println!("🧪 resolve: len_is_ok=true, nnp_is_ok=true, is_in_bounds=false");
                 println!("    └─ is_low: {}", is_low_result);
-                return if is_low_result {
+                if is_low_result {
                     Resolution::Convert
                 } else {
                     Resolution::SplitHigh
-                };
+                }
             }
         } else {
             let can_convert_result = can_convert();
             println!("🧪 resolve: len_is_ok=true, nnp_is_ok=false");
             println!("    └─ can_convert: {}", can_convert_result);
-            return if can_convert_result {
+            if can_convert_result {
                 Resolution::Convert
             } else {
                 Resolution::SplitHigh
-            };
+            }
         }
     } else {
-        let bad_len_result = bad_len_is_coverable();
-        if bad_len_result {
-            let can_convert_result = can_convert();
-            println!("🧪 resolve: len_is_ok=false, bad_len_is_coverable=true");
-            println!("    └─ can_convert: {}", can_convert_result);
-            return if can_convert_result {
-                Resolution::Convert
-            } else {
-                Resolution::SplitHalf
-            };
+        let can_convert_result = can_convert();
+        println!("🧪 resolve: len_is_ok=false, bad_len_is_coverable=true");
+        println!("    └─ can_convert: {}", can_convert_result);
+        if can_convert_result {
+            Resolution::Convert
         } else {
-            println!("🧪 resolve: len_is_ok=false, bad_len_is_coverable=false");
-            return Resolution::SplitHigh;
+            Resolution::SplitHalf
         }
     }
 }
@@ -102,10 +95,6 @@ fn fdl_resolver() {
                         assert!(len_match);
                         allow_bounds_check.set(allow_bounds_check.get() || range != KeyRange::OutsideNnp);
                         range != KeyRange::OutsideNnp
-                    },
-                    || {
-                        assert!(!len_match);
-                        range == KeyRange::Coverable
                     },
                     || {
                         assert!(allow_bounds_check.get());

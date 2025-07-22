@@ -303,6 +303,7 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeDynamic<'bm, BM> for HashLeaf
     }
 
     fn can_promote(&self, to: u8) -> Result<(), PromoteError> {
+        //println!("Self: {:?}", self);
         match to {
             node_tag::FULLY_DENSE_LEAF => {
 
@@ -329,6 +330,7 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeDynamic<'bm, BM> for HashLeaf
 
                 let prefix_len = self.prefix().len();
                 if key_len > 4 {
+                    println!("Key len is too long: {key_len}");
                     return Result::Err(Keys);
                 }
 
@@ -385,11 +387,12 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeDynamic<'bm, BM> for HashLeaf
                     FullyDenseLeaf::get_capacity_fdl(self.lower_fence().len(),
                                                      self.upper_fence_tail().len(),
                                                      first_val.len()) {
+                    println!("Area is too big: {area}");
                     return Err(Capacity);
 
                 }
 
-
+                println!("Can Promote!");
                 Ok(())
             },
             _ => Err(PromoteError::Node),
@@ -397,7 +400,6 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeDynamic<'bm, BM> for HashLeaf
     }
 
     fn promote(&mut self, to: u8) {
-        println!("Promoting \n {self}");
         match to {
             node_tag::FULLY_DENSE_LEAF => {
 
