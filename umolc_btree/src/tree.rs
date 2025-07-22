@@ -100,7 +100,7 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> Tree<'bm, BM> {
                 let mut node: BM::GuardX = node.upgrade();
                 let mut parent: BM::GuardX = parent.upgrade();
                 self.ensure_parent_not_meta(&mut parent);
-                if self.split_locked_node(&mut node, &mut parent).is_ok() {
+                if self.split_locked_node(&mut node, &mut parent, k).is_ok() {
                     None
                 } else {
                     Some(parent.page_id())
@@ -160,7 +160,7 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> Tree<'bm, BM> {
 
                 }
 
-                else if self.split_locked_node(&mut node, &mut parent).is_err() {
+                else if self.split_locked_node(&mut node, &mut parent, k).is_err() {
                     let parent_id = parent.page_id();
                     drop(parent);
                     drop(node);
@@ -194,10 +194,10 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> Tree<'bm, BM> {
         Some((node, val))
     }
 
-    fn split_locked_node(&self, node: &mut Page, parent: &mut Page) -> Result<(), ()> {
+    fn split_locked_node(&self, node: &mut Page, parent: &mut Page, key: &[u8]) -> Result<(), ()> {
         //TODO inline
         if node.common.count as usize > 1 {
-            node.as_dyn_node_mut().split(self.bm, parent.as_dyn_node_mut())
+            node.as_dyn_node_mut().split(self.bm, parent.as_dyn_node_mut(), key)
         } else {
             Ok(())
         }
@@ -280,7 +280,7 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeStatic<'bm, BM> for MetadataP
 }
 
 impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeDynamic<'bm, BM> for MetadataPage {
-    fn split(&mut self, _bm: BM, _parent: &mut dyn NodeDynamic<'bm, BM>) -> Result<(), ()> {
+    fn split(&mut self, _bm: BM, _parent: &mut dyn NodeDynamic<'bm, BM>, _key: &[u8]) -> Result<(), ()> {
         unimplemented!()
     }
 

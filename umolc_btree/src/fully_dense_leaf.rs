@@ -16,6 +16,7 @@ use std::fmt::{Debug, Display, Formatter};
 use std::mem::{offset_of, MaybeUninit};
 use std::usize;
 use umolc::{o_project, BufferManager, OPtr, OlcErrorHandler, PageId};
+use crate::fully_dense_leaf::insert_resolver::Resolution::SplitHigh;
 
 define_node! {
     pub struct FullyDenseLeaf {
@@ -147,6 +148,20 @@ impl FullyDenseLeaf {
         }
         ret
     }
+
+    fn set_upper_fence_tail(&mut self, key: &[u8]) {
+        let prefix_len = self.as_page().common.prefix_len as usize;
+        let tail = &key[prefix_len..];
+        let uf_len = tail.len();
+        self.as_page_mut().common.upper_fence_len = uf_len as u16;
+
+        let offset = size_of::<Self>()
+            - self.as_page().common.lower_fence_len as usize
+            - uf_len;
+
+        self.slice_mut::<u8>(offset, uf_len).copy_from_slice(tail);
+    }
+
 
     pub fn init_wrapper(
         &mut self,
@@ -365,7 +380,18 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeStatic<'bm, BM> for FullyDens
 }
 
 impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeDynamic<'bm, BM> for FullyDenseLeaf {
-    fn split(&mut self, bm: BM, parent: &mut dyn NodeDynamic<'bm, BM>) -> Result<(), ()> {
+    fn split(&mut self, bm: BM, parent: &mut dyn NodeDynamic<'bm, BM>, key: &[u8]) -> Result<(), ()> {
+        if self.split_mode == SPLIT_MODE_HIGH {
+
+            let mut right = insert_upper_sibling(parent, bm, key)?;
+            let right = right.cast_mut::<Self>();
+
+            right.init(key, self.upper_fence_combined(), (self.key_len as usize), (self.val_len as usize));
+            self.set_upper_fence_tail(key);
+
+            return Ok(())
+        }
+
         let split_at = match self.split_mode {
             SPLIT_MODE_HALF => {
                 Self::iter_key_indices(self.capacity as usize, |x| self.read_unaligned::<u64>(x))
@@ -374,27 +400,29 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeDynamic<'bm, BM> for FullyDen
                     .unwrap() as u32
                     + self.reference
             }
-            SPLIT_MODE_HIGH => match self.reference.checked_add(self.capacity as u32) {
-                Some(x) => x,
-                None => return self.split_at_wrap(bm, parent),
-            },
             x => panic!("bad split mode {x}"),
         };
 
-        // TODO: The uninit array is declared at length 512, but the assertion in write_to_uninit will fail because of that. Change the assert or switch from uninit
         let key_len = self.key_len as usize;
-        let mut sep_key_buffer: [MaybeUninit<u8>; 512] = unsafe { MaybeUninit::uninit().assume_init() };
 
-        let sep_key = &*self
-            .key_from_numeric_part(split_at)
-            .write_to_uninit(&mut sep_key_buffer[..key_len]);
+        let mut buffer = [0u8; 512];
+
+        let key_buf: &mut [u8] = &mut buffer[..key_len];
+
+        self.key_from_numeric_part(split_at).write_to(key_buf);
 
 
-        let mut right = insert_upper_sibling(parent, bm, sep_key)?;
+        let key_len = self.key_len as usize;
+        assert!(key_len <= 512, "key_len exceeds sep_key_buffer capacity");
+
+
+
+/*
+        let mut right = insert_upper_sibling(parent, bm, key_buf)?;
         let right = right.cast_mut::<Self>();
         // sep_key has same length as key_len, so is a valid key in right
-        right.init(sep_key, self.upper_fence_combined(), self.key_len as usize, self.val_len as usize).unwrap();
-        self.as_page_mut().init_upper_fence(sep_key);
+        right.init(key_buf, self.upper_fence_combined(), self.key_len as usize, self.val_len as usize).unwrap();
+        self.as_page_mut().init_upper_fence(key_buf);
         debug_assert!(self.common.upper_fence_len <= 4);
         let transfer_from_index = (split_at - self.reference) as usize;
         debug_assert!(right.reference == self.reference + self.capacity as u32);
@@ -406,7 +434,7 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeDynamic<'bm, BM> for FullyDen
                 self.common.count -= 1;
                 right.common.count += 1;
             }
-        }
+        }*/
         Ok(())
     }
 

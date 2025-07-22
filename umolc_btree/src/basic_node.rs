@@ -377,7 +377,7 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>, V: NodeKind> NodeDynamic<'bm, BM>
         *self = tmp;
     }
 
-    fn split(&mut self, bm: BM, parent: &mut dyn NodeDynamic<'bm, BM>) -> Result<(), ()> {
+    fn split(&mut self, bm: BM, parent: &mut dyn NodeDynamic<'bm, BM>, _key: &[u8]) -> Result<(), ()> {
         let mut left = BasicNode::<V>::zeroed();
         let count = self.common.count as usize;
         let (low_count, sep_key) = find_separator::<BM, _>(self, |i| self.key_combined(i));
@@ -541,7 +541,9 @@ mod tests {
             }
         }
         let s1 = n1.to_debug();
-        n1.split(bm, g2.as_dyn_node_mut()).unwrap();
+
+        // the basic node does not use this logic, so it is fine to do this. The Key value was implemented here as part of the splitting mechanism for FDLs
+        n1.split(bm, g2.as_dyn_node_mut(), (0 as usize).to_le_bytes().as_slice()).unwrap();
         g2.as_dyn_node_mut::<BM>().validate();
         let g2_debug = g2.as_dyn_node_mut::<BM>().to_debug();
         assert_eq!(g2_debug.keys.len(), 1);

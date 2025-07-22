@@ -1,8 +1,9 @@
+use bstr::ByteSlice;
 use umolc_btree::{Page, Tree};
 
 
 #[test]
-fn test_fdl_promotion() {
+fn fdl_promotion() {
     use crate::Tree;
     use crate::Page;
     use umolc::SimpleBm;
@@ -51,7 +52,7 @@ fn test_fdl_promotion() {
 }
 
 #[test]
-fn test_fdl_demotion() {
+fn fdl_demotion() {
     use crate::Tree;
     use crate::Page;
     use umolc::SimpleBm;
@@ -114,12 +115,12 @@ fn test_fdl_demotion() {
 
 
 #[test]
-fn test_fdl_split_high() {
+fn fdl_split_high() {
     use crate::Tree;
     use crate::Page;
     use umolc::SimpleBm;
 
-    const PAGE_COUNT: usize = 512;
+    const PAGE_COUNT: usize = 1024;
     let bm = SimpleBm::<Page>::new(PAGE_COUNT);
     let tree = Tree::new(&bm);
 
@@ -132,11 +133,11 @@ fn test_fdl_split_high() {
         }
         else {
             let res = tree.lookup_to_vec(&key);
-            assert_eq!(res, Some(value), "Key is not present in HashMap");
-            tree.remove(&key);
             let index_bytes: [u8; 4] = key[(b"Test").len()..].try_into().expect("Key does not contain valid u32 suffix");
             let key_index = u32::from_be_bytes(index_bytes);
-            assert_eq!(tree.lookup_to_vec(&key), None, "Key is still present and hasn't been removed");
+            assert_eq!(res, Some(value), "Key {key_index} is not present in HashMap");
+            tree.remove(&key);
+            assert_eq!(tree.lookup_to_vec(&key), None, "Key {key_index} is still present and hasn't been removed");
         }
     };
 
@@ -146,4 +147,62 @@ fn test_fdl_split_high() {
             insert_key(b"Test", (100*20*2) - (i * 20 + j), true);
         }
     }
+
+    for i in 0..4001 {
+        insert_key(b"Test", i, false);
+    }
 }
+
+#[test]
+fn fdl_split_half() {
+    use crate::Tree;
+    use crate::Page;
+    use umolc::SimpleBm;
+
+    const PAGE_COUNT: usize = 1024;
+    let bm = SimpleBm::<Page>::new(PAGE_COUNT);
+    let tree = Tree::new(&bm);
+
+    let mut insert_key = |prefix: &[u8], i: u32, insert: bool, correct_len: bool| {
+        let mut key = prefix.to_vec();
+        key.extend_from_slice(&i.to_be_bytes());
+
+        if !correct_len {
+            key.extend_from_slice("Test".as_bytes().iter().as_slice());
+        }
+
+        let value = 1860u64.to_le_bytes().to_vec();
+        if(insert) {
+            tree.insert(&key, &value);
+        }
+        else {
+            let res = tree.lookup_to_vec(&key);
+            let index_bytes: [u8; 4] = key[(b"Test").len()..].try_into().expect("Key does not contain valid u32 suffix");
+            let key_index = u32::from_be_bytes(index_bytes);
+            assert_eq!(res, Some(value), "Key {key_index} is not present in HashMap");
+            tree.remove(&key);
+            assert_eq!(tree.lookup_to_vec(&key), None, "Key {key_index} is still present and hasn't been removed");
+        }
+    };
+
+    for i in 0..=60 {
+        for j in 0..=20 {
+            insert_key(b"Test", i * 20 + j, true, true );
+            insert_key(b"Test", (100*20*2) - (i * 20 + j), true, true);
+        }
+    }
+
+
+    for i in 0..60*20+1 {
+        insert_key(b"Test", i, true, false);
+    }
+
+    for i in 0..60*20+1 {
+        insert_key(b"Test", i, false, false);
+    }
+
+    for i in 0..60*20+1 {
+        insert_key(b"Test", i, false, false);
+    }
+}
+

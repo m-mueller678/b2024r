@@ -254,7 +254,7 @@ pub trait NodeStatic<'bm, BM: BufferManager<'bm, Page = Page>>: NodeDynamic<'bm,
 pub trait NodeDynamic<'bm, BM: BufferManager<'bm, Page = Page>>: ToFromPage + NodeDynamicAuto<'bm, BM> + Debug {
     /// fails iff parent_insert fails.
     /// if node is near empty, no split is performed and parent_insert is not called.
-    fn split(&mut self, bm: BM, parent: &mut dyn NodeDynamic<'bm, BM>) -> Result<(), ()>;
+    fn split(&mut self, bm: BM, parent: &mut dyn NodeDynamic<'bm, BM>, key: &[u8]) -> Result<(), ()>;
     fn merge(&mut self, right: &mut Page);
     fn validate(&self);
     fn leaf_remove(&mut self, k: &[u8]) -> Option<()>;
