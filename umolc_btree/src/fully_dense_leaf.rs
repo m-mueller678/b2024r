@@ -107,7 +107,7 @@ impl FullyDenseLeaf {
     pub fn force_insert<O: OlcErrorHandler>(&mut self, key: &[u8], val: &[u8]) {
         let index = Self::key_to_index::<O>(unsafe { OPtr::from_ref(self) }, key).expect("Index computation failed");
 
-        let was_present = self.set_bit::<true>(index);
+        let was_present = self.set_bit::<true>(index, false);
         self.common.count += (!was_present) as u16;
         self.val_mut(index).copy_from_slice(val);
     }
@@ -137,8 +137,9 @@ impl FullyDenseLeaf {
         byte_ptr[byte_index] & mask != 0
     }
 
-    fn set_bit<const SET: bool>(&mut self, i: usize) -> bool {
-        debug_assert!(i < self.capacity as usize, "{i}");
+    // boolean ignores the debug_assert which needs to be done in split and other operations
+    fn set_bit<const SET: bool>(&mut self, i: usize, ignore: bool) -> bool {
+        debug_assert!(i < self.capacity as usize || ignore, "{i}");
         let mask = 1 << (i % 8);
         let ret = self._data[i / 8] & mask != 0;
         if SET {
@@ -313,7 +314,7 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeStatic<'bm, BM> for FullyDens
         let index = index.get();
         match resolution {
             Resolution::Ok => {
-                let was_present = self.set_bit::<true>(index);
+                let was_present = self.set_bit::<true>(index, false);
                 self.common.count += (!was_present) as u16;
                 self.val_mut(index).copy_from_slice(val);
                 Ok(if was_present { Some(()) } else { None })
@@ -385,56 +386,74 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeDynamic<'bm, BM> for FullyDen
 
             let mut right = insert_upper_sibling(parent, bm, key)?;
             let right = right.cast_mut::<Self>();
-
             right.init(key, self.upper_fence_combined(), (self.key_len as usize), (self.val_len as usize));
             self.set_upper_fence_tail(key);
 
             return Ok(())
         }
 
-        let split_at = match self.split_mode {
-            SPLIT_MODE_HALF => {
-                Self::iter_key_indices(self.capacity as usize, |x| self.read_unaligned::<u64>(x))
-                    .skip(self.common.count as usize / 2)
-                    .next()
-                    .unwrap() as u32
-                    + self.reference
+        println!("Splitting {self}");
+
+        if self.split_mode != SPLIT_MODE_HALF {
+            unimplemented!();
+        }
+
+        // This is a more barebone method to using the iterator, but this makes it less prone to mistakes
+        let mut split_at = self.capacity as u32 / 2;
+        let mut count = 0;
+        for i in 0..self.capacity as usize {
+            if self.get_bit_direct(i) {
+                if count >= self.common.count as usize / 2 {
+                    split_at = i as u32;
+                    break;
+                }
+                count+=1;
             }
-            x => panic!("bad split mode {x}"),
+        }
+
+        let key_len = self.key_len as usize;
+
+
+        let mut sep_key_buf: [MaybeUninit<u8>; 512] = unsafe { MaybeUninit::uninit().assume_init() };
+        let sep_key: &[u8] = {
+            let initialized = self
+                .key_from_numeric_part(split_at + self.reference)
+                .write_to_uninit(&mut sep_key_buf[..key_len]);
+            initialized
         };
-
-        let key_len = self.key_len as usize;
-
-        let mut buffer = [0u8; 512];
-
-        let key_buf: &mut [u8] = &mut buffer[..key_len];
-
-        self.key_from_numeric_part(split_at).write_to(key_buf);
-
-
-        let key_len = self.key_len as usize;
-        assert!(key_len <= 512, "key_len exceeds sep_key_buffer capacity");
-
-
-
-/*
-        let mut right = insert_upper_sibling(parent, bm, key_buf)?;
+        let mut right = insert_upper_sibling(parent, bm, sep_key)?;
         let right = right.cast_mut::<Self>();
+
         // sep_key has same length as key_len, so is a valid key in right
-        right.init(key_buf, self.upper_fence_combined(), self.key_len as usize, self.val_len as usize).unwrap();
-        self.as_page_mut().init_upper_fence(key_buf);
+        right.init(sep_key, self.upper_fence_combined(), self.key_len as usize, self.val_len as usize).unwrap();
+        self.as_page_mut().init_upper_fence(sep_key);
+
+        let old_capacity = self.capacity as usize;
+        let old_count = self.common.count;
+
+        self.capacity = split_at as u16;
+        right.capacity = old_capacity as u16 - split_at as u16;
+        self.common.count = count as u16;
+
+
+        debug_assert!(self.capacity as usize + right.capacity as usize == old_capacity, "Capacities don't add up: {:?} + {:?} != {old_capacity}", self.capacity, right.capacity);
         debug_assert!(self.common.upper_fence_len <= 4);
-        let transfer_from_index = (split_at - self.reference) as usize;
-        debug_assert!(right.reference == self.reference + self.capacity as u32);
-        for i in transfer_from_index..self.capacity as usize {
-            if self.set_bit::<false>(i) {
-                let ri = i - self.capacity as usize;
-                right.set_bit::<true>(ri);
+        debug_assert!(right.reference == self.reference + self.capacity as u32, "References do not match: {:?} + {:?} != {:?}", self.reference, self.capacity, right.reference);
+        for i in split_at as usize..old_capacity as usize {
+            if self.set_bit::<false>(i, true) {
+                let ri = i - count as usize;
+                right.set_bit::<true>(ri, false);
                 right.val_mut(ri).copy_from_slice(self.val(i));
-                self.common.count -= 1;
                 right.common.count += 1;
             }
-        }*/
+        }
+
+        debug_assert!(old_count == self.common.count + right.common.count, "Counts don't add up: {:?} + {:?} != {:?}", old_count, self.common.count, right.common.count);
+        self.capacity = split_at as u16;
+        println!("Splitted in half. New cacpacities are {:?} and {:?}", self.capacity, right.capacity);
+
+        println!("Self after Split: {self}");
+        println!("Right after Split: {right}");
         Ok(())
     }
 
@@ -479,7 +498,7 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeDynamic<'bm, BM> for FullyDen
         if i >= self.capacity as usize {
             return None;
         }
-        if self.set_bit::<false>(i) {
+        if self.set_bit::<false>(i, false) {
             self.common.count -= 1;
             Some(())
         } else {
@@ -512,6 +531,7 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeDynamic<'bm, BM> for FullyDen
                 //println!("count: {count}, required_bytes: {required_bytes}, data_bytes: {data_bytes}, heap_bytes: {heap_bytes}, slot_bytes: {slot_bytes}, hash_bytes: {hash_bytes}, key_len: {key_len}, val_len: {val_len}");
 
                 if required_bytes > data_bytes {
+                    println!("Required bytes: {required_bytes}, data bytes: {data_bytes}");
                     return Err(PromoteError::Capacity);
                 }
                 Ok(())
@@ -590,6 +610,8 @@ impl Debug for FullyDenseLeaf {
             ($base:expr => $($f:ident),*) => {$(s.field(std::stringify!($f),&$base.$f);)*};
         }
         fields!(self.common => count, lower_fence_len, upper_fence_len, prefix_len);
+        s.field(std::stringify!(self.key_len), &self.key_len);
+        s.field(std::stringify!(self.capacity), &self.capacity);
         s.field("lf", &BStr::new(self.lower_fence()));
         s.field("uf", &BString::new(self.upper_fence_combined().to_vec()));
         let mut count = 0;

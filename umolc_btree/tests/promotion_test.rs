@@ -15,7 +15,7 @@ fn fdl_promotion() {
     let mut insert_key = |prefix: &[u8], i: u32, insert: bool| {
         let mut key = prefix.to_vec();
         key.extend_from_slice(&i.to_be_bytes());
-        let value = 1860u64.to_le_bytes().to_vec();
+        let value = i.to_le_bytes().to_vec();
         if(insert) {
             tree.insert(&key, &value);
         }
@@ -68,7 +68,7 @@ fn fdl_demotion() {
             let tmp: u32 = 0;
             key.extend_from_slice(&tmp.to_be_bytes().as_slice());
         }
-        let value = 1860u64.to_le_bytes().to_vec();
+        let value = i.to_le_bytes().to_vec();
         if(insert) {
             tree.insert(&key, &value);
         }
@@ -127,7 +127,7 @@ fn fdl_split_high() {
     let mut insert_key = |prefix: &[u8], i: u32, insert: bool| {
         let mut key = prefix.to_vec();
         key.extend_from_slice(&i.to_be_bytes());
-        let value = 1860u64.to_le_bytes().to_vec();
+        let value = i.to_le_bytes().to_vec();
         if(insert) {
             tree.insert(&key, &value);
         }
@@ -171,17 +171,15 @@ fn fdl_split_half() {
             key.extend_from_slice("Test".as_bytes().iter().as_slice());
         }
 
-        let value = 1860u64.to_le_bytes().to_vec();
+        let value = i.to_le_bytes().to_vec();
         if(insert) {
             tree.insert(&key, &value);
         }
         else {
             let res = tree.lookup_to_vec(&key);
-            let index_bytes: [u8; 4] = key[(b"Test").len()..].try_into().expect("Key does not contain valid u32 suffix");
-            let key_index = u32::from_be_bytes(index_bytes);
-            assert_eq!(res, Some(value), "Key {key_index} is not present in HashMap");
+            assert_eq!(res, Some(value), "Key is not present in HashMap");
             tree.remove(&key);
-            assert_eq!(tree.lookup_to_vec(&key), None, "Key {key_index} is still present and hasn't been removed");
+            assert_eq!(tree.lookup_to_vec(&key), None, "Key is still present and hasn't been removed");
         }
     };
 
@@ -197,9 +195,7 @@ fn fdl_split_half() {
         insert_key(b"Test", i, true, false);
     }
 
-    for i in 0..60*20+1 {
-        insert_key(b"Test", i, false, false);
-    }
+
 
     for i in 0..60*20+1 {
         insert_key(b"Test", i, false, false);

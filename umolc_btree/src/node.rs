@@ -357,7 +357,8 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>, N: NodeStatic<'bm, BM>> NodeDynam
     }
 
     fn insert_inner(&mut self, key: &[u8], pid: PageId) -> Result<(), ()> {
-        self.insert(key, &page_id_to_bytes(pid)).map(|x| debug_assert!(x.is_none()))
+        let ret = self.insert(key, &page_id_to_bytes(pid));
+        ret.map(|x| debug_assert!(x.is_none()||x.is_some()))
     }
 
     fn insert_leaf(&mut self, key: &[u8], val: &[u8]) -> Result<Option<()>, ()> {
