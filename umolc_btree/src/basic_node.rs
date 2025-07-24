@@ -45,6 +45,10 @@ impl<V: NodeKind> BasicNode<V> {
         self.slice::<u8>(offset, PAGE_ID_LEN).try_into().unwrap()
     }
 
+    pub fn get_basic_node_data_size () -> usize {
+        BASIC_NODE_DATA_SIZE
+    }
+
     fn reserved_head_count(count: usize) -> usize {
         count.next_multiple_of(HEAD_RESERVATION)
     }
@@ -489,6 +493,11 @@ mod tests {
     #[test]
     fn test_basic_leaf() {
         test_leaf::<&'static SimpleBm<Page>, BasicLeaf>()
+    }
+
+    #[test]
+    fn test_fdl() {
+        test_leaf::<& 'static SimpleBm<Page>, BasicLeaf>()
     }
 
     #[test]

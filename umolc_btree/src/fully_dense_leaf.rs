@@ -1,10 +1,10 @@
-use crate::basic_node::BasicLeaf;
+use crate::basic_node::{BasicLeaf, BasicNode};
 use crate::fully_dense_leaf::insert_resolver::{resolve, Resolution};
 use crate::hash_leaf::HashLeaf;
 use crate::heap_node::HeapNode;
 use crate::key_source::{HeadSourceSlice, SourceSlice, SourceSlicePair, ZeroKey};
 use crate::node::PromoteError::Node;
-use crate::node::{insert_upper_sibling, node_tag, page_cast_mut, CommonNodeHead, NodeDynamic, NodeDynamicAuto, NodeStatic, PromoteError, ToFromPageExt, PAGE_SIZE};
+use crate::node::{insert_upper_sibling, node_tag, page_cast_mut, CommonNodeHead, KindLeaf, NodeDynamic, NodeDynamicAuto, NodeKind, NodeStatic, PromoteError, ToFromPageExt, PAGE_SIZE};
 use crate::{define_node, Page, MAX_KEY_SIZE};
 use arrayvec::ArrayVec;
 use bstr::{BStr, BString};
@@ -510,48 +510,43 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeDynamic<'bm, BM> for FullyDen
         match to {
             node_tag::HASH_LEAF => {
 
-                let data_bytes = HashLeaf::get_hash_leaf_data_size();
-                let count = self.common.count as usize;
+                    let data_bytes = HashLeaf::get_hash_leaf_data_size();
+                    let count = self.common.count as usize;
 
+
+                    let key_len = self.key_len as usize;
+                    let val_len = self.val_len as usize;
+
+                    let reserved_slots = count.next_multiple_of(8);
+                    let slot_bytes = reserved_slots * 2;
+                    let hash_bytes = count;
+
+                    // key is only the offset, so it should be like max 400, so barely more than a byte in size.
+                    // 2+2 are the lengths that we store in the hash leaf
+                    let heap_bytes = count * (2 + 2 + key_len + val_len);
+
+
+                    let required_bytes = slot_bytes + hash_bytes + heap_bytes;
+
+                    if required_bytes > data_bytes {
+                        return Err(PromoteError::Capacity);
+                    }
+                    Ok(())
+            },
+
+            node_tag::BASIC_LEAF => {
+                pub type BasicLeaf = BasicNode<KindLeaf>;
+                let data_bytes = BasicLeaf::get_basic_node_data_size();
+
+                let count = self.common.count as usize;
 
                 let key_len = self.key_len as usize;
                 let val_len = self.val_len as usize;
 
-                let reserved_slots = count.next_multiple_of(8);
-                let slot_bytes = reserved_slots * 2;
-                let hash_bytes = count;
 
-                // key is only the offset, so it should be like max 400, so barely more than a byte in size.
-                // 2+2 are the lengths that we store in the hash leaf
-                let heap_bytes = count * (2 + 2 + key_len + val_len);
-
-
-                let required_bytes = slot_bytes + hash_bytes + heap_bytes;
-
-                //println!("count: {count}, required_bytes: {required_bytes}, data_bytes: {data_bytes}, heap_bytes: {heap_bytes}, slot_bytes: {slot_bytes}, hash_bytes: {hash_bytes}, key_len: {key_len}, val_len: {val_len}");
-
-                if required_bytes > data_bytes {
-                    println!("Required bytes: {required_bytes}, data bytes: {data_bytes}");
-                    return Err(PromoteError::Capacity);
-                }
                 Ok(())
             },
-            /*
-            node_tag::BASIC_LEAF => {
-                let new_heap_size = BasicLeaf::record_size_after_insert_map(key, val).unwrap();
-                let transfer_count = self.common.count as usize; // for simplicity assume that all existing keys will be transferred (none overwritten)
-                let old_heap_size = transfer_count
-                    * (BasicLeaf::KEY_OFFSET + (self.key_len as usize).saturating_sub(4) + self.val_len as usize);
-                let fence_size = self.common.lower_fence_len as usize + self.common.upper_fence_len as usize;
-                if(BasicLeaf::heap_start_min(transfer_count + 1) + old_heap_size + new_heap_size + fence_size
-                    <= PAGE_SIZE) {
-                    Ok(())
-                }
-                else {
-                    Err(PromoteError::Capacity)
-                }
-            },
-             */
+
             _ => Err(Node),
         }
     }
@@ -634,3 +629,65 @@ impl Display for FullyDenseLeaf {
 }
 
 mod insert_resolver;
+
+mod test {
+    use std::collections::HashSet;
+    use bytemuck::Zeroable;
+    use umolc::{BufferManager, OPtr, SimpleBm};
+    use crate::basic_node::{BasicInner, BasicLeaf};
+    use crate::fully_dense_leaf::FullyDenseLeaf;
+    use crate::hash_leaf::HashLeaf;
+    use crate::key_source::SourceSlice;
+    use crate::node::{
+        page_id_from_bytes, page_id_to_bytes, NodeDynamic, NodeStatic, Page, ToFromPageExt, PAGE_ID_LEN,
+    };
+
+    type BM<'a> = &'a SimpleBm<Page>;
+
+
+
+    #[allow(clippy::unused_enumerate_index)]
+    fn test_leaf<'bm, BM: BufferManager<'bm, Page = Page>, N: NodeStatic<'bm, BM>>() {
+        let mut page = Page::zeroed();
+        let mut leaf = page.cast_mut::<FullyDenseLeaf>();
+        leaf =& mut FullyDenseLeaf::zeroed();
+
+        let base = b"Test".as_slice();
+        let mut lowerfence =  base.clone().to_vec();
+        lowerfence.extend_from_slice((0 as u32).to_le_bytes().as_slice());
+        let mut upperfence = base.clone().to_vec();
+        upperfence.extend_from_slice((400 as u32).to_le_bytes().as_slice());
+
+        let key_len: usize = 8;
+        let val_len : usize  = 4;
+
+        leaf.init_wrapper(lowerfence.as_slice(), upperfence.as_slice(), key_len, val_len);
+
+        let mut count = 0;
+        for i in 0..500 {
+            let u : u32 = i;
+            let mut key = b"Test".as_slice().to_vec();
+            key.extend_from_slice(&u.to_le_bytes().as_slice());
+            let res = NodeStatic::<BM>::insert(&mut leaf, key.as_slice(), u.to_le_bytes().as_slice());
+            if res.is_err() {
+                count = i;
+                println!("Fits {count} values.")
+            }
+
+        }
+
+
+    }
+
+    #[test]
+    fn basic_leaf_demotion() {
+        test_leaf::<&'static SimpleBm<Page>, BasicLeaf>()
+    }
+
+
+    #[test]
+    fn hash_leaf_demotion() {
+        test_leaf::<&'static SimpleBm<Page>, HashLeaf>()
+    }
+
+}
