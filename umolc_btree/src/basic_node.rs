@@ -49,7 +49,7 @@ impl<V: NodeKind> BasicNode<V> {
         BASIC_NODE_DATA_SIZE
     }
 
-    fn reserved_head_count(count: usize) -> usize {
+    pub fn reserved_head_count(count: usize) -> usize {
         count.next_multiple_of(HEAD_RESERVATION)
     }
     fn slot_offset(count: usize) -> usize {
@@ -429,7 +429,7 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>, V: NodeKind> NodeDynamic<'bm, BM>
                     return Err(PromoteError::Fences);
                 }
 
-                let first_key = self.heap_key(0);
+                let first_key = self.key_combined(0);
                 let first_val = self.heap_val(0);
 
                 let key_len = first_key.len();
@@ -444,8 +444,12 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>, V: NodeKind> NodeDynamic<'bm, BM>
                     return Err(Keys);
                 }
 
+                if key_len != self.lower_fence().len() {
+                    return Err(Keys);
+                }
+
                 for i in 0..count {
-                    let key = self.heap_key(i);
+                    let key = self.key_combined(i);
                     let val = self.heap_val(i);
 
                     if key.len()!= key_len {
@@ -472,12 +476,11 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>, V: NodeKind> NodeDynamic<'bm, BM>
                 let mut max_suffix = 0;
 
                 for i in 0..count {
-                    let suffix = self.heap_key(i);
+                    let suffix = self.key_combined(i);
 
 
                     let mut full_key = Vec::with_capacity(self.common.prefix_len as usize + suffix.len());
                     full_key.extend_from_slice(self.prefix());
-                    full_key.extend_from_slice(suffix);
 
                     let full_len = full_key.len();
                     let numeric_slice = &full_key[full_len.saturating_sub(4)..];
@@ -511,32 +514,34 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>, V: NodeKind> NodeDynamic<'bm, BM>
     fn promote(&mut self, to: u8) {
         match to {
             node_tag::FULLY_DENSE_LEAF => {
-
+                println!("promote to FDL\n {:?}", self);
                 let count = self.common.count as usize;
                 let prefix_len = self.common.prefix_len as usize;
 
-                let first_key = self.heap_key(0);
+                let first_key = self.key_combined(0);
                 let first_val = self.heap_val(0);
                 let key_len = first_key.len();
                 let val_len = first_val.len();
 
 
+
                 let mut fdl = FullyDenseLeaf::zeroed();
-
-
                 fdl.init_wrapper(self.lower_fence(), self.upper_fence_combined(), key_len+prefix_len, val_len)
                     .expect("FDL init_wrapper failed in promote()");
 
 
 
-
                 for i in 0..count {
-                    let suffix = self.heap_key(i);
+                    let suffix = self.key_combined(i);
+                    println!("suffix: {:?}", suffix.to_vec());
                     let val = self.heap_val(i);
 
                     let mut full_key = Vec::with_capacity(self.common.prefix_len as usize + suffix.len());
+
                     full_key.extend_from_slice(self.prefix());
-                    full_key.extend_from_slice(suffix);
+                    //full_key.extend_from_slice(suffix);
+                    println!("{:?}",suffix.len());
+                    println!("full_key: {:?}", full_key);
                     fdl.force_insert::<BM::OlcEH>(full_key.as_slice(), val);
                 }
 

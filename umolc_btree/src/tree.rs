@@ -32,7 +32,7 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> Tree<'bm, BM> {
             meta.root = root_guard.page_id();
             meta.common.tag = node_tag::METADATA_MARKER;
         }
-        NodeStatic::<BM>::init(root_guard.cast_mut::<HashLeaf>(), &[][..], &[][..], None);
+        NodeStatic::<BM>::init(root_guard.cast_mut::<BasicLeaf>(), &[][..], &[][..], None);
         Tree { meta: meta_guard.page_id(), bm, _p: PhantomData }
     }
 
@@ -58,6 +58,9 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> Tree<'bm, BM> {
         } else {
             None
         }
+    }
+    pub fn scan<'a>(&'a self, lower_bound: &[u8], upper_bound: &[u8]) -> Vec<(&'a [u8], &'a [u8])> {
+        unimplemented!();
     }
 
     fn try_remove(&self, k: &[u8], removed: &mut bool) {

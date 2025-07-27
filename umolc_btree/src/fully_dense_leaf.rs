@@ -14,6 +14,7 @@ use itertools::Itertools;
 use std::cell::Cell;
 use std::fmt::{Debug, Display, Formatter};
 use std::mem::{offset_of, MaybeUninit};
+use std::sync::atomic::fence;
 use std::usize;
 use umolc::{o_project, BufferManager, OPtr, OlcErrorHandler, PageId};
 use crate::fully_dense_leaf::insert_resolver::Resolution::SplitHigh;
@@ -285,7 +286,7 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeStatic<'bm, BM> for FullyDens
         let mut index = Cell::new(usize::MAX);
         let resolution = resolve(
             || {
-                (NodeDynamic::<BM>::can_promote)(self, node_tag::HASH_LEAF).is_ok()
+                (NodeDynamic::<BM>::can_promote)(self, node_tag::BASIC_LEAF).is_ok()
             },
             || {
                 let result = self.common.count as usize * 4 <= self.capacity as usize;
@@ -328,7 +329,7 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeStatic<'bm, BM> for FullyDens
             }
             Resolution::Convert => {
 
-                NodeDynamic::<BM>::promote(self, node_tag::HASH_LEAF);
+                NodeDynamic::<BM>::promote(self, node_tag::BASIC_LEAF);
 
 
                 // this insertion should work after copying over. We need to seperate it out for the promotion logic
@@ -515,32 +516,33 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeDynamic<'bm, BM> for FullyDen
         match to {
             node_tag::HASH_LEAF => {
 
-                    let data_bytes = HashLeaf::get_hash_leaf_data_size();
-                    let count = self.common.count as usize;
+                let data_bytes = HashLeaf::get_hash_leaf_data_size();
+                let count = self.common.count as usize;
 
 
-                    let key_len = self.key_len as usize;
-                    let val_len = self.val_len as usize;
+                let key_len = self.key_len as usize;
+                let val_len = self.val_len as usize;
 
-                    let reserved_slots = count.next_multiple_of(8);
-                    let slot_bytes = reserved_slots * 2;
-                    let hash_bytes = count;
+                let reserved_slots = count.next_multiple_of(8);
+                let slot_bytes = reserved_slots * 2;
+                let hash_bytes = count;
 
-                    // key is only the offset, so it should be like max 400, so barely more than a byte in size.
-                    // 2+2 are the lengths that we store in the hash leaf
-                    let heap_bytes = count * (2 + 2 + key_len + val_len);
+                // key is only the offset, so it should be like max 400, so barely more than a byte in size.
+                // 2+2 are the lengths that we store in the hash leaf
+                let heap_bytes = count * (2 + 2 + key_len.min(4) + val_len);
 
 
-                    let required_bytes = slot_bytes + hash_bytes + heap_bytes;
+                let fence_bytes = self.upper_fence_tail().len() + self.lower_fence().len();
 
-                    if required_bytes > data_bytes {
-                        return Err(PromoteError::Capacity);
-                    }
-                    Ok(())
+                let required_bytes = slot_bytes + hash_bytes + heap_bytes + fence_bytes;
+
+                if required_bytes > data_bytes {
+                    return Err(PromoteError::Capacity);
+                }
+                Ok(())
             },
 
             node_tag::BASIC_LEAF => {
-                unimplemented!();
                 pub type BasicLeaf = BasicNode<KindLeaf>;
                 let data_bytes = BasicLeaf::get_basic_node_data_size();
 
@@ -549,6 +551,20 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeDynamic<'bm, BM> for FullyDen
                 let key_len = self.key_len as usize;
                 let val_len = self.val_len as usize;
 
+                let head_bytes = 4 * count.next_multiple_of(BasicLeaf::reserved_head_count(count));
+                let slot_bytes = 2 * count;
+
+                let hint_bytes = 64;
+
+                let fence_bytes = self.upper_fence_tail().len() + self.lower_fence().len();
+
+                let heap_bytes = count * (2 + 2 + key_len.min(4) + val_len);
+
+                let required_bytes = head_bytes + slot_bytes + hint_bytes + fence_bytes + heap_bytes;
+
+                if required_bytes > data_bytes {
+                    return Err(PromoteError::Capacity);
+                }
 
                 Ok(())
             },
@@ -560,7 +576,7 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeDynamic<'bm, BM> for FullyDen
     fn promote(&mut self, to: u8) {
         match to {
             node_tag::BASIC_LEAF => {
-                unimplemented!();
+                /*
                 let mut tmp: BasicLeaf = BasicLeaf::zeroed();
                 NodeStatic::<BM>::init(&mut tmp, self.lower_fence(), self.upper_fence_combined(), None);
                 assert!(self.key_len as usize <= MAX_KEY_SIZE);
@@ -583,6 +599,20 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeDynamic<'bm, BM> for FullyDen
                 }
                 tmp.update_hints(0, self.common.count as usize, 0);
                 *self.as_page_mut() = tmp.copy_page();
+
+*/
+                let mut tmp: BasicLeaf = BasicLeaf::zeroed();
+                NodeStatic::<BM>::init(&mut tmp, self.lower_fence(), self.upper_fence_combined(), None);
+                for i in 0..self.capacity as usize {
+                    if self.get_bit_direct(i) {
+                        let val = self.val(i);
+                        let key = self.key_from_numeric_part(self.reference + i as u32);
+
+                        NodeStatic::<BM>::insert(&mut tmp, key.to_vec().as_slice(), val).unwrap();
+                    }
+
+                }
+                *self.as_page_mut() = tmp.copy_page();
             },
             node_tag::HASH_LEAF => {
                 //println!("Self: {:?}", self);
@@ -597,7 +627,6 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeDynamic<'bm, BM> for FullyDen
                     }
 
                 }
-                //println!("Temp {:?}", tmp);
                 *self.as_page_mut() = tmp.copy_page();
             },
             _ => unimplemented!(),
@@ -722,7 +751,7 @@ mod test {
     fn basic_leaf_demotion() {
         for val_len in 0..100 {
             for key_len in 1..10 {
-                test_leaf::<&'static SimpleBm<Page>>(node_tag::BASIC_INNER, key_len*4, val_len);
+                test_leaf::<&'static SimpleBm<Page>>(node_tag::BASIC_LEAF, key_len*4, val_len);
             }
         }
     }

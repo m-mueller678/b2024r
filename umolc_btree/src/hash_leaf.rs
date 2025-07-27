@@ -331,6 +331,10 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeDynamic<'bm, BM> for HashLeaf
                     return Err(Keys);
                 }
 
+                if key_len != self.lower_fence().len() {
+                    return Err(Keys);
+                }
+
                 for i in 0..count {
                     let key = self.heap_key(i);
                     let val = self.heap_val(i);
