@@ -289,12 +289,14 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeStatic<'bm, BM> for FullyDens
             },
             || {
                 let result = self.common.count as usize * 4 <= self.capacity as usize;
+                let result = false;
                 //println!("is_low {:?}", result);
                 result
             },
             {
                 let result = val.len() == self.val_len as usize && key.len() == self.key_len as usize;
                 //println!("len_is_ok {:?}", result);
+                //println!("val_len: {:?} vs. val.len() {:?}, key_len: {:?} vs key.len() {:?}", self.val_len, val.len(), self.key_len, key.len());
                 result
             },
             || {
@@ -306,7 +308,12 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeStatic<'bm, BM> for FullyDens
                 //println!("nnp_is_ok: {:?}", result);
                 result
             },
-            || index.get() < self.capacity as usize,
+            || {
+                let res = index.get() < self.capacity as usize;
+                //println!("index_is_ok: {:?}", res);
+                //println!("index vs capacity: {:?} vs {:?}", index.get(), self.capacity as usize);
+                res
+            },
         );
         if resolution != Resolution::Ok {
             println!("Resolution: {:?}", resolution);
@@ -321,10 +328,8 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeStatic<'bm, BM> for FullyDens
             }
             Resolution::Convert => {
 
-                println!("Converting to hash leaf");
                 NodeDynamic::<BM>::promote(self, node_tag::HASH_LEAF);
 
-                println!("Successfully promoted to {:?}", self.common.tag);
 
                 // this insertion should work after copying over. We need to seperate it out for the promotion logic
 
@@ -535,6 +540,7 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeDynamic<'bm, BM> for FullyDen
             },
 
             node_tag::BASIC_LEAF => {
+                unimplemented!();
                 pub type BasicLeaf = BasicNode<KindLeaf>;
                 let data_bytes = BasicLeaf::get_basic_node_data_size();
 
@@ -554,6 +560,7 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeDynamic<'bm, BM> for FullyDen
     fn promote(&mut self, to: u8) {
         match to {
             node_tag::BASIC_LEAF => {
+                unimplemented!();
                 let mut tmp: BasicLeaf = BasicLeaf::zeroed();
                 NodeStatic::<BM>::init(&mut tmp, self.lower_fence(), self.upper_fence_combined(), None);
                 assert!(self.key_len as usize <= MAX_KEY_SIZE);
@@ -638,56 +645,96 @@ mod test {
     use crate::fully_dense_leaf::FullyDenseLeaf;
     use crate::hash_leaf::HashLeaf;
     use crate::key_source::SourceSlice;
-    use crate::node::{
-        page_id_from_bytes, page_id_to_bytes, NodeDynamic, NodeStatic, Page, ToFromPageExt, PAGE_ID_LEN,
-    };
+    use crate::node::{node_tag, page_id_from_bytes, page_id_to_bytes, NodeDynamic, NodeStatic, Page, ToFromPageExt, PAGE_ID_LEN};
 
     type BM<'a> = &'a SimpleBm<Page>;
 
 
+    fn generate_key(i: u32, key_len: usize) -> Vec<u8> {
+        if key_len < 4 {
+            panic!("Key length must be at least 4");
+        }
+        let mut key= (0..).map(|i| i as u8).take(key_len-4).collect::<Vec<u8>>();
+        key.extend_from_slice(&i.to_be_bytes());
+        key
+    }
 
     #[allow(clippy::unused_enumerate_index)]
-    fn test_leaf<'bm, BM: BufferManager<'bm, Page = Page>, N: NodeStatic<'bm, BM>>() {
+    fn test_leaf<'bm, BM: BufferManager<'bm, Page = Page>>(node_tag: u8, key_len: usize, val_len: usize) {
         let mut page = Page::zeroed();
-        let mut leaf = page.cast_mut::<FullyDenseLeaf>();
-        leaf =& mut FullyDenseLeaf::zeroed();
+        let leaf = page.cast_mut::<FullyDenseLeaf>();
 
-        let base = b"Test".as_slice();
-        let mut lowerfence =  base.clone().to_vec();
-        lowerfence.extend_from_slice((0 as u32).to_le_bytes().as_slice());
-        let mut upperfence = base.clone().to_vec();
-        upperfence.extend_from_slice((400 as u32).to_le_bytes().as_slice());
+        let mut lowerfence = generate_key(0, key_len);
+        let mut upperfence = generate_key(4096, key_len);
 
-        let key_len: usize = 8;
-        let val_len : usize  = 4;
 
-        leaf.init_wrapper(lowerfence.as_slice(), upperfence.as_slice(), key_len, val_len);
+        let res = leaf.init_wrapper(lowerfence.as_slice(), upperfence.as_slice(), key_len, val_len);
 
-        let mut count = 0;
-        for i in 0..500 {
-            let u : u32 = i;
-            let mut key = b"Test".as_slice().to_vec();
-            key.extend_from_slice(&u.to_le_bytes().as_slice());
-            let res = NodeStatic::<BM>::insert(&mut leaf, key.as_slice(), u.to_le_bytes().as_slice());
-            if res.is_err() {
-                count = i;
-                println!("Fits {count} values.")
-            }
-
+        if res.is_err() {
+            panic!("Error: Couldn't initialize the node. This is an error of the node logic itself, this test has no responsibility for it.");
         }
 
+        let max = leaf.capacity as usize;
 
+        for i in 0..leaf.capacity as usize {
+            let mut key = generate_key(i as u32, key_len);
+            let val: &[u8] = &(0..).map(|i| i as u8).take(val_len).collect::<Vec<u8>>();
+            leaf.force_insert::<BM::OlcEH>(key.as_slice(), val);
+        }
+
+        let mut i : u32 = 0;
+        loop {
+            let mut key = generate_key(i, key_len);
+            i+=1;
+
+            let result = leaf.as_page_mut().as_dyn_node_mut::<BM>().leaf_remove(key.as_slice());
+            if result.is_none() {
+                panic!("Error: Couldn't remove the values present. This is an error of the node logic itself, this test has no responsibility for it.");
+            }
+            if NodeDynamic::<BM>::can_promote(leaf, node_tag).is_ok(){
+                println!("Can promote at: {:?}", leaf.common.count);
+                break;
+            }
+        }
+
+        let promotion_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            NodeDynamic::<BM>::promote(leaf, node_tag::HASH_LEAF);
+        }));
+
+        assert!(promotion_result.is_ok(), "promotion to HASH_LEAF panicked");
+
+
+        loop {
+            if i>=max as u32 {
+                break;
+            }
+            let mut key = generate_key(i, key_len);
+            i+=1;
+
+            let result = leaf.as_page_mut().as_dyn_node_mut::<BM>().leaf_remove(key.as_slice());
+            if result.is_none() {
+                panic!("After demoting, the value for key '{:?}' is not present.", key);
+            }
+        }
     }
 
     #[test]
     fn basic_leaf_demotion() {
-        test_leaf::<&'static SimpleBm<Page>, BasicLeaf>()
+        for val_len in 0..100 {
+            for key_len in 1..10 {
+                test_leaf::<&'static SimpleBm<Page>>(node_tag::BASIC_INNER, key_len*4, val_len);
+            }
+        }
     }
 
 
     #[test]
     fn hash_leaf_demotion() {
-        test_leaf::<&'static SimpleBm<Page>, HashLeaf>()
+        for val_len in 0..100 {
+            for key_len in 1..10 {
+                test_leaf::<&'static SimpleBm<Page>>(node_tag::HASH_LEAF, key_len*4, val_len);
+            }
+        }
     }
 
 }

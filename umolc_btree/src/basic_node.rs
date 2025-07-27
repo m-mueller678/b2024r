@@ -12,7 +12,7 @@ use std::mem::{offset_of, size_of};
 use std::ops::Range;
 use umolc::{o_project, BufferManager, OPtr, OlcErrorHandler, PageId};
 use crate::fully_dense_leaf::FullyDenseLeaf;
-use crate::node::PromoteError::Node;
+use crate::node::PromoteError::{Capacity, Keys, Node, ValueLen};
 
 const HINT_COUNT: usize = 16;
 const MIN_HINT_SPACING: usize = 3;
@@ -416,13 +416,135 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>, V: NodeKind> NodeDynamic<'bm, BM>
         self.remove::<BM::OlcEH>(k)
     }
 
-    fn can_promote(&self, _to: u8) -> Result<(), PromoteError> {
-        Err(Node)
+    fn can_promote(&self, to: u8) -> Result<(), PromoteError> {
+        match to {
+            node_tag::FULLY_DENSE_LEAF => {
+
+                let count = self.common.count as usize;
+                if count == 0 {
+                    return Err(Capacity);
+                }
+
+                if self.lower_fence().is_empty() {
+                    return Err(PromoteError::Fences);
+                }
+
+                let first_key = self.heap_key(0);
+                let first_val = self.heap_val(0);
+
+                let key_len = first_key.len();
+                let val_len = first_val.len();
+
+                let mut key_error: bool = false;
+                let mut val_error: bool = false;
+
+
+                let prefix_len = self.prefix().len();
+                if key_len > 4 {
+                    return Err(Keys);
+                }
+
+                for i in 0..count {
+                    let key = self.heap_key(i);
+                    let val = self.heap_val(i);
+
+                    if key.len()!= key_len {
+                        key_error = true;
+                    }
+
+                    if val.len() != val_len {
+                        val_error = true;
+                    }
+                }
+
+                // we don't return immediately but just here, in case there would be a hierachy of errors.
+                // if there is none, we can just remove these if-cases and return on finding an error.
+                if key_error {
+                    return Err(Keys);
+                }
+                if val_error {
+                    return Err(ValueLen);
+                }
+
+
+
+                let mut min_suffix = u32::MAX;
+                let mut max_suffix = 0;
+
+                for i in 0..count {
+                    let suffix = self.heap_key(i);
+
+
+                    let mut full_key = Vec::with_capacity(self.common.prefix_len as usize + suffix.len());
+                    full_key.extend_from_slice(self.prefix());
+                    full_key.extend_from_slice(suffix);
+
+                    let full_len = full_key.len();
+                    let numeric_slice = &full_key[full_len.saturating_sub(4)..];
+
+                    let mut padded = [0u8; 4];
+                    padded[..full_len.min(4)].copy_from_slice(&numeric_slice);
+
+                    let index = u32::from_be_bytes(padded.try_into().unwrap());
+
+                    min_suffix = min_suffix.min(index);
+                    max_suffix = max_suffix.max(index);
+                }
+                let area = max_suffix - min_suffix + 1;
+
+
+                if area as usize >
+                    FullyDenseLeaf::get_capacity_fdl(self.lower_fence().len(),
+                                                     self.upper_fence_tail().len(),
+                                                     first_val.len()) {
+                    return Err(Capacity);
+
+                }
+
+                Ok(())
+            },
+            _ => Err(Node)
+        }
     }
 
 
-    fn promote(&mut self, _to: u8) {
-        unreachable!()
+    fn promote(&mut self, to: u8) {
+        match to {
+            node_tag::FULLY_DENSE_LEAF => {
+
+                let count = self.common.count as usize;
+                let prefix_len = self.common.prefix_len as usize;
+
+                let first_key = self.heap_key(0);
+                let first_val = self.heap_val(0);
+                let key_len = first_key.len();
+                let val_len = first_val.len();
+
+
+                let mut fdl = FullyDenseLeaf::zeroed();
+
+
+                fdl.init_wrapper(self.lower_fence(), self.upper_fence_combined(), key_len+prefix_len, val_len)
+                    .expect("FDL init_wrapper failed in promote()");
+
+
+
+
+                for i in 0..count {
+                    let suffix = self.heap_key(i);
+                    let val = self.heap_val(i);
+
+                    let mut full_key = Vec::with_capacity(self.common.prefix_len as usize + suffix.len());
+                    full_key.extend_from_slice(self.prefix());
+                    full_key.extend_from_slice(suffix);
+                    fdl.force_insert::<BM::OlcEH>(full_key.as_slice(), val);
+                }
+
+                *self.as_page_mut() = fdl.copy_page();
+            },
+            _=> unreachable!()
+        }
+
     }
 }
 
