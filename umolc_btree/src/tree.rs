@@ -59,7 +59,8 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> Tree<'bm, BM> {
             None
         }
     }
-    pub fn scan<'a>(&'a self, lower_bound: &[u8], upper_bound: &[u8]) -> Vec<(&'a [u8], &'a [u8])> {
+    pub fn scan<'a, F>(&self, lower_bound: &[u8], mut callback: F)
+        where F: FnMut(&'a [u8], &'a [u8]) -> bool {
         unimplemented!();
     }
 
@@ -294,7 +295,11 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeDynamic<'bm, BM> for Metadata
     fn validate(&self) {}
 
     fn leaf_remove(&mut self, _k: &[u8]) -> Option<()> {
-        todo!()
+        unimplemented!()
+    }
+
+    fn scan<'a>(&'a self) -> Vec<(&'a [u8], &'a [u8])> {
+        unimplemented!()
     }
 
     fn can_promote(&self, _to: u8) -> Result<(), PromoteError> {

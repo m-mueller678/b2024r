@@ -259,6 +259,8 @@ pub trait NodeDynamic<'bm, BM: BufferManager<'bm, Page = Page>>: ToFromPage + No
     fn validate(&self);
     fn leaf_remove(&mut self, k: &[u8]) -> Option<()>;
 
+    fn scan<'a>(&'a self) -> Vec<(&'a [u8], &'a [u8])>;
+
     fn can_promote(&self, to: u8) -> Result<(), PromoteError>;
 
     fn promote(&mut self, to: u8);

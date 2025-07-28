@@ -302,6 +302,10 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeDynamic<'bm, BM> for HashLeaf
         Some(())
     }
 
+    fn scan<'a>(&'a self) -> Vec<(&'a [u8], &'a [u8])> {
+        todo!()
+    }
+
     fn can_promote(&self, to: u8) -> Result<(), PromoteError> {
         //println!("Self: {:?}", self);
         match to {

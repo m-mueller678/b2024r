@@ -1,3 +1,4 @@
+use core::slice::SlicePattern;
 use crate::basic_node::{BasicLeaf, BasicNode};
 use crate::fully_dense_leaf::insert_resolver::{resolve, Resolution};
 use crate::hash_leaf::HashLeaf;
@@ -495,8 +496,6 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeDynamic<'bm, BM> for FullyDen
             count += if self.get_bit_direct(i) { 1 } else { 0 };
         }
         assert_eq!(count, self.common.count as usize, "Bad count");
-
-        //TODO: add more checks regarding the fences
     }
 
     fn leaf_remove(&mut self, k: &[u8]) -> Option<()> {
@@ -631,6 +630,25 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeDynamic<'bm, BM> for FullyDen
             },
             _ => unimplemented!(),
         }
+    }
+
+    fn scan<'a>(&'a self) -> Vec<(&'a [u8], &'a [u8])> {
+        let mut ret: Vec<(&'a [u8], &'a [u8])> = Vec::new();
+        let mut key_buf: [MaybeUninit<u8>; MAX_KEY_SIZE] = unsafe { MaybeUninit::uninit().assume_init() };
+
+        for i in 0..self.capacity as usize {
+            if self.get_bit_direct(i) {
+                let key_src = self.key_from_numeric_part(self.reference + i as u32);
+                let val = self.val(i);
+
+                let key = unsafe {
+                    &*key_src.write_to_uninit(&mut key_buf[..self.key_len as usize]) as &[u8]
+                };
+                ret.push((key, val));
+            }
+        }
+
+        ret
     }
 }
 

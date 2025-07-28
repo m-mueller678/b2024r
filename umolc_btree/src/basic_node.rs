@@ -551,6 +551,10 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>, V: NodeKind> NodeDynamic<'bm, BM>
         }
 
     }
+
+    fn scan<'a>(&'a self) -> Vec<(&'a [u8], &'a [u8])> {
+        todo!()
+    }
 }
 
 const HEAD_RESERVATION: usize = 16;
