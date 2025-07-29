@@ -59,9 +59,34 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> Tree<'bm, BM> {
             None
         }
     }
-    pub fn scan<'a, F>(&self, lower_bound: &[u8], mut callback: F)
-        where F: FnMut(Vec<u8>, &'a [u8]) -> bool {
-        unimplemented!();
+    pub fn scan<F>(&self, lower_bound: &[u8], mut callback: F)
+    where
+            for<'a> F: FnMut(&Vec<u8>, &'a [u8]) -> bool {
+
+        let mut parent = self.bm.lock_optimistic(self.meta);
+        let mut node_pid = self.meta;
+        let mut node = self.bm.lock_optimistic(self.meta);
+
+        let mut queue = Vec::new();
+
+        //loop {
+            while o_ptr_is_inner::<BM>(node.o_ptr())  {
+                node_pid = o_ptr_lookup_inner::<BM>(node.o_ptr(), lower_bound, true);
+                queue.push(parent);
+                parent = node;
+                node = self.bm.lock_optimistic(node_pid);
+            }
+
+            let mut node: BM::GuardX = node.upgrade();
+            let list: Vec<(Vec<u8>, &[u8])> = node.as_dyn_node::<BM>().scan();
+            for (y, z) in list {
+                if !callback(&y, z) {
+                    return;
+                }
+            }
+
+
+        //}
     }
 
     fn try_remove(&self, k: &[u8], removed: &mut bool) {
@@ -147,7 +172,6 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> Tree<'bm, BM> {
                 node.reset_written();
                 let mut parent = parent.upgrade();
                 self.ensure_parent_not_meta(&mut parent);
-
 
                 let can_promote = node.as_dyn_node::<BM>().can_promote(node_tag::FULLY_DENSE_LEAF);
 

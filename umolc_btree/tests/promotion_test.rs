@@ -1,7 +1,4 @@
-use std::collections::HashSet;
 use bstr::ByteSlice;
-use bytemuck::Zeroable;
-use rand::prelude::{SliceRandom, SmallRng};
 use umolc::{BufferManager, CommonSeqLockBM, OPtr};
 use umolc_btree::{Page, Tree};
 

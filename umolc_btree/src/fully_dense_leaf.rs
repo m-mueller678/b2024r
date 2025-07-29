@@ -291,7 +291,6 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeStatic<'bm, BM> for FullyDens
             },
             || {
                 let result = self.common.count as usize * 4 <= self.capacity as usize;
-                let result = false;
                 //println!("is_low {:?}", result);
                 result
             },
@@ -336,7 +335,7 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeStatic<'bm, BM> for FullyDens
                 // this insertion should work after copying over. We need to seperate it out for the promotion logic
 
 
-                let hash_leaf = page_cast_mut::<FullyDenseLeaf, HashLeaf>(self);
+                let hash_leaf = page_cast_mut::<FullyDenseLeaf, BasicLeaf>(self);
 
                 let ret = NodeStatic::<BM>::insert(hash_leaf, key, val);
                 debug_assert!(ret.is_ok());
@@ -389,7 +388,7 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeStatic<'bm, BM> for FullyDens
 
 impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeDynamic<'bm, BM> for FullyDenseLeaf {
     fn split(&mut self, bm: BM, parent: &mut dyn NodeDynamic<'bm, BM>, key: &[u8]) -> Result<(), ()> {
-        println!("Splitting {self}");
+        println!("Splitting");
         if self.split_mode == SPLIT_MODE_HIGH {
 
             let mut right = insert_upper_sibling(parent, bm, key)?;
