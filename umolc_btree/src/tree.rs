@@ -60,7 +60,7 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> Tree<'bm, BM> {
         }
     }
     pub fn scan<'a, F>(&self, lower_bound: &[u8], mut callback: F)
-        where F: FnMut(&'a [u8], &'a [u8]) -> bool {
+        where F: FnMut(Vec<u8>, &'a [u8]) -> bool {
         unimplemented!();
     }
 
@@ -298,7 +298,7 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeDynamic<'bm, BM> for Metadata
         unimplemented!()
     }
 
-    fn scan<'a>(&'a self) -> Vec<(&'a [u8], &'a [u8])> {
+    fn scan<'a>(&'a self) -> Vec<(Vec<u8>, &'a [u8])> {
         unimplemented!()
     }
 

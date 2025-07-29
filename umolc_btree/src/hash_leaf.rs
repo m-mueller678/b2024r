@@ -302,8 +302,21 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeDynamic<'bm, BM> for HashLeaf
         Some(())
     }
 
-    fn scan<'a>(&'a self) -> Vec<(&'a [u8], &'a [u8])> {
-        todo!()
+    fn scan<'a>(&'a self) -> Vec<(Vec<u8>, &'a [u8])> {
+        let mut ret: Vec<(Vec<u8>, &'a [u8])> = Vec::with_capacity(self.common.count as usize);
+
+        for i in 0..self.common.count {
+            let val = self.heap_val(i as usize);
+
+            let suffix = self.heap_key(i as usize);
+
+            let mut full_key = Vec::with_capacity(self.common.prefix_len as usize + suffix.len());
+            full_key.extend_from_slice(self.prefix());
+            full_key.extend_from_slice(suffix);
+            ret.push((full_key, val));
+        }
+
+        ret
     }
 
     fn can_promote(&self, to: u8) -> Result<(), PromoteError> {
@@ -335,9 +348,6 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeDynamic<'bm, BM> for HashLeaf
                     return Err(Keys);
                 }
 
-                if key_len != self.lower_fence().len() {
-                    return Err(Keys);
-                }
 
                 for i in 0..count {
                     let key = self.heap_key(i);
@@ -387,6 +397,7 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeDynamic<'bm, BM> for HashLeaf
                 }
                 let area = max_suffix - min_suffix + 1;
 
+                println!("area: {}", area);
 
                 if area as usize >
                     FullyDenseLeaf::get_capacity_fdl(self.lower_fence().len(),
@@ -416,7 +427,6 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeDynamic<'bm, BM> for HashLeaf
 
 
                 let mut fdl = FullyDenseLeaf::zeroed();
-
 
                 fdl.init_wrapper(self.lower_fence(), self.upper_fence_combined(), key_len+prefix_len, val_len)
                     .expect("FDL init_wrapper failed in promote()");

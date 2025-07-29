@@ -1,7 +1,6 @@
 #![feature(arbitrary_self_types_pointers)]
 #![feature(maybe_uninit_slice)]
 extern crate core;
-extern crate core;
 
 mod basic_node;
 mod fully_dense_leaf;

@@ -3,7 +3,7 @@ use crate::heap_node::{HeapLength, HeapLengthError, HeapNode, HeapNodeInfo};
 use crate::key_source::{key_head, HeadSourceSlice, SourceSlice, SourceSlicePair};
 use crate::node::{find_separator, insert_upper_sibling, node_tag, page_cast_mut, page_id_from_bytes, page_id_from_olc_bytes, CommonNodeHead, DebugNode, KindInner, KindLeaf, NodeDynamic, NodeKind, NodeStatic, Page, PromoteError, ToFromPageExt, PAGE_ID_LEN, PAGE_SIZE};
 use crate::util::Supreme;
-use bstr::{BStr, BString};
+use bstr::{BStr, BString, ByteSlice};
 use bytemuck::{Pod, Zeroable};
 use indxvec::Search;
 use itertools::Itertools;
@@ -46,7 +46,7 @@ impl<V: NodeKind> BasicNode<V> {
     }
 
     pub fn get_basic_node_data_size () -> usize {
-        BASIC_NODE_DATA_SIZE
+        BASIC_NODE_DATA_SIZE*4
     }
 
     pub fn reserved_head_count(count: usize) -> usize {
@@ -252,8 +252,8 @@ impl<V: NodeKind> Debug for BasicNode<V> {
             };
             let head = self.heads()[i];
             let kl = self.read_unaligned_u16(offset);
-            let key = BStr::new(self.heap_key(i));
-            f(&mut format_args!("{i:4}:{offset:04x}->[0x{head:08x}][{kl:3}] {key:?} -> {val:?}"))
+            let key = self.key_combined(i);
+            f(&mut format_args!("{i:4}:{offset:04x}->[0x{head:08x}][{kl:3}] {:?} -> {val:?}", key.to_vec().as_slice()))
         });
         s.field("records", &format_args!("\n{}", records_fmt));
         s.finish()
@@ -444,9 +444,6 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>, V: NodeKind> NodeDynamic<'bm, BM>
                     return Err(Keys);
                 }
 
-                if key_len != self.lower_fence().len() {
-                    return Err(Keys);
-                }
 
                 for i in 0..count {
                     let key = self.key_combined(i);
@@ -476,11 +473,11 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>, V: NodeKind> NodeDynamic<'bm, BM>
                 let mut max_suffix = 0;
 
                 for i in 0..count {
-                    let suffix = self.key_combined(i);
-
+                    let mut suffix = self.key_combined(i).to_vec();
 
                     let mut full_key = Vec::with_capacity(self.common.prefix_len as usize + suffix.len());
                     full_key.extend_from_slice(self.prefix());
+                    full_key.append(&mut suffix);
 
                     let full_len = full_key.len();
                     let numeric_slice = &full_key[full_len.saturating_sub(4)..];
@@ -490,10 +487,12 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>, V: NodeKind> NodeDynamic<'bm, BM>
 
                     let index = u32::from_be_bytes(padded.try_into().unwrap());
 
+
                     min_suffix = min_suffix.min(index);
                     max_suffix = max_suffix.max(index);
                 }
                 let area = max_suffix - min_suffix + 1;
+                println!("area: {}", area);
 
 
                 if area as usize >
@@ -512,9 +511,10 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>, V: NodeKind> NodeDynamic<'bm, BM>
 
 
     fn promote(&mut self, to: u8) {
+        println!("Promoting to FDL");
         match to {
             node_tag::FULLY_DENSE_LEAF => {
-                println!("promote to FDL\n {:?}", self);
+                println!("Promoting to FDL");
                 let count = self.common.count as usize;
                 let prefix_len = self.common.prefix_len as usize;
 
@@ -533,15 +533,12 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>, V: NodeKind> NodeDynamic<'bm, BM>
 
                 for i in 0..count {
                     let suffix = self.key_combined(i);
-                    println!("suffix: {:?}", suffix.to_vec());
                     let val = self.heap_val(i);
 
                     let mut full_key = Vec::with_capacity(self.common.prefix_len as usize + suffix.len());
 
                     full_key.extend_from_slice(self.prefix());
-                    //full_key.extend_from_slice(suffix);
-                    println!("{:?}",suffix.len());
-                    println!("full_key: {:?}", full_key);
+                    full_key.append(&mut suffix.to_vec());
                     fdl.force_insert::<BM::OlcEH>(full_key.as_slice(), val);
                 }
 
@@ -552,8 +549,21 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>, V: NodeKind> NodeDynamic<'bm, BM>
 
     }
 
-    fn scan<'a>(&'a self) -> Vec<(&'a [u8], &'a [u8])> {
-        todo!()
+    fn scan<'a>(&'a self) -> Vec<(Vec<u8>, &'a [u8])> {
+        let mut ret: Vec<(Vec<u8>, &'a [u8])> = Vec::with_capacity(self.common.count as usize);
+
+        for i in 0..self.common.count {
+            let val = self.heap_val(i as usize);
+
+            let suffix = self.key_combined(i as usize);
+
+            let mut full_key = Vec::with_capacity(self.common.prefix_len as usize + suffix.len());
+            full_key.extend_from_slice(self.prefix());
+            full_key.append(&mut suffix.to_vec());
+            ret.push((full_key, val));
+        }
+
+        ret
     }
 }
 

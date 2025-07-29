@@ -1,4 +1,3 @@
-use core::slice::SlicePattern;
 use crate::basic_node::{BasicLeaf, BasicNode};
 use crate::fully_dense_leaf::insert_resolver::{resolve, Resolution};
 use crate::hash_leaf::HashLeaf;
@@ -107,7 +106,8 @@ impl FullyDenseLeaf {
     }
 
     pub fn force_insert<O: OlcErrorHandler>(&mut self, key: &[u8], val: &[u8]) {
-        let index = Self::key_to_index::<O>(unsafe { OPtr::from_ref(self) }, key).expect("Index computation failed");
+        let index = Self::key_to_index::<O>(
+            unsafe { OPtr::from_ref(self) }, key).expect("Index computation failed");
 
         let was_present = self.set_bit::<true>(index, false);
         self.common.count += (!was_present) as u16;
@@ -141,7 +141,7 @@ impl FullyDenseLeaf {
 
     // boolean ignores the debug_assert which needs to be done in split and other operations
     fn set_bit<const SET: bool>(&mut self, i: usize, ignore: bool) -> bool {
-        debug_assert!(i < self.capacity as usize || ignore, "{i}");
+        debug_assert!(i < self.capacity as usize || ignore, "{i} was larger than capacity {}", self.capacity);
         let mask = 1 << (i % 8);
         let ret = self._data[i / 8] & mask != 0;
         if SET {
@@ -389,6 +389,7 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeStatic<'bm, BM> for FullyDens
 
 impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeDynamic<'bm, BM> for FullyDenseLeaf {
     fn split(&mut self, bm: BM, parent: &mut dyn NodeDynamic<'bm, BM>, key: &[u8]) -> Result<(), ()> {
+        println!("Splitting {self}");
         if self.split_mode == SPLIT_MODE_HIGH {
 
             let mut right = insert_upper_sibling(parent, bm, key)?;
@@ -399,7 +400,6 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeDynamic<'bm, BM> for FullyDen
             return Ok(())
         }
 
-        println!("Splitting {self}");
 
         if self.split_mode != SPLIT_MODE_HALF {
             unimplemented!();
@@ -557,11 +557,12 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeDynamic<'bm, BM> for FullyDen
 
                 let fence_bytes = self.upper_fence_tail().len() + self.lower_fence().len();
 
-                let heap_bytes = count * (2 + 2 + key_len.min(4) + val_len);
+                let heap_bytes = count * (2 + 2 + key_len.saturating_sub(4).min(1) + val_len);
 
                 let required_bytes = head_bytes + slot_bytes + hint_bytes + fence_bytes + heap_bytes;
 
                 if required_bytes > data_bytes {
+                    println!("Required bytes: {required_bytes}, data bytes: {data_bytes}");
                     return Err(PromoteError::Capacity);
                 }
 
@@ -632,18 +633,15 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeDynamic<'bm, BM> for FullyDen
         }
     }
 
-    fn scan<'a>(&'a self) -> Vec<(&'a [u8], &'a [u8])> {
-        let mut ret: Vec<(&'a [u8], &'a [u8])> = Vec::new();
-        let mut key_buf: [MaybeUninit<u8>; MAX_KEY_SIZE] = unsafe { MaybeUninit::uninit().assume_init() };
+    fn scan<'a>(&'a self) -> Vec<(Vec<u8>, &'a [u8])> {
+        let mut ret: Vec<(Vec<u8>, &'a [u8])> = Vec::with_capacity(self.common.count as usize);
 
         for i in 0..self.capacity as usize {
             if self.get_bit_direct(i) {
                 let key_src = self.key_from_numeric_part(self.reference + i as u32);
                 let val = self.val(i);
 
-                let key = unsafe {
-                    &*key_src.write_to_uninit(&mut key_buf[..self.key_len as usize]) as &[u8]
-                };
+                let key = key_src.to_vec();
                 ret.push((key, val));
             }
         }
