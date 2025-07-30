@@ -207,7 +207,7 @@ pub trait ToFromPageExt: ToFromPage + Sized {
 
     fn fences_start(&self) -> usize {
         let head = &self.as_page().common;
-        size_of::<Self>() - head.lower_fence_len as usize - head.upper_fence_len as usize
+        size_of::<Self>() - head.lower_fence_len as usize - head.upper_fence_len as usize - PAGE_ID_LEN
     }
 
     fn relocate_by<const UP: bool, T: Pod>(&mut self, offset: usize, count: usize, dist: usize) {
@@ -248,6 +248,8 @@ pub trait NodeStatic<'bm, BM: BufferManager<'bm, Page = Page>>: NodeDynamic<'bm,
 
     fn lookup_leaf<'a>(this: OPtr<'a, Self, BM::OlcEH>, key: &[u8]) -> Option<OPtr<'a, [u8], BM::OlcEH>>;
     fn lookup_inner(this: OPtr<'_, Self, BM::OlcEH>, key: &[u8], high_on_equal: bool) -> PageId;
+    fn overwrite_right(&mut self, new: Option<PageId>);
+
     fn to_debug_kv(&self) -> (Vec<Vec<u8>>, Vec<Vec<u8>>);
 }
 
@@ -262,6 +264,8 @@ pub trait NodeDynamic<'bm, BM: BufferManager<'bm, Page = Page>>: ToFromPage + No
     fn scan<'a>(&'a self) -> Vec<(Vec<u8>, &'a [u8])>;
 
     fn can_promote(&self, to: u8) -> Result<(), PromoteError>;
+
+    fn lookup_right_child(&self) -> Option<PageId>;
 
     fn promote(&mut self, to: u8);
 }
@@ -390,6 +394,24 @@ pub fn page_id_from_olc_bytes<O: OlcErrorHandler>(x: OPtr<[u8; PAGE_ID_LEN], O>)
     PageId { x: u64::from_ne_bytes(b) }
 }
 
+pub fn read_right_sibling(page: &Page) -> Option<PageId> {
+    let lf = page.common.lower_fence_len as usize;
+    let uf = page.common.upper_fence_len as usize;
+    let offset = PAGE_SIZE - lf - uf - PAGE_ID_LEN;
+    let raw = page.slice::<u8>(offset, PAGE_ID_LEN);
+    let id = page_id_from_bytes(raw.try_into().unwrap());
+    if id.x == 0 { None } else { Some(id) }
+}
+
+pub fn write_right_sibling(page: &mut Page, pid: Option<PageId>) {
+    let lf = page.common.lower_fence_len as usize;
+    let uf = page.common.upper_fence_len as usize;
+    let offset = PAGE_SIZE - lf - uf - PAGE_ID_LEN;
+    let raw = page_id_to_bytes(pid.unwrap_or(PageId { x: 0 }));
+    page.slice_mut::<u8>(offset, PAGE_ID_LEN).copy_from_slice(&raw);
+}
+
+
 #[repr(C, align(16))]
 #[derive(Zeroable)]
 pub struct Page {
@@ -414,6 +436,8 @@ impl NodeKind for KindLeaf {
     const IS_LEAF: bool = true;
     type BasicValLength = u16;
 }
+
+
 
 #[derive(Clone, Copy, Zeroable, Pod)]
 #[repr(C)]

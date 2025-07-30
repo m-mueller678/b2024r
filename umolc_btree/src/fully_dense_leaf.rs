@@ -4,7 +4,7 @@ use crate::hash_leaf::HashLeaf;
 use crate::heap_node::HeapNode;
 use crate::key_source::{HeadSourceSlice, SourceSlice, SourceSlicePair, ZeroKey};
 use crate::node::PromoteError::Node;
-use crate::node::{insert_upper_sibling, node_tag, page_cast_mut, CommonNodeHead, KindLeaf, NodeDynamic, NodeDynamicAuto, NodeKind, NodeStatic, PromoteError, ToFromPageExt, PAGE_SIZE};
+use crate::node::{insert_upper_sibling, node_tag, page_cast_mut, page_id_from_bytes, page_id_to_bytes, read_right_sibling, write_right_sibling, CommonNodeHead, KindLeaf, NodeDynamic, NodeDynamicAuto, NodeKind, NodeStatic, PromoteError, ToFromPageExt, PAGE_ID_LEN, PAGE_SIZE};
 use crate::{define_node, Page, MAX_KEY_SIZE};
 use arrayvec::ArrayVec;
 use bstr::{BStr, BString};
@@ -16,7 +16,7 @@ use std::fmt::{Debug, Display, Formatter};
 use std::mem::{offset_of, MaybeUninit};
 use std::sync::atomic::fence;
 use std::usize;
-use umolc::{o_project, BufferManager, OPtr, OlcErrorHandler, PageId};
+use umolc::{o_project, BufferManager, BufferManagerGuard, OPtr, OlcErrorHandler, PageId};
 use crate::fully_dense_leaf::insert_resolver::Resolution::SplitHigh;
 
 define_node! {
@@ -187,6 +187,7 @@ impl FullyDenseLeaf {
         let space = PAGE_SIZE
             - (self.common.lower_fence_len as usize)
             - (self.common.upper_fence_len as usize).max(4)
+            - PAGE_ID_LEN
             - offset_of!(Self, _data);
         let mut capacity = space * 8 / (val_len * 8 + 1);
         let is_ok = |capacity: usize| capacity.next_multiple_of(64) / 8 + capacity * val_len <= space;
@@ -264,14 +265,6 @@ impl FullyDenseLeaf {
         let capacity = o_project!(this.capacity).r() as usize;
         let first_val_start = Self::first_val_start_static(capacity);
         this.as_slice().i(first_val_start + val_len * i..first_val_start + val_len * (i + 1))
-    }
-
-    fn split_at_wrap<'bm, BM: BufferManager<'bm, Page = Page>>(
-        &mut self,
-        bm: BM,
-        parent: &mut dyn NodeDynamic<'bm, BM>,
-    ) -> Result<(), ()> {
-        todo!()
     }
 }
 
@@ -378,6 +371,20 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeStatic<'bm, BM> for FullyDens
         unimplemented!()
     }
 
+    fn overwrite_right(&mut self, new: Option<PageId>) {
+        write_right_sibling(self.as_page_mut(), new);
+        /*
+        let encocded = page_id_to_bytes(new.unwrap_or(PageId{x: 0}));
+
+        let offset = PAGE_SIZE
+            - self.common.lower_fence_len as usize
+            - self.common.upper_fence_len as usize
+            - PAGE_ID_LEN;
+
+        self.slice_mut(offset, PAGE_ID_LEN).copy_from_slice(&encocded);*/
+    }
+
+
     fn to_debug_kv(&self) -> (Vec<Vec<u8>>, Vec<Vec<u8>>) {
         let indices = || Self::iter_key_indices(self.capacity as usize, |x| self.read_unaligned::<u64>(x));
         let keys = indices().map(|i| Self::key_from_numeric_part(self, self.reference + i as u32).to_vec()).collect();
@@ -392,9 +399,17 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeDynamic<'bm, BM> for FullyDen
         if self.split_mode == SPLIT_MODE_HIGH {
 
             let mut right = insert_upper_sibling(parent, bm, key)?;
+            let page_id = right.page_id();
             let right = right.cast_mut::<Self>();
-            right.init(key, self.upper_fence_combined(), (self.key_len as usize), (self.val_len as usize));
+
+            let res = right.init(key, self.upper_fence_combined(), self.key_len as usize, self.val_len as usize);
+            if res.is_err() {
+                panic!("Failed to init right sibling");
+            }
             self.set_upper_fence_tail(key);
+
+            NodeStatic::<BM>::overwrite_right(right, NodeDynamic::<BM>::lookup_right_child(self));
+            NodeStatic::<BM>::overwrite_right(self, Some(page_id));
 
             return Ok(())
         }
@@ -428,6 +443,7 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeDynamic<'bm, BM> for FullyDen
             initialized
         };
         let mut right = insert_upper_sibling(parent, bm, sep_key)?;
+        let page_id = right.page_id();
         let right = right.cast_mut::<Self>();
 
         // sep_key has same length as key_len, so is a valid key in right
@@ -456,10 +472,10 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeDynamic<'bm, BM> for FullyDen
 
         debug_assert!(old_count == self.common.count + right.common.count, "Counts don't add up: {:?} + {:?} != {:?}", old_count, self.common.count, right.common.count);
         self.capacity = split_at as u16;
-        println!("Splitted in half. New cacpacities are {:?} and {:?}", self.capacity, right.capacity);
 
-        println!("Self after Split: {self}");
-        println!("Right after Split: {right}");
+
+        NodeStatic::<BM>::overwrite_right(right, NodeDynamic::<BM>::lookup_right_child(self));
+        NodeStatic::<BM>::overwrite_right(self, Some(page_id));
         Ok(())
     }
 
@@ -646,6 +662,23 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeDynamic<'bm, BM> for FullyDen
         }
 
         ret
+    }
+
+    fn lookup_right_child(&self) -> Option<PageId> {
+        read_right_sibling(&self.as_page())
+        /*
+        let offset = PAGE_SIZE
+            - self.common.lower_fence_len as usize
+            - self.common.upper_fence_len as usize
+            - PAGE_ID_LEN;
+        let bytes = self.slice(offset, PAGE_ID_LEN);
+        let id = page_id_from_bytes(bytes.try_into().unwrap());
+
+        if id.x == 0 {
+            None
+        } else {
+            Some(id)
+        }*/
     }
 }
 

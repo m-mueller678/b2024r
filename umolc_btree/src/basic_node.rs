@@ -1,7 +1,7 @@
 use crate::define_node;
 use crate::heap_node::{HeapLength, HeapLengthError, HeapNode, HeapNodeInfo};
 use crate::key_source::{key_head, HeadSourceSlice, SourceSlice, SourceSlicePair};
-use crate::node::{find_separator, insert_upper_sibling, node_tag, page_cast_mut, page_id_from_bytes, page_id_from_olc_bytes, CommonNodeHead, DebugNode, KindInner, KindLeaf, NodeDynamic, NodeKind, NodeStatic, Page, PromoteError, ToFromPageExt, PAGE_ID_LEN, PAGE_SIZE};
+use crate::node::{find_separator, insert_upper_sibling, node_tag, page_cast_mut, page_id_from_bytes, page_id_from_olc_bytes, read_right_sibling, write_right_sibling, CommonNodeHead, DebugNode, KindInner, KindLeaf, NodeDynamic, NodeKind, NodeStatic, Page, PromoteError, ToFromPageExt, PAGE_ID_LEN, PAGE_SIZE};
 use crate::util::Supreme;
 use bstr::{BStr, BString, ByteSlice};
 use bytemuck::{Pod, Zeroable};
@@ -10,7 +10,7 @@ use itertools::Itertools;
 use std::fmt::{Debug, Formatter};
 use std::mem::{offset_of, size_of};
 use std::ops::Range;
-use umolc::{o_project, BufferManager, OPtr, OlcErrorHandler, PageId};
+use umolc::{o_project, BufferManager, BufferManagerGuard, OPtr, OlcErrorHandler, PageId};
 use crate::fully_dense_leaf::FullyDenseLeaf;
 use crate::node::PromoteError::{Capacity, Keys, Node, ValueLen};
 
@@ -333,6 +333,12 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>, V: NodeKind> NodeStatic<'bm, BM> 
         };
         page_id_from_olc_bytes(this.array_slice(lower_offset))
     }
+
+    fn overwrite_right(&mut self, new: Option<PageId>) {
+        write_right_sibling(self.as_page_mut(), new);
+    }
+
+
     fn to_debug_kv(&self) -> (Vec<Vec<u8>>, Vec<Vec<u8>>) {
         let range = 0..self.common.count as usize;
         let keys = range.clone().map(|i| self.key_combined(i).to_vec()).collect();
@@ -382,10 +388,12 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>, V: NodeKind> NodeDynamic<'bm, BM>
     }
 
     fn split(&mut self, bm: BM, parent: &mut dyn NodeDynamic<'bm, BM>, _key: &[u8]) -> Result<(), ()> {
+        let page_id_curr = NodeDynamic::<BM>::lookup_right_child(self);
         let mut left = BasicNode::<V>::zeroed();
         let count = self.common.count as usize;
         let (low_count, sep_key) = find_separator::<BM, _>(self, |i| self.key_combined(i));
         let mut right = insert_upper_sibling(parent, bm, sep_key)?;
+        let page_id = Some(right.page_id());
         let right = page_cast_mut::<_, BasicNode<V>>(&mut *right);
         self.validate();
         let (lr, rr) = if V::IS_LEAF {
@@ -409,6 +417,9 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>, V: NodeKind> NodeDynamic<'bm, BM>
         left.validate();
         right.validate();
         *self = left;
+
+        NodeStatic::<BM>::overwrite_right(self, page_id_curr);
+        NodeStatic::<BM>::overwrite_right(right, page_id);
         Ok(())
     }
 
@@ -547,6 +558,10 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>, V: NodeKind> NodeDynamic<'bm, BM>
             _=> unreachable!()
         }
 
+    }
+
+    fn lookup_right_child(&self) -> Option<PageId> {
+        read_right_sibling(&self.as_page())
     }
 
     fn scan<'a>(&'a self) -> Vec<(Vec<u8>, &'a [u8])> {

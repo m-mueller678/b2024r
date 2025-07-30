@@ -33,6 +33,8 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> Tree<'bm, BM> {
             meta.common.tag = node_tag::METADATA_MARKER;
         }
         NodeStatic::<BM>::init(root_guard.cast_mut::<BasicLeaf>(), &[][..], &[][..], None);
+        NodeStatic::<BM>::overwrite_right(root_guard.cast_mut::<BasicLeaf>(), None);
+
         Tree { meta: meta_guard.page_id(), bm, _p: PhantomData }
     }
 
@@ -67,17 +69,17 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> Tree<'bm, BM> {
         let mut node_pid = self.meta;
         let mut node = self.bm.lock_optimistic(self.meta);
 
-        let mut queue = Vec::new();
 
-        //loop {
-            while o_ptr_is_inner::<BM>(node.o_ptr())  {
-                node_pid = o_ptr_lookup_inner::<BM>(node.o_ptr(), lower_bound, true);
-                queue.push(parent);
-                parent = node;
-                node = self.bm.lock_optimistic(node_pid);
-            }
+        while o_ptr_is_inner::<BM>(node.o_ptr())  {
+            node_pid = o_ptr_lookup_inner::<BM>(node.o_ptr(), lower_bound, true);
+            parent.release_unchecked();
+            parent = node;
+            node = self.bm.lock_optimistic(node_pid);
+        }
 
-            let mut node: BM::GuardX = node.upgrade();
+        let mut node: BM::GuardX = node.upgrade();
+
+        loop {
             let list: Vec<(Vec<u8>, &[u8])> = node.as_dyn_node::<BM>().scan();
             for (y, z) in list {
                 if !callback(&y, z) {
@@ -85,8 +87,16 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> Tree<'bm, BM> {
                 }
             }
 
-
-        //}
+            let right = node.as_dyn_node::<BM>().lookup_right_child();
+            match right {
+                Some(right_id) => {
+                    node = self.bm.lock_optimistic(right_id).upgrade();
+                }
+                None => {
+                    return;
+                }
+            }
+        }
     }
 
     fn try_remove(&self, k: &[u8], removed: &mut bool) {
@@ -302,6 +312,11 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeStatic<'bm, BM> for MetadataP
         PageId { x: o_project!(this.root.x).r() }
     }
 
+    fn overwrite_right(&mut self, new: Option<PageId>) {
+        unimplemented!()
+    }
+
+
     fn to_debug_kv(&self) -> (Vec<Vec<u8>>, Vec<Vec<u8>>) {
         (Vec::new(), vec![page_id_to_bytes(self.root).to_vec()])
     }
@@ -323,6 +338,10 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeDynamic<'bm, BM> for Metadata
     }
 
     fn scan<'a>(&'a self) -> Vec<(Vec<u8>, &'a [u8])> {
+        unimplemented!()
+    }
+
+    fn lookup_right_child(&self) -> Option<PageId>{
         unimplemented!()
     }
 

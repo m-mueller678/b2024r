@@ -1,5 +1,5 @@
 use crate::key_source::SourceSlice;
-use crate::node::{ToFromPageExt, PAGE_SIZE};
+use crate::node::{ToFromPageExt, PAGE_ID_LEN, PAGE_SIZE};
 use crate::Page;
 use bytemuck::{Pod, Zeroable};
 use std::fmt::Debug;
@@ -123,7 +123,9 @@ pub trait HeapNode: ToFromPageExt + Debug {
     fn init_heap(&mut self) {
         self.heap_info_mut().freed = 0;
         self.heap_info_mut().bump =
-            size_of::<Self>() as u16 - self.as_page().common.lower_fence_len - self.as_page().common.upper_fence_len;
+            size_of::<Self>() as u16 - self.as_page().common.lower_fence_len
+            - self.as_page().common.upper_fence_len
+            - PAGE_ID_LEN as u16;
     }
 
     fn compactify(&mut self) {
