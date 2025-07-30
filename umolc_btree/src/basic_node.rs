@@ -388,7 +388,6 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>, V: NodeKind> NodeDynamic<'bm, BM>
     }
 
     fn split(&mut self, bm: BM, parent: &mut dyn NodeDynamic<'bm, BM>, _key: &[u8]) -> Result<(), ()> {
-        let page_id_curr = NodeDynamic::<BM>::lookup_right_child(self);
         let mut left = BasicNode::<V>::zeroed();
         let count = self.common.count as usize;
         let (low_count, sep_key) = find_separator::<BM, _>(self, |i| self.key_combined(i));
@@ -418,8 +417,9 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>, V: NodeKind> NodeDynamic<'bm, BM>
         right.validate();
         *self = left;
 
-        NodeStatic::<BM>::overwrite_right(self, page_id_curr);
-        NodeStatic::<BM>::overwrite_right(right, page_id);
+        NodeStatic::<BM>::overwrite_right(right, NodeDynamic::<BM>::lookup_right_child(self));
+        NodeStatic::<BM>::overwrite_right(self, page_id);
+
         Ok(())
     }
 

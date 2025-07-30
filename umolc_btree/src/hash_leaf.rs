@@ -228,7 +228,6 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeStatic<'bm, BM> for HashLeaf 
 impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeDynamic<'bm, BM> for HashLeaf {
     fn split(&mut self, bm: BM, parent: &mut dyn NodeDynamic<'bm, BM>, _key: &[u8]) -> Result<(), ()> {
         self.sort();
-        let page_id_curr = NodeDynamic::<BM>::lookup_right_child(self);
         let mut left = Self::zeroed();
         let count = self.common.count as usize;
         let (low_count, sep_key) = find_separator::<BM, _>(self, |i| self.heap_key(i));
@@ -255,8 +254,8 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeDynamic<'bm, BM> for HashLeaf
         right.validate();
         *self = left;
 
+        NodeStatic::<BM>::overwrite_right(right, NodeDynamic::<BM>::lookup_right_child(self));
         NodeStatic::<BM>::overwrite_right(self, page_id);
-        NodeStatic::<BM>::overwrite_right(right, page_id_curr);
         Ok(())
     }
 

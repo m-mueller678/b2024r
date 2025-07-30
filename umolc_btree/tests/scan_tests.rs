@@ -24,7 +24,7 @@ fn basic_scan() {
 
     let value = generate_key(0, 4);
 
-    for i in 0..100 {
+    for i in 0..10000 {
         let key = generate_key(i, 8);
         list.push((key.clone(), value.as_slice()));
         tree.insert(key.as_slice(), value.as_slice());
@@ -32,6 +32,7 @@ fn basic_scan() {
 
     let first_key = generate_key(0,8).clone();
 
+    let mut i = 0;
     tree.scan(first_key.as_slice(),
               |x, x1| {
                   println!("Scan: {:?}->{:?}", x, x1.to_vec());
