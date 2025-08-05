@@ -64,22 +64,13 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> Tree<'bm, BM> {
     pub fn scan<F>(&self, lower_bound: &[u8], mut callback: F)
     where
             for<'a> F: FnMut(&Vec<u8>, &'a [u8]) -> bool {
-
-        let mut parent = self.bm.lock_optimistic(self.meta);
-        let mut node_pid = self.meta;
-        let mut node = self.bm.lock_optimistic(self.meta);
-
-
-        while o_ptr_is_inner::<BM>(node.o_ptr())  {
-            node_pid = o_ptr_lookup_inner::<BM>(node.o_ptr(), lower_bound, true);
-            parent.release_unchecked();
-            parent = node;
-            node = self.bm.lock_optimistic(node_pid);
-        }
-
-        let mut node: BM::GuardX = node.upgrade();
+        let mut buffer: [MaybeUninit<u8>; 512] = unsafe { MaybeUninit::uninit().assume_init() };
+        let mut key = lower_bound;
 
         loop {
+            let [parent, node] = self.descend(key, None);
+            let mut node: BM::GuardX = node.upgrade();
+            parent.release_unchecked();
             let list: Vec<(Vec<u8>, &[u8])> = node.as_dyn_node::<BM>().scan();
             for (y, z) in list {
                 if !callback(&y, z) {
@@ -87,16 +78,20 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> Tree<'bm, BM> {
                 }
             }
 
-            let right = node.as_dyn_node::<BM>().lookup_right_child();
-            match right {
-                Some(right_id) => {
-                    node = self.bm.lock_optimistic(right_id).upgrade();
-                }
-                None => {
-                    return;
-                }
+            let upper = node.upper_fence_combined();
+
+            let upper_len = upper.len();
+            key = {
+                upper.to_vec()
+                    .write_to_uninit(&mut buffer[..upper_len])
+            };
+            if key.is_empty() {
+                return;
             }
+
+
         }
+
     }
 
     fn try_remove(&self, k: &[u8], removed: &mut bool) {

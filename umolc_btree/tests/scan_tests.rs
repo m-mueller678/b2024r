@@ -35,7 +35,8 @@ fn basic_scan() {
     let mut i = 0;
     tree.scan(first_key.as_slice(),
               |x, x1| {
-                  println!("Scan: {:?}->{:?}", x, x1.to_vec());
+                  println!("Scan {:?}: {:?}->{:?}", i, x, x1.to_vec());
+                  i += 1;
                   true
               }
     )
