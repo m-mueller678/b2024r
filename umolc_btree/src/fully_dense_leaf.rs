@@ -664,21 +664,34 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeDynamic<'bm, BM> for FullyDen
         ret
     }
 
+    fn scan_with_callback(
+        &self,
+        buffer: &mut [MaybeUninit<u8>; 512],
+        callback: &mut dyn FnMut(&[u8], &[u8]) -> bool
+    ) -> bool {
+
+        for i in 0..self.capacity as usize {
+            if self.get_bit_direct(i) {
+                let key_src = self.key_from_numeric_part(self.reference + i as u32);
+                let key_src_len = key_src.len();
+                let val = self.val(i);
+
+                let key = key_src.to_vec();
+                key_src.write_to_uninit(&mut buffer[..key_src_len]);
+                let full_key : &mut [u8] = unsafe {
+                    std::slice::from_raw_parts_mut(buffer.as_mut_ptr() as *mut u8, key_src_len)
+                };
+
+                if callback(&full_key, val) {
+                    return true;
+                }
+            }
+        }
+        false
+    }
+
     fn lookup_right_child(&self) -> Option<PageId> {
         read_right_sibling(&self.as_page())
-        /*
-        let offset = PAGE_SIZE
-            - self.common.lower_fence_len as usize
-            - self.common.upper_fence_len as usize
-            - PAGE_ID_LEN;
-        let bytes = self.slice(offset, PAGE_ID_LEN);
-        let id = page_id_from_bytes(bytes.try_into().unwrap());
-
-        if id.x == 0 {
-            None
-        } else {
-            Some(id)
-        }*/
     }
 }
 

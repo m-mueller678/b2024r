@@ -37,7 +37,7 @@ fn basic_scan() {
               |x, x1| {
                   println!("Scan {:?}: {:?}->{:?}", i, x, x1.to_vec());
                   i += 1;
-                  true
+                  false
               }
     )
 

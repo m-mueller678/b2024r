@@ -8,7 +8,7 @@ use bytemuck::{Pod, Zeroable};
 use indxvec::Search;
 use itertools::Itertools;
 use std::fmt::{Debug, Formatter};
-use std::mem::{offset_of, size_of};
+use std::mem::{offset_of, size_of, MaybeUninit};
 use std::ops::Range;
 use umolc::{o_project, BufferManager, BufferManagerGuard, OPtr, OlcErrorHandler, PageId};
 use crate::fully_dense_leaf::FullyDenseLeaf;
@@ -579,6 +579,35 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>, V: NodeKind> NodeDynamic<'bm, BM>
         }
 
         ret
+    }
+
+    fn scan_with_callback(
+        &self,
+        buffer: &mut [MaybeUninit<u8>; 512],
+        callback: &mut dyn FnMut(&[u8], &[u8]) -> bool
+    ) -> bool {
+
+        let prefix = self.prefix();
+        let prefix_len = prefix.len();
+        for i in 0..self.common.count {
+            let val = self.heap_val(i as usize);
+
+            let suffix = self.key_combined(i as usize);
+
+            let total_len = prefix_len + suffix.len();
+            prefix.write_to_uninit(&mut buffer[..prefix_len]);
+            suffix.write_to_uninit(&mut buffer[prefix_len..total_len]);
+            let full_key : &mut [u8] = unsafe {
+                std::slice::from_raw_parts_mut(buffer.as_mut_ptr() as *mut u8, total_len)
+            };
+
+
+            if callback(&full_key, val) {
+                return true;
+            }
+        }
+
+        false
     }
 }
 

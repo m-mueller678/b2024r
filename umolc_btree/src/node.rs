@@ -9,7 +9,7 @@ use bytemuck::{Pod, Zeroable};
 use static_assertions::const_assert_eq;
 use std::{assert, fmt};
 use std::fmt::{Debug, Formatter};
-use std::mem::{swap, transmute};
+use std::mem::{swap, transmute, MaybeUninit};
 use std::sync::atomic::AtomicU8;
 use umolc::{
     o_project, BufferManager, BufferManagerExt, BufferManagerGuard, ExclusiveGuard, OPtr, OlcErrorHandler, PageId,
@@ -262,6 +262,7 @@ pub trait NodeDynamic<'bm, BM: BufferManager<'bm, Page = Page>>: ToFromPage + No
     fn leaf_remove(&mut self, k: &[u8]) -> Option<()>;
 
     fn scan<'a>(&'a self) -> Vec<(Vec<u8>, &'a [u8])>;
+    fn scan_with_callback(&self, buffer: &mut [MaybeUninit<u8>; 512], callback: &mut dyn FnMut(&[u8], &[u8]) -> bool) -> bool;
 
     fn can_promote(&self, to: u8) -> Result<(), PromoteError>;
 
