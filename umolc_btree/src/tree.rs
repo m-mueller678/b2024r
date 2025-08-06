@@ -33,7 +33,6 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> Tree<'bm, BM> {
             meta.common.tag = node_tag::METADATA_MARKER;
         }
         NodeStatic::<BM>::init(root_guard.cast_mut::<BasicLeaf>(), &[][..], &[][..], None);
-        NodeStatic::<BM>::overwrite_right(root_guard.cast_mut::<BasicLeaf>(), None);
 
         Tree { meta: meta_guard.page_id(), bm, _p: PhantomData }
     }
@@ -309,10 +308,6 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeStatic<'bm, BM> for MetadataP
         PageId { x: o_project!(this.root.x).r() }
     }
 
-    fn overwrite_right(&mut self, new: Option<PageId>) {
-        unimplemented!()
-    }
-
 
     fn to_debug_kv(&self) -> (Vec<Vec<u8>>, Vec<Vec<u8>>) {
         (Vec::new(), vec![page_id_to_bytes(self.root).to_vec()])
@@ -331,14 +326,6 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeDynamic<'bm, BM> for Metadata
     fn validate(&self) {}
 
     fn leaf_remove(&mut self, _k: &[u8]) -> Option<()> {
-        unimplemented!()
-    }
-
-    fn scan<'a>(&'a self) -> Vec<(Vec<u8>, &'a [u8])> {
-        unimplemented!()
-    }
-
-    fn lookup_right_child(&self) -> Option<PageId>{
         unimplemented!()
     }
 

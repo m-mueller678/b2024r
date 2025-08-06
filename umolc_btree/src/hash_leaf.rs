@@ -1,6 +1,6 @@
 use crate::heap_node::{HeapNode, HeapNodeInfo, HeapLength, ConstHeapLength};
 use crate::key_source::SourceSlice;
-use crate::node::{find_separator, insert_upper_sibling, node_tag, page_cast_mut, DebugNode, NodeDynamic, NodeStatic, ToFromPageExt, PAGE_SIZE, PromoteError, write_right_sibling, read_right_sibling};
+use crate::node::{find_separator, insert_upper_sibling, node_tag, page_cast_mut, DebugNode, NodeDynamic, NodeStatic, ToFromPageExt, PAGE_SIZE, PromoteError};
 use crate::key_source::common_prefix;
 use crate::util::Supreme;
 use crate::fully_dense_leaf::FullyDenseLeaf;
@@ -218,11 +218,6 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeStatic<'bm, BM> for HashLeaf 
         let values = range.map(|i| self.heap_val(i).to_vec()).collect();
         (keys, values)
     }
-
-    fn overwrite_right(&mut self, new: Option<PageId>) {
-        write_right_sibling(self.as_page_mut(), new);
-    }
-
 }
 
 impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeDynamic<'bm, BM> for HashLeaf {
@@ -232,7 +227,6 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeDynamic<'bm, BM> for HashLeaf
         let count = self.common.count as usize;
         let (low_count, sep_key) = find_separator::<BM, _>(self, |i| self.heap_key(i));
         let mut right = insert_upper_sibling(parent, bm, sep_key)?;
-        let page_id = Some(right.page_id());
         let right = right.cast_mut::<Self>();
         self.validate();
         NodeStatic::<BM>::init(&mut left, self.lower_fence(), sep_key, None);
@@ -253,9 +247,6 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeDynamic<'bm, BM> for HashLeaf
         left.validate();
         right.validate();
         *self = left;
-
-        NodeStatic::<BM>::overwrite_right(right, NodeDynamic::<BM>::lookup_right_child(self));
-        NodeStatic::<BM>::overwrite_right(self, page_id);
         Ok(())
     }
 
@@ -308,23 +299,6 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeDynamic<'bm, BM> for HashLeaf
         Some(())
     }
 
-    fn scan<'a>(&'a self) -> Vec<(Vec<u8>, &'a [u8])> {
-        let mut ret: Vec<(Vec<u8>, &'a [u8])> = Vec::with_capacity(self.common.count as usize);
-
-        for i in 0..self.common.count {
-            let val = self.heap_val(i as usize);
-
-            let suffix = self.heap_key(i as usize);
-
-            let mut full_key = Vec::with_capacity(self.common.prefix_len as usize + suffix.len());
-            full_key.extend_from_slice(self.prefix());
-            full_key.extend_from_slice(suffix);
-            ret.push((full_key, val));
-        }
-
-        ret
-    }
-
     fn scan_with_callback(
         &self,
         buffer: &mut [MaybeUninit<u8>; 512],
@@ -352,10 +326,6 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeDynamic<'bm, BM> for HashLeaf
         }
 
         false
-    }
-
-    fn lookup_right_child(&self) -> Option<PageId> {
-        read_right_sibling(&self.as_page())
     }
 
     fn can_promote(&self, to: u8) -> Result<(), PromoteError> {

@@ -1,7 +1,7 @@
 use crate::define_node;
 use crate::heap_node::{HeapLength, HeapLengthError, HeapNode, HeapNodeInfo};
 use crate::key_source::{key_head, HeadSourceSlice, SourceSlice, SourceSlicePair};
-use crate::node::{find_separator, insert_upper_sibling, node_tag, page_cast_mut, page_id_from_bytes, page_id_from_olc_bytes, read_right_sibling, write_right_sibling, CommonNodeHead, DebugNode, KindInner, KindLeaf, NodeDynamic, NodeKind, NodeStatic, Page, PromoteError, ToFromPageExt, PAGE_ID_LEN, PAGE_SIZE};
+use crate::node::{find_separator, insert_upper_sibling, node_tag, page_cast_mut, page_id_from_bytes, page_id_from_olc_bytes, CommonNodeHead, DebugNode, KindInner, KindLeaf, NodeDynamic, NodeKind, NodeStatic, Page, PromoteError, ToFromPageExt, PAGE_ID_LEN, PAGE_SIZE};
 use crate::util::Supreme;
 use bstr::{BStr, BString, ByteSlice};
 use bytemuck::{Pod, Zeroable};
@@ -334,10 +334,6 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>, V: NodeKind> NodeStatic<'bm, BM> 
         page_id_from_olc_bytes(this.array_slice(lower_offset))
     }
 
-    fn overwrite_right(&mut self, new: Option<PageId>) {
-        write_right_sibling(self.as_page_mut(), new);
-    }
-
 
     fn to_debug_kv(&self) -> (Vec<Vec<u8>>, Vec<Vec<u8>>) {
         let range = 0..self.common.count as usize;
@@ -392,7 +388,6 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>, V: NodeKind> NodeDynamic<'bm, BM>
         let count = self.common.count as usize;
         let (low_count, sep_key) = find_separator::<BM, _>(self, |i| self.key_combined(i));
         let mut right = insert_upper_sibling(parent, bm, sep_key)?;
-        let page_id = Some(right.page_id());
         let right = page_cast_mut::<_, BasicNode<V>>(&mut *right);
         self.validate();
         let (lr, rr) = if V::IS_LEAF {
@@ -416,9 +411,6 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>, V: NodeKind> NodeDynamic<'bm, BM>
         left.validate();
         right.validate();
         *self = left;
-
-        NodeStatic::<BM>::overwrite_right(right, NodeDynamic::<BM>::lookup_right_child(self));
-        NodeStatic::<BM>::overwrite_right(self, page_id);
 
         Ok(())
     }
@@ -558,27 +550,6 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>, V: NodeKind> NodeDynamic<'bm, BM>
             _=> unreachable!()
         }
 
-    }
-
-    fn lookup_right_child(&self) -> Option<PageId> {
-        read_right_sibling(&self.as_page())
-    }
-
-    fn scan<'a>(&'a self) -> Vec<(Vec<u8>, &'a [u8])> {
-        let mut ret: Vec<(Vec<u8>, &'a [u8])> = Vec::with_capacity(self.common.count as usize);
-
-        for i in 0..self.common.count {
-            let val = self.heap_val(i as usize);
-
-            let suffix = self.key_combined(i as usize);
-
-            let mut full_key = Vec::with_capacity(self.common.prefix_len as usize + suffix.len());
-            full_key.extend_from_slice(self.prefix());
-            full_key.append(&mut suffix.to_vec());
-            ret.push((full_key, val));
-        }
-
-        ret
     }
 
     fn scan_with_callback(
