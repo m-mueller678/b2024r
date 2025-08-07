@@ -312,6 +312,10 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeStatic<'bm, BM> for MetadataP
     fn to_debug_kv(&self) -> (Vec<Vec<u8>>, Vec<Vec<u8>>) {
         (Vec::new(), vec![page_id_to_bytes(self.root).to_vec()])
     }
+
+    fn hasGoodHeads(&self) -> bool {
+        todo!()
+    }
 }
 
 impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeDynamic<'bm, BM> for MetadataPage {

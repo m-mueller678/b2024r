@@ -378,6 +378,10 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeStatic<'bm, BM> for FullyDens
         let values = indices().map(|i| self.val(i).to_vec()).collect();
         (keys, values)
     }
+
+    fn hasGoodHeads(&self) -> bool {
+        true
+    }
 }
 
 impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeDynamic<'bm, BM> for FullyDenseLeaf {

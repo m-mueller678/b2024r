@@ -12,6 +12,8 @@ use std::mem::{offset_of, size_of, MaybeUninit};
 use std::ops::Range;
 use umolc::{o_project, BufferManager, BufferManagerGuard, OPtr, OlcErrorHandler, PageId};
 use crate::fully_dense_leaf::FullyDenseLeaf;
+use crate::hash_leaf::HashLeaf;
+use crate::node::node_tag::HASH_LEAF;
 use crate::node::PromoteError::{Capacity, Keys, Node, ValueLen};
 
 const HINT_COUNT: usize = 16;
@@ -149,6 +151,10 @@ impl<V: NodeKind> BasicNode<V> {
             let key = restore_prefix.join(self.key_combined(src_i).slice(prefix_grow..));
             dst.insert_pre_allocated_slot(dst_i, key, self.heap_val(src_i));
         }
+    }
+
+    pub fn head_reservation() -> usize {
+        HEAD_RESERVATION
     }
 
     pub fn insert_pre_allocated_slot(&mut self, index: usize, key: impl SourceSlice, val: &[u8]) {
@@ -344,6 +350,22 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>, V: NodeKind> NodeStatic<'bm, BM> 
             .collect();
         (keys, values)
     }
+
+    fn hasGoodHeads(&self) -> bool {
+        let treshold = self.common.count as usize / 16;
+        let mut collision_count = 0;
+        for i in 1..self.common.count as usize {
+            let head1 = self.heads()[i - 1];
+            let head2 = self.heads()[i];
+            if head1 == head2 {
+                collision_count += 1;
+            }
+            if collision_count > treshold {
+                return false;
+            }
+        }
+        true
+    }
 }
 
 impl<'bm, BM: BufferManager<'bm, Page = Page>, V: NodeKind> NodeDynamic<'bm, BM> for BasicNode<V> {
@@ -503,6 +525,31 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>, V: NodeKind> NodeDynamic<'bm, BM>
                                                      first_val.len()) {
                     return Err(Capacity);
 
+                }
+
+                Ok(())
+            },
+            node_tag::HASH_LEAF => {
+
+                let count = self.common.count;
+                let bump = self.heap_info().bump;
+
+                // approximated bump of hash_leaf (the keys are 4 byte longer because of the heads)
+                // well, more like up to 4 bytes, because some keys might be less than 4 bytes long.
+                // but I dont think this slight difference is worth the effort,
+                // as they will just be promoted to FDLs then, probably.
+                let new_bump = bump-(4*count);
+
+                let slots = HashLeaf::slot_reservation(count as usize);
+                let hashes = count;
+
+                // the two is the "sorted" u16.
+                let metadata = size_of::<CommonNodeHead>() + size_of::<HashLeaf>() + 2;
+
+                let total_req = metadata + slots + hashes as usize;
+
+                if total_req >= new_bump as usize {
+                    return Err(Capacity);
                 }
 
                 Ok(())

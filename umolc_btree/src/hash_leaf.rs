@@ -16,6 +16,7 @@ use std::mem::{offset_of, MaybeUninit};
 use std::ops::Range;
 use indxvec::Printing;
 use umolc::{o_project, BufferManager, BufferManagerGuard, OPtr, OlcErrorHandler, PageId};
+use crate::basic_node::BasicLeaf;
 use crate::hash_leaf::PromoteError::{Capacity, Keys, ValueLen};
 
 define_node! {
@@ -43,7 +44,7 @@ impl HashLeaf {
         Self::SLOT_OFFSET + Self::slot_reservation(count) * 2
     }
 
-    fn slot_reservation(count: usize) -> usize {
+    pub fn slot_reservation(count: usize) -> usize {
         count.next_multiple_of(SLOT_RESERVATION)
     }
 
@@ -217,6 +218,30 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeStatic<'bm, BM> for HashLeaf 
         let keys = range.clone().map(|i| self.heap_key(i).to_vec()).collect();
         let values = range.map(|i| self.heap_val(i).to_vec()).collect();
         (keys, values)
+    }
+
+    fn hasGoodHeads(&self) -> bool {
+        let treshold = self.common.count as usize / 16;
+        let mut collision_count = 0;
+        for i in 1..self.common.count as usize {
+            let key1 = self.heap_key(i-1);
+            let key2 = self.heap_key(i);
+
+            if key1.len() < 4 || key2.len() < 4 {
+                continue;
+            }
+
+            let head1 = &key1[..4];
+            let head2 = &key2[..4];
+
+            if head1 == head2 {
+                collision_count += 1;
+            }
+            if collision_count > treshold {
+                return false;
+            }
+        }
+        true
     }
 }
 
@@ -414,6 +439,29 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeDynamic<'bm, BM> for HashLeaf
                                                      first_val.len()) {
                     return Err(Capacity);
 
+                }
+
+                Ok(())
+            },
+            node_tag::BASIC_LEAF => {
+
+                let count = self.common.count;
+                let bump = self.heap_info().bump;
+
+                // 4 byte heads will be removed from each key
+                let new_bump = bump + 4 * count;
+                let slots = count*2;
+
+                // next multiple of head reservation times head size as estimate of head array
+                let heads = count.next_multiple_of(BasicLeaf::head_reservation() as u16)*4;
+
+
+                let hint_size = 64;
+
+                let new_size = slots * 2 + heads + hint_size + size_of::<CommonNodeHead>() as u16 + size_of::<HeapNodeInfo>() as u16;
+
+                if new_size >= new_bump{
+                    return Err(Capacity);
                 }
 
                 Ok(())

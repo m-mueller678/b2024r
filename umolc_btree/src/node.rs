@@ -116,6 +116,28 @@ impl fmt::Display for PromoteError {
     }
 }
 
+pub fn increase_scan_counter(common: &mut CommonNodeHead) {
+    if common.scan_counter == 255 {
+        return;
+    }
+    if fastrand::u8(..100) < 15 {
+        if common.scan_counter < 3 {
+            common.scan_counter += 1;
+        }
+    }
+}
+
+pub fn decrease_scan_counter(common: &mut CommonNodeHead) {
+    if common.scan_counter == 255 {
+        return;
+    }
+    if fastrand::u8(..100) < 5 {
+        if common.scan_counter > 0 {
+            common.scan_counter -= 1;
+        }
+    }
+}
+
 impl Debug for PromoteError {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         std::fmt::Display::fmt(self, f)
@@ -252,6 +274,8 @@ pub trait NodeStatic<'bm, BM: BufferManager<'bm, Page = Page>>: NodeDynamic<'bm,
     fn lookup_inner(this: OPtr<'_, Self, BM::OlcEH>, key: &[u8], high_on_equal: bool) -> PageId;
 
     fn to_debug_kv(&self) -> (Vec<Vec<u8>>, Vec<Vec<u8>>);
+
+    fn hasGoodHeads(&self) -> bool;
 }
 
 pub trait NodeDynamic<'bm, BM: BufferManager<'bm, Page = Page>>: ToFromPage + NodeDynamicAuto<'bm, BM> + Debug {
