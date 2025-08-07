@@ -41,6 +41,8 @@ pub struct CommonNodeHead {
     pub count: u16,
     pub lower_fence_len: u16,
     pub upper_fence_len: u16,
+    pub scan_counter: u8,
+    pub _pad: u8,
 }
 
 const NODE_UNSAFE_CELL_HEAD: usize = 2;

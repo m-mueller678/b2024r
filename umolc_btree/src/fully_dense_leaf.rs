@@ -22,10 +22,10 @@ use crate::fully_dense_leaf::insert_resolver::Resolution::SplitHigh;
 define_node! {
     pub struct FullyDenseLeaf {
         pub common: CommonNodeHead,
+        reference: u32,
         key_len:u16,
         capacity:u16, // if reference is close to u32::MAX or upper fence, capacity will not be lowered
         val_len:u16,
-        reference: u32,
         split_mode:u8,
         _data: [u8; PAGE_SIZE-size_of::<CommonNodeHead>()-11],
     }

@@ -1,6 +1,6 @@
 use crate::heap_node::{HeapNode, HeapNodeInfo, HeapLength, ConstHeapLength};
 use crate::key_source::SourceSlice;
-use crate::node::{find_separator, insert_upper_sibling, node_tag, page_cast_mut, DebugNode, NodeDynamic, NodeStatic, ToFromPageExt, PAGE_SIZE, PromoteError};
+use crate::node::{find_separator, insert_upper_sibling, node_tag, page_cast_mut, DebugNode, NodeDynamic, NodeStatic, ToFromPageExt, PAGE_SIZE, PromoteError, CommonNodeHead};
 use crate::key_source::common_prefix;
 use crate::util::Supreme;
 use crate::fully_dense_leaf::FullyDenseLeaf;
@@ -28,7 +28,7 @@ define_node! {
 }
 
 
-const HASH_LEAF_DATA_SIZE: usize = PAGE_SIZE - 16;
+const HASH_LEAF_DATA_SIZE: usize = PAGE_SIZE - size_of::<CommonNodeHead>() -6;
 const SLOT_RESERVATION: usize = 8;
 
 impl HashLeaf {

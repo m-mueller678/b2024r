@@ -24,7 +24,6 @@ define_node! {
     pub struct BasicNode<V> {
         pub common: CommonNodeHead,
         heap: HeapNodeInfo,
-        _pad: u16,
         hints: [u32; HINT_COUNT],
         _data: [u32; BASIC_NODE_DATA_SIZE],
     }
