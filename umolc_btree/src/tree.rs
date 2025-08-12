@@ -31,6 +31,7 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> Tree<'bm, BM> {
             let meta = page_cast_mut::<_, MetadataPage>(&mut *meta_guard);
             meta.root = root_guard.page_id();
             meta.common.tag = node_tag::METADATA_MARKER;
+            meta.common.scan_counter = 3;
         }
         NodeStatic::<BM>::init(root_guard.cast_mut::<BasicLeaf>(), &[][..], &[][..], None);
 
@@ -73,7 +74,7 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> Tree<'bm, BM> {
             let [parent, node] = self.descend(key, None);
             let mut node: BM::GuardX = node.upgrade();
             parent.release_unchecked();
-            let ret = node.as_dyn_node::<BM>().scan_with_callback(&mut buffer_for_callback, &mut callback);
+            let ret = node.as_dyn_node_mut::<BM>().scan_with_callback(&mut buffer_for_callback, &mut callback);
 
             if ret {
                 return;
@@ -313,8 +314,12 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeStatic<'bm, BM> for MetadataP
         (Vec::new(), vec![page_id_to_bytes(self.root).to_vec()])
     }
 
-    fn hasGoodHeads(&self) -> bool {
+    fn set_scan_counter(&mut self, counter: u8) {
         todo!()
+    }
+
+    fn hasGoodHeads(&self) -> (bool, bool) {
+        unimplemented!()
     }
 }
 
@@ -341,7 +346,7 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeDynamic<'bm, BM> for Metadata
         unimplemented!()
     }
 
-    fn scan_with_callback(&self, buffer: &mut [MaybeUninit<u8>; 512], callback: &mut dyn FnMut(&[u8], &[u8]) -> bool) -> bool {
+    fn scan_with_callback(&mut self, buffer: &mut [MaybeUninit<u8>; 512], callback: &mut dyn FnMut(&[u8], &[u8]) -> bool) -> bool {
         todo!()
     }
 }

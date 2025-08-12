@@ -1,13 +1,13 @@
 use crate::define_node;
 use crate::heap_node::{HeapLength, HeapLengthError, HeapNode, HeapNodeInfo};
 use crate::key_source::{key_head, HeadSourceSlice, SourceSlice, SourceSlicePair};
-use crate::node::{find_separator, insert_upper_sibling, node_tag, page_cast_mut, page_id_from_bytes, page_id_from_olc_bytes, CommonNodeHead, DebugNode, KindInner, KindLeaf, NodeDynamic, NodeKind, NodeStatic, Page, PromoteError, ToFromPageExt, PAGE_ID_LEN, PAGE_SIZE};
+use crate::node::{decrease_scan_counter, find_separator, increase_scan_counter, insert_upper_sibling, node_tag, page_cast_mut, page_id_from_bytes, page_id_from_olc_bytes, CommonNodeHead, DebugNode, KindInner, KindLeaf, NodeDynamic, NodeDynamicAuto, NodeKind, NodeStatic, Page, PromoteError, ToFromPageExt, PAGE_ID_LEN, PAGE_SIZE};
 use crate::util::Supreme;
 use bstr::{BStr, BString, ByteSlice};
 use bytemuck::{Pod, Zeroable};
 use indxvec::Search;
 use itertools::Itertools;
-use std::fmt::{Debug, Formatter};
+use std::fmt::{Debug, Formatter, Octal};
 use std::mem::{offset_of, size_of, MaybeUninit};
 use std::ops::Range;
 use umolc::{o_project, BufferManager, BufferManagerGuard, OPtr, OlcErrorHandler, PageId};
@@ -271,11 +271,24 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>, V: NodeKind> NodeStatic<'bm, BM> 
     type TruncatedKey<'a> = SourceSlicePair<u8, HeadSourceSlice, &'a [u8]>;
 
     fn insert(&mut self, key: &[u8], val: &[u8]) -> Result<Option<()>, ()> {
+        if !<Self as NodeStatic<'bm, BM>>::IS_INNER {
+            if self.common.scan_counter == 0 {
+                let page = self.as_page_mut();
+                if page.as_dyn_node_mut::<BM>().can_promote(node_tag::HASH_LEAF).is_ok() {
+                    println!("Casting to hash leaf");
+                    page.as_dyn_node_mut::<BM>().promote(node_tag::HASH_LEAF);
+                    return page.as_dyn_node_mut::<BM>().insert_leaf(key, val);
+                }
+            }
+            decrease_scan_counter(&mut self.common);
+        }
+
+
         let index = Self::find::<BM::OlcEH>(OPtr::from_mut(self), key);
         let count = self.common.count as usize;
         let new_heap_start = Self::heap_start_min(count + index.is_err() as usize);
         let key = &key[self.common.prefix_len as usize..];
-        HeapNode::insert(self, new_heap_start, key, val, index, |this| {
+        let res = HeapNode::insert(self, new_heap_start, key, val, index, |this| {
             let insert_at = index.unwrap_err();
             let orhc = Self::reserved_head_count(count);
             let nrhc = Self::reserved_head_count(count + 1);
@@ -294,7 +307,9 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>, V: NodeKind> NodeStatic<'bm, BM> 
             this.set_head(insert_at, key_head(key));
             this.update_hints(count, count + 1, insert_at);
         })
-        .map_err(|_| ())
+        .map_err(|_| ());
+
+        res
     }
 
     fn init(&mut self, lf: impl SourceSlice, uf: impl SourceSlice, lower: Option<&[u8; 5]>) {
@@ -351,20 +366,40 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>, V: NodeKind> NodeStatic<'bm, BM> 
         (keys, values)
     }
 
-    fn hasGoodHeads(&self) -> bool {
+    fn set_scan_counter(&mut self, counter: u8) {
+        self.common.scan_counter = counter;
+    }
+
+    fn hasGoodHeads(&self) -> (bool, bool) {
         let treshold = self.common.count as usize / 16;
         let mut collision_count = 0;
-        for i in 1..self.common.count as usize {
+
+        let mut first = true;
+        let mut second = true;
+
+        for i in 1..(self.common.count / 2) as usize {
             let head1 = self.heads()[i - 1];
             let head2 = self.heads()[i];
             if head1 == head2 {
                 collision_count += 1;
             }
             if collision_count > treshold {
-                return false;
+                first = false;
+                break;
             }
         }
-        true
+        for i in (self.common.count as usize / 2)..self.common.count as usize {
+            let head1 = self.heads()[i - 1];
+            let head2 = self.heads()[i];
+            if head1 == head2 {
+                collision_count += 1;
+            }
+            if collision_count > treshold {
+                second = false;
+                break;
+            }
+        }
+        (first, second)
     }
 }
 
@@ -405,7 +440,13 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>, V: NodeKind> NodeDynamic<'bm, BM>
     }
 
     fn split(&mut self, bm: BM, parent: &mut dyn NodeDynamic<'bm, BM>, _key: &[u8]) -> Result<(), ()> {
+
+        let (lft, rght) = NodeStatic::<BM>::hasGoodHeads(self);
+
         let mut left = BasicNode::<V>::zeroed();
+
+        let scan_counter = self.common.scan_counter;
+
         let count = self.common.count as usize;
         let (low_count, sep_key) = find_separator::<BM, _>(self, |i| self.key_combined(i));
         let mut right = insert_upper_sibling(parent, bm, sep_key)?;
@@ -429,10 +470,14 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>, V: NodeKind> NodeDynamic<'bm, BM>
         right.common.count = rr.len() as u16;
         self.copy_records(right, rr.clone(), 0);
         right.update_hints(0, rr.count(), 0);
+
+        left.common.scan_counter = if lft {255} else if scan_counter == 255 {3} else {scan_counter};
+
+        right.common.scan_counter = if lft {255} else if scan_counter == 255 {3} else {scan_counter};
+
         left.validate();
         right.validate();
         *self = left;
-
         Ok(())
     }
 
@@ -540,11 +585,11 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>, V: NodeKind> NodeDynamic<'bm, BM>
                 // as they will just be promoted to FDLs then, probably.
                 let new_bump = bump-(4*count);
 
-                let slots = HashLeaf::slot_reservation(count as usize);
+                let slots = HashLeaf::slot_reservation(count as usize) * 2;
                 let hashes = count;
 
                 // the two is the "sorted" u16.
-                let metadata = size_of::<CommonNodeHead>() + size_of::<HashLeaf>() + 2;
+                let metadata = size_of::<CommonNodeHead>() + size_of::<HeapNodeInfo>() + 2;
 
                 let total_req = metadata + slots + hashes as usize;
 
@@ -560,7 +605,6 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>, V: NodeKind> NodeDynamic<'bm, BM>
 
 
     fn promote(&mut self, to: u8) {
-        println!("Promoting to FDL");
         match to {
             node_tag::FULLY_DENSE_LEAF => {
                 println!("Promoting to FDL");
@@ -572,10 +616,12 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>, V: NodeKind> NodeDynamic<'bm, BM>
                 let key_len = first_key.len();
                 let val_len = first_val.len();
 
+                let scan_counter = self.common.scan_counter;
+
 
 
                 let mut fdl = FullyDenseLeaf::zeroed();
-                fdl.init_wrapper(self.lower_fence(), self.upper_fence_combined(), key_len+prefix_len, val_len)
+                fdl.init(self.lower_fence(), self.upper_fence_combined(), key_len+prefix_len, val_len)
                     .expect("FDL init_wrapper failed in promote()");
 
 
@@ -591,18 +637,47 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>, V: NodeKind> NodeDynamic<'bm, BM>
                     fdl.force_insert::<BM::OlcEH>(full_key.as_slice(), val);
                 }
 
+                NodeStatic::<BM>::set_scan_counter(&mut fdl, scan_counter);
                 *self.as_page_mut() = fdl.copy_page();
             },
+            node_tag::HASH_LEAF => {
+                let count = self.common.count as usize;
+
+                let scan_counter = self.common.scan_counter;
+
+                let mut hash_leaf = HashLeaf::zeroed();
+                NodeStatic::<BM>::init(&mut hash_leaf, self.lower_fence(), self.upper_fence_combined(), None);
+
+
+                for i in 0..count {
+                    let suffix = self.key_combined(i);
+                    let val = self.heap_val(i);
+
+                    let mut full_key = Vec::with_capacity(self.common.prefix_len as usize + suffix.len());
+
+                    full_key.extend_from_slice(self.prefix());
+                    full_key.append(&mut suffix.to_vec());
+                    let result = NodeStatic::<BM>::insert(&mut hash_leaf, full_key.as_slice(), val);
+                    if result.is_err() {
+                        panic!("promote: insert failed");
+                    }
+                }
+                NodeStatic::<BM>::set_scan_counter(&mut hash_leaf, scan_counter);
+
+                *self.as_page_mut() = hash_leaf.copy_page();
+            }
             _=> unreachable!()
         }
 
     }
 
     fn scan_with_callback(
-        &self,
+        &mut self,
         buffer: &mut [MaybeUninit<u8>; 512],
         callback: &mut dyn FnMut(&[u8], &[u8]) -> bool
     ) -> bool {
+
+        increase_scan_counter(&mut self.common);
 
         let prefix = self.prefix();
         let prefix_len = prefix.len();
