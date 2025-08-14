@@ -272,14 +272,6 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>, V: NodeKind> NodeStatic<'bm, BM> 
 
     fn insert(&mut self, key: &[u8], val: &[u8]) -> Result<Option<()>, ()> {
         if !<Self as NodeStatic<'bm, BM>>::IS_INNER {
-            if self.common.scan_counter == 0 {
-                let page = self.as_page_mut();
-                if page.as_dyn_node_mut::<BM>().can_promote(node_tag::HASH_LEAF).is_ok() {
-                    println!("Casting to hash leaf");
-                    page.as_dyn_node_mut::<BM>().promote(node_tag::HASH_LEAF);
-                    return page.as_dyn_node_mut::<BM>().insert_leaf(key, val);
-                }
-            }
             decrease_scan_counter(&mut self.common);
         }
 
@@ -288,7 +280,7 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>, V: NodeKind> NodeStatic<'bm, BM> 
         let count = self.common.count as usize;
         let new_heap_start = Self::heap_start_min(count + index.is_err() as usize);
         let key = &key[self.common.prefix_len as usize..];
-        let res = HeapNode::insert(self, new_heap_start, key, val, index, |this| {
+        HeapNode::insert(self, new_heap_start, key, val, index, |this| {
             let insert_at = index.unwrap_err();
             let orhc = Self::reserved_head_count(count);
             let nrhc = Self::reserved_head_count(count + 1);
@@ -307,9 +299,7 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>, V: NodeKind> NodeStatic<'bm, BM> 
             this.set_head(insert_at, key_head(key));
             this.update_hints(count, count + 1, insert_at);
         })
-        .map_err(|_| ());
-
-        res
+        .map_err(|_| ())
     }
 
     fn init(&mut self, lf: impl SourceSlice, uf: impl SourceSlice, lower: Option<&[u8; 5]>) {
@@ -676,7 +666,6 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>, V: NodeKind> NodeDynamic<'bm, BM>
         buffer: &mut [MaybeUninit<u8>; 512],
         callback: &mut dyn FnMut(&[u8], &[u8]) -> bool
     ) -> bool {
-
         increase_scan_counter(&mut self.common);
 
         let prefix = self.prefix();
@@ -700,6 +689,20 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>, V: NodeKind> NodeDynamic<'bm, BM>
         }
 
         false
+    }
+
+    fn qualifies_for_promote(&self) -> Option<u8> {
+        debug_assert!(!<Self as NodeStatic<'bm, BM>>::IS_INNER);
+        if self.common.scan_counter == 0 {
+            Some(node_tag::HASH_LEAF)
+        }
+        else {
+            None
+        }
+    }
+
+    fn retry_later(&mut self) {
+        self.common.scan_counter += 1;
     }
 }
 

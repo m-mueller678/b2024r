@@ -170,6 +170,22 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> Tree<'bm, BM> {
     fn try_insert(&self, k: &[u8], val: &[u8]) -> Option<()> {
         let [parent, node] = self.descend(k, None);
         let mut node: BM::GuardX = node.upgrade();
+
+        match node.as_dyn_node::<BM>().qualifies_for_promote() {
+            Some(to) => {
+
+                println!("This shit actually fired, holy fuck! {:?}", to);
+                if node.as_dyn_node::<BM>().can_promote(to).is_ok() {
+                    node.as_dyn_node_mut::<BM>().promote(to);
+                }
+                else {
+                    println!("This shit actually fired :(");
+                    node.as_dyn_node_mut::<BM>().retry_later();
+                }
+            },
+            None => {}
+        }
+
         match node.as_dyn_node_mut::<BM>().insert_leaf(k, val) {
             Ok(x) => {
                 parent.release_unchecked();
@@ -182,17 +198,8 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> Tree<'bm, BM> {
 
                 let can_promote = node.as_dyn_node::<BM>().can_promote(node_tag::FULLY_DENSE_LEAF);
 
-
-                match &can_promote {
-                    Ok(_) => println!("promotion possible"),
-
-                    Err(e) => println!("🥀 promotion failed: {:?}", e),
-                };
                 if can_promote.is_ok() {
                     node.as_dyn_node_mut::<BM>().promote(node_tag::FULLY_DENSE_LEAF);
-
-
-
                 }
 
                 else if self.split_locked_node(&mut node, &mut parent, k).is_err() {
@@ -347,6 +354,14 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeDynamic<'bm, BM> for Metadata
     }
 
     fn scan_with_callback(&mut self, buffer: &mut [MaybeUninit<u8>; 512], callback: &mut dyn FnMut(&[u8], &[u8]) -> bool) -> bool {
+        unimplemented!()
+    }
+
+    fn qualifies_for_promote(&self) -> Option<u8> {
+        unimplemented!()
+    }
+
+    fn retry_later(&mut self) {
         todo!()
     }
 }

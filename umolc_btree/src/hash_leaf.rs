@@ -191,11 +191,10 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeStatic<'bm, BM> for HashLeaf 
     }
 
     fn insert(&mut self, key: &[u8], val: &[u8]) -> Result<Option<()>, ()> {
-        decrease_scan_counter(&mut self.common);
         let (index, hash) = Self::find::<BM::OlcEH>(OPtr::from_mut(self), key);
         let count = self.common.count as usize;
         let new_heap_start = Self::heap_start_min(count + index.is_none() as usize);
-        let res = HeapNode::insert(
+        HeapNode::insert(
             self,
             new_heap_start,
             &key[self.common.prefix_len as usize..],
@@ -211,8 +210,7 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeStatic<'bm, BM> for HashLeaf 
                 *this.page_index_mut::<u8>(Self::hash_offset(count + 1) + count) = hash;
             },
         )
-        .map_err(|_| ());
-        res
+        .map_err(|_| ())
     }
 
     fn to_debug_kv(&self) -> (Vec<Vec<u8>>, Vec<Vec<u8>>) {
@@ -308,11 +306,15 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeDynamic<'bm, BM> for HashLeaf
 
         if rgth {
             right.common.scan_counter = 255;
-            //NodeDynamic::<BM>::promote(right, node_tag::BASIC_LEAF);
+        }
+        else {
+            right.common.scan_counter = if scan_counter == 255 { 3 } else { scan_counter };
         }
         if lft {
             left.common.scan_counter = 255;
-            //NodeDynamic::<BM>::promote(&mut left, node_tag::BASIC_LEAF);
+        }
+        else {
+            left.common.scan_counter = if scan_counter == 255 { 3 } else { scan_counter };
         }
 
         *self = left;
@@ -374,12 +376,6 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeDynamic<'bm, BM> for HashLeaf
         buffer: &mut [MaybeUninit<u8>; 512],
         callback: &mut dyn FnMut(&[u8], &[u8]) -> bool
     ) -> bool {
-        //TODO see if this breaks stuff.
-        if self.common.scan_counter == 3 && false {
-            self.as_page_mut().as_dyn_node_mut::<BM>().promote(node_tag::BASIC_LEAF);
-            return   self.as_page_mut().as_dyn_node_mut::<BM>().scan_with_callback(buffer, callback);
-        }
-
         increase_scan_counter(&mut self.common);
 
         let prefix = self.prefix();
@@ -578,6 +574,24 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeDynamic<'bm, BM> for HashLeaf
             }
             _=> unreachable!("promote: unexpected node tag {:?}", to)
         }
+    }
+
+    fn qualifies_for_promote(&self) -> Option<u8> {
+        if self.common.scan_counter >= 3 {
+
+            // if the scan_counter is 255 (which is the only sensible option) we promote, as that node has good heads
+            Some(node_tag::BASIC_LEAF)
+        }
+        else {
+            None
+        }
+    }
+
+
+    // will only be called if qualifies for promote, but promotion is not possible.
+    // We just delay, as it is most likely that the node will be split soon anyways.
+    fn retry_later(&mut self) {
+        self.common.scan_counter -= 1;
     }
 }
 

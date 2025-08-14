@@ -301,6 +301,10 @@ pub trait NodeDynamic<'bm, BM: BufferManager<'bm, Page = Page>>: ToFromPage + No
     fn can_promote(&self, to: u8) -> Result<(), PromoteError>;
 
     fn promote(&mut self, to: u8);
+
+    fn qualifies_for_promote(&self) -> Option<u8>;
+
+    fn retry_later (&mut self);
 }
 
 pub trait NodeDynamicAuto<'bm, BM: BufferManager<'bm, Page = Page>> {

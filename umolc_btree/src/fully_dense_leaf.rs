@@ -264,38 +264,27 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeStatic<'bm, BM> for FullyDens
         let mut index = Cell::new(usize::MAX);
         let resolution = resolve(
             || {
+
+                // The heads are always fine for fully dense leaves
                 (NodeDynamic::<BM>::can_promote)(self, node_tag::BASIC_LEAF).is_ok()
             },
             || {
-                let result = self.common.count as usize * 4 <= self.capacity as usize;
-                //println!("is_low {:?}", result);
-                result
+                self.common.count as usize * 4 <= self.capacity as usize
             },
             {
-                let result = val.len() == self.val_len as usize && key.len() == self.key_len as usize;
-                //println!("len_is_ok {:?}", result);
-                //println!("val_len: {:?} vs. val.len() {:?}, key_len: {:?} vs key.len() {:?}", self.val_len, val.len(), self.key_len, key.len());
-                result
+                val.len() == self.val_len as usize && key.len() == self.key_len as usize
             },
             || {
                 let res = Self::key_to_index::<BM::OlcEH>(unsafe { OPtr::from_ref(self) }, key);
                 if let Ok(i) = res {
                     index.set(i);
                 }
-                let result = res.is_ok();
-                //println!("nnp_is_ok: {:?}", result);
-                result
+                res.is_ok()
             },
             || {
-                let res = index.get() < self.capacity as usize;
-                //println!("index_is_ok: {:?}", res);
-                //println!("index vs capacity: {:?} vs {:?}", index.get(), self.capacity as usize);
-                res
+                index.get() < self.capacity as usize
             },
         );
-        if resolution != Resolution::Ok {
-            println!("Resolution: {:?}", resolution);
-        }
         let index = index.get();
         match resolution {
             Resolution::Ok => {
@@ -551,7 +540,6 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeDynamic<'bm, BM> for FullyDen
                 let required_bytes = head_bytes + slot_bytes + hint_bytes + fence_bytes + heap_bytes;
 
                 if required_bytes > data_bytes {
-                    println!("Required bytes: {required_bytes}, data bytes: {data_bytes}");
                     return Err(PromoteError::Capacity);
                 }
 
@@ -652,6 +640,15 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeDynamic<'bm, BM> for FullyDen
         }
         false
     }
+
+    fn qualifies_for_promote(&self) -> Option<u8> {
+        None
+    }
+
+
+    fn retry_later(&mut self) {
+        unreachable!();
+    }
 }
 
 impl Debug for FullyDenseLeaf {
@@ -743,7 +740,6 @@ mod test {
                 panic!("Error: Couldn't remove the values present. This is an error of the node logic itself, this test has no responsibility for it.");
             }
             if NodeDynamic::<BM>::can_promote(leaf, node_tag).is_ok(){
-                println!("Can promote at: {:?}", leaf.common.count);
                 break;
             }
         }
@@ -843,7 +839,7 @@ mod test {
         for val_len in 0..100 {
             for key_len in 1..10 {
                 test_leaf::<&'static SimpleBm<Page>>(node_tag::BASIC_LEAF, key_len*4, val_len);
-                println!("Passed for Key len: {key_len}, Val len: {val_len}")
+                //println!("Passed for Key len: {key_len}, Val len: {val_len}")
             }
         }
     }
@@ -854,7 +850,7 @@ mod test {
         for val_len in 0..100 {
             for key_len in 1..10 {
                 test_leaf::<&'static SimpleBm<Page>>(node_tag::HASH_LEAF, key_len*4, val_len);
-                println!("Passed for Key len: {key_len}, Val len: {val_len}")
+                //println!("Passed for Key len: {key_len}, Val len: {val_len}")
             }
         }
     }
