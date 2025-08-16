@@ -74,6 +74,20 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> Tree<'bm, BM> {
             let [parent, node] = self.descend(key, None);
             let mut node: BM::GuardX = node.upgrade();
             parent.release_unchecked();
+
+            match node.as_dyn_node::<BM>().qualifies_for_promote() {
+                None => {},
+                Some(to) => {
+                    println!("We need to promote because of scans: {to}");
+                    if node.as_dyn_node::<BM>().can_promote(to).is_ok() {
+                        node.as_dyn_node_mut::<BM>().promote(to);
+                    }
+                    else {
+                        node.as_dyn_node_mut::<BM>().retry_later();
+                    }
+                },
+            }
+
             let ret = node.as_dyn_node_mut::<BM>().scan_with_callback(&mut buffer_for_callback, &mut callback);
 
             if ret {
