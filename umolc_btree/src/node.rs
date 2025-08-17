@@ -132,9 +132,6 @@ pub fn increase_scan_counter(common: &mut CommonNodeHead){
 }
 
 pub fn decrease_scan_counter(common: &mut CommonNodeHead) {
-    if common.scan_counter == 255 {
-        return;
-    }
     if fastrand::u8(..100) < 5 {
         if common.scan_counter > 0 {
             common.scan_counter -= 1;
@@ -296,7 +293,11 @@ pub trait NodeDynamic<'bm, BM: BufferManager<'bm, Page = Page>>: ToFromPage + No
     fn validate(&self);
     fn leaf_remove(&mut self, k: &[u8]) -> Option<()>;
 
-    fn scan_with_callback(&mut self, buffer: &mut [MaybeUninit<u8>; 512], callback: &mut dyn FnMut(&[u8], &[u8]) -> bool) -> bool;
+    fn scan_with_callback(&mut self, buffer: &mut [MaybeUninit<u8>; 512], start : Option<&[u8]>, callback: &mut dyn FnMut(&[u8], &[u8]) -> bool) -> bool;
+
+    fn get_node_tag(&self) -> u8;
+
+    fn get_scan_counter(&self) -> u8;
 
     fn can_promote(&self, to: u8) -> Result<(), PromoteError>;
 

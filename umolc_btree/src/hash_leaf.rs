@@ -206,7 +206,9 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeStatic<'bm, BM> for HashLeaf 
                 if r1 != r2 {
                     this.relocate_by::<true, u8>(Self::SLOT_OFFSET + r1 * 2, count, SLOT_RESERVATION * 2);
                 }
-                this.common.count += 1;
+                if index.is_none() {
+                    this.common.count += 1;
+                }
                 *this.page_index_mut::<u8>(Self::hash_offset(count + 1) + count) = hash;
             },
         )
@@ -374,19 +376,30 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeDynamic<'bm, BM> for HashLeaf
     fn scan_with_callback(
         &mut self,
         buffer: &mut [MaybeUninit<u8>; 512],
+        start: Option<&[u8]>,
         callback: &mut dyn FnMut(&[u8], &[u8]) -> bool
     ) -> bool {
         increase_scan_counter(&mut self.common);
 
+        let mut lf : usize = 0;
+
+        match start {
+            None => {},
+            Some(key) => {
+                let (index, _hash) = Self::find::<BM::OlcEH>(OPtr::from_mut(self), key);
+                lf = index.unwrap_or(0);
+            }
+        }
+
         let prefix = self.prefix();
         let prefix_len = prefix.len();
-        for i in 0..self.common.count {
+        prefix.write_to_uninit(&mut buffer[..prefix_len]);
+        for i in lf..self.common.count as usize {
             let val = self.heap_val(i as usize);
 
             let suffix = self.heap_key(i as usize);
 
             let total_len = prefix_len + suffix.len();
-            prefix.write_to_uninit(&mut buffer[..prefix_len]);
             suffix.write_to_uninit(&mut buffer[prefix_len..total_len]);
             let full_key : &mut [u8] = unsafe {
                 std::slice::from_raw_parts_mut(buffer.as_mut_ptr() as *mut u8, total_len)
@@ -399,6 +412,14 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeDynamic<'bm, BM> for HashLeaf
         }
 
         false
+    }
+
+    fn get_node_tag(&self) -> u8 {
+        self.common.tag
+    }
+
+    fn get_scan_counter(&self) -> u8 {
+        self.common.scan_counter
     }
 
     fn can_promote(&self, to: u8) -> Result<(), PromoteError> {
@@ -504,6 +525,8 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeDynamic<'bm, BM> for HashLeaf
                 let hint_size = 64;
 
                 let new_size = slots * 2 + heads + hint_size + size_of::<CommonNodeHead>() as u16 + size_of::<HeapNodeInfo>() as u16;
+
+                println!("new_size: {} vs bump: {}", new_size, new_bump);
 
                 if new_size >= new_bump{
                     return Err(Capacity);

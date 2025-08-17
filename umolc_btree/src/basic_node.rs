@@ -295,7 +295,9 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>, V: NodeKind> NodeStatic<'bm, BM> 
                 this.relocate_by::<true, u16>(Self::HEAD_OFFSET + orhc * 4, insert_at, HEAD_RESERVATION * 2);
             }
             this.relocate_by::<true, u32>(Self::HEAD_OFFSET + 4 * insert_at, count - insert_at, 1);
-            this.common.count += 1;
+            if index.is_err() {
+                this.common.count += 1;
+            }
             this.set_head(insert_at, key_head(key));
             this.update_hints(count, count + 1, insert_at);
         })
@@ -664,19 +666,31 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>, V: NodeKind> NodeDynamic<'bm, BM>
     fn scan_with_callback(
         &mut self,
         buffer: &mut [MaybeUninit<u8>; 512],
+        start: Option<&[u8]>,
         callback: &mut dyn FnMut(&[u8], &[u8]) -> bool
     ) -> bool {
         increase_scan_counter(&mut self.common);
 
+        let mut lf : usize = 0;
+
+        match start {
+            None => {},
+            Some(key) => {
+
+                let index= Self::find::<BM::OlcEH>(OPtr::from_mut(self), key);
+                lf = index.unwrap_or(0);
+            }
+        }
+
         let prefix = self.prefix();
         let prefix_len = prefix.len();
-        for i in 0..self.common.count {
+        prefix.write_to_uninit(&mut buffer[..prefix_len]);
+        for i in lf..self.common.count as usize {
             let val = self.heap_val(i as usize);
 
             let suffix = self.key_combined(i as usize);
 
             let total_len = prefix_len + suffix.len();
-            prefix.write_to_uninit(&mut buffer[..prefix_len]);
             suffix.write_to_uninit(&mut buffer[prefix_len..total_len]);
             let full_key : &mut [u8] = unsafe {
                 std::slice::from_raw_parts_mut(buffer.as_mut_ptr() as *mut u8, total_len)
@@ -703,6 +717,14 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>, V: NodeKind> NodeDynamic<'bm, BM>
 
     fn retry_later(&mut self) {
         self.common.scan_counter += 1;
+    }
+
+    fn get_node_tag(&self) -> u8 {
+        self.common.tag
+    }
+
+    fn get_scan_counter(&self) -> u8 {
+        self.common.scan_counter
     }
 }
 

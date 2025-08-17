@@ -70,6 +70,8 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> Tree<'bm, BM> {
         let mut buffer_for_callback: [MaybeUninit<u8>; 512] = unsafe { MaybeUninit::uninit().assume_init() };
         let mut key = lower_bound;
 
+        let mut lf = Some(lower_bound);
+
         loop {
             let [parent, node] = self.descend(key, None);
             let mut node: BM::GuardX = node.upgrade();
@@ -88,7 +90,43 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> Tree<'bm, BM> {
                 },
             }
 
-            let ret = node.as_dyn_node_mut::<BM>().scan_with_callback(&mut buffer_for_callback, &mut callback);
+            let ret = node.as_dyn_node_mut::<BM>().scan_with_callback(&mut buffer_for_callback, lf, &mut callback);
+
+            lf = None;
+
+            if ret {
+                return;
+            }
+
+            let upper = node.upper_fence_combined();
+
+            let upper_len = upper.len();
+            key = {
+                upper.to_vec()
+                    .write_to_uninit(&mut buffer[..upper_len])
+            };
+            if key.is_empty() {
+                return;
+            }
+
+
+        }
+
+    }
+
+    pub fn scan_node_types<F>(&self, lower_bound: &[u8], mut callback: F)
+    where F: FnMut(u8, u8) -> bool {
+        let mut buffer: [MaybeUninit<u8>; 512] = unsafe { MaybeUninit::uninit().assume_init() };
+
+        let mut key = lower_bound;
+
+
+        loop {
+            let [parent, node] = self.descend(key, None);
+            let mut node: BM::GuardX = node.upgrade();
+            parent.release_unchecked();
+
+            let ret = callback(node.as_dyn_node::<BM>().get_node_tag(), node.as_dyn_node::<BM>().get_scan_counter());
 
             if ret {
                 return;
@@ -367,7 +405,7 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeDynamic<'bm, BM> for Metadata
         unimplemented!()
     }
 
-    fn scan_with_callback(&mut self, buffer: &mut [MaybeUninit<u8>; 512], callback: &mut dyn FnMut(&[u8], &[u8]) -> bool) -> bool {
+    fn scan_with_callback(&mut self, _buffer: &mut [MaybeUninit<u8>; 512], _start : Option<&[u8]>, _callback: &mut dyn FnMut(&[u8], &[u8]) -> bool) -> bool {
         unimplemented!()
     }
 
@@ -376,6 +414,14 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeDynamic<'bm, BM> for Metadata
     }
 
     fn retry_later(&mut self) {
+        todo!()
+    }
+
+    fn get_node_tag(&self) -> u8 {
+        todo!()
+    }
+
+    fn get_scan_counter(&self) -> u8 {
         todo!()
     }
 }

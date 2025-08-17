@@ -578,6 +578,8 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeDynamic<'bm, BM> for FullyDen
                 *self.as_page_mut() = tmp.copy_page();
 
 */
+                let mut buffer: [MaybeUninit<u8>; 512] = unsafe { MaybeUninit::uninit().assume_init() };
+
                 let scan_counter = self.common.scan_counter;
                 let mut tmp: BasicLeaf = BasicLeaf::zeroed();
                 NodeStatic::<BM>::init(&mut tmp, self.lower_fence(), self.upper_fence_combined(), None);
@@ -585,8 +587,15 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeDynamic<'bm, BM> for FullyDen
                     if self.get_bit_direct(i) {
                         let val = self.val(i);
                         let key = self.key_from_numeric_part(self.reference + i as u32);
+                        let key_len = key.len();
 
-                        NodeStatic::<BM>::insert(&mut tmp, key.to_vec().as_slice(), val).unwrap();
+
+                        key.write_to_uninit(&mut buffer[..key_len]);
+                        let full_key : &mut [u8] = unsafe {
+                            std::slice::from_raw_parts_mut(buffer.as_mut_ptr() as *mut u8, key_len)
+                        };
+
+                        NodeStatic::<BM>::insert(&mut tmp, full_key, val).unwrap();
                     }
 
                 }
@@ -596,6 +605,8 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeDynamic<'bm, BM> for FullyDen
             },
             node_tag::HASH_LEAF => {
                 //println!("Self: {:?}", self);
+
+                let mut buffer: [MaybeUninit<u8>; 512] = unsafe { MaybeUninit::uninit().assume_init() };
                 let mut tmp: HashLeaf = HashLeaf::zeroed();
                 let scan_counter = self.common.scan_counter;
                 NodeStatic::<BM>::init(&mut tmp, self.lower_fence(), self.upper_fence_combined(), None);
@@ -603,8 +614,13 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeDynamic<'bm, BM> for FullyDen
                     if self.get_bit_direct(i) {
                         let val = self.val(i);
                         let key = self.key_from_numeric_part(self.reference + i as u32);
+                        let key_len = key.len();
+                        key.write_to_uninit(&mut buffer[..key_len]);
+                        let full_key : &mut [u8] = unsafe {
+                            std::slice::from_raw_parts_mut(buffer.as_mut_ptr() as *mut u8, key_len)
+                        };
 
-                        NodeStatic::<BM>::insert(&mut tmp, key.to_vec().as_slice(), val).unwrap();
+                        NodeStatic::<BM>::insert(&mut tmp, full_key, val).unwrap();
                     }
 
                 }
@@ -618,16 +634,28 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeDynamic<'bm, BM> for FullyDen
     fn scan_with_callback(
         &mut self,
         buffer: &mut [MaybeUninit<u8>; 512],
+        start: Option<&[u8]>,
         callback: &mut dyn FnMut(&[u8], &[u8]) -> bool
     ) -> bool {
 
-        for i in 0..self.capacity as usize {
+        let mut lf : usize = 0;
+
+        match start {
+            None => {},
+            Some(key) => {
+                let res = Self::key_to_index::<BM::OlcEH>(unsafe { OPtr::from_ref(self) }, key);
+                if let Ok(i) = res {
+                    lf = i;
+                }
+            }
+        }
+
+        for i in lf..self.capacity as usize {
             if self.get_bit_direct(i) {
                 let key_src = self.key_from_numeric_part(self.reference + i as u32);
                 let key_src_len = key_src.len();
                 let val = self.val(i);
 
-                let key = key_src.to_vec();
                 key_src.write_to_uninit(&mut buffer[..key_src_len]);
                 let full_key : &mut [u8] = unsafe {
                     std::slice::from_raw_parts_mut(buffer.as_mut_ptr() as *mut u8, key_src_len)
@@ -649,6 +677,14 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeDynamic<'bm, BM> for FullyDen
     fn retry_later(&mut self) {
         unreachable!();
     }
+
+    fn get_node_tag(&self) -> u8 {
+        self.common.tag
+    }
+    fn get_scan_counter(&self) -> u8 {
+        self.common.scan_counter
+    }
+
 }
 
 impl Debug for FullyDenseLeaf {
