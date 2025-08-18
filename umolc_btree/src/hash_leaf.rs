@@ -193,7 +193,9 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeStatic<'bm, BM> for HashLeaf 
     fn insert(&mut self, key: &[u8], val: &[u8]) -> Result<Option<()>, ()> {
         let (index, hash) = Self::find::<BM::OlcEH>(OPtr::from_mut(self), key);
         let count = self.common.count as usize;
-        let new_heap_start = Self::heap_start_min(count + index.is_none() as usize);
+        let is_new = index.is_none();
+        let pos = index.unwrap_or(count);
+        let new_heap_start = Self::heap_start_min(count + is_new as usize);
         HeapNode::insert(
             self,
             new_heap_start,
@@ -202,14 +204,16 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeStatic<'bm, BM> for HashLeaf 
             index.ok_or(count),
             |this| {
                 let r1 = Self::slot_reservation(count);
-                let r2 = Self::slot_reservation(count + 1);
-                if r1 != r2 {
-                    this.relocate_by::<true, u8>(Self::SLOT_OFFSET + r1 * 2, count, SLOT_RESERVATION * 2);
-                }
-                if index.is_none() {
+                if is_new {
+                    let r2 = Self::slot_reservation(count + 1);
+                    if r1 != r2 {
+                        this.relocate_by::<true, u8>(Self::SLOT_OFFSET + r1 * 2, count, SLOT_RESERVATION * 2);
+                    }
                     this.common.count += 1;
+
                 }
-                *this.page_index_mut::<u8>(Self::hash_offset(count + 1) + count) = hash;
+                let base = Self::hash_offset(count + is_new as usize);
+                *this.page_index_mut::<u8>(base + pos) = hash;
             },
         )
         .map_err(|_| ())
@@ -223,13 +227,16 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeStatic<'bm, BM> for HashLeaf 
     }
 
     fn hasGoodHeads(&self) -> (bool, bool) {
-        let treshold = (self.common.count as usize /2) / 16;
+
+        // contrary to other nodes we use sorted here instead of common.count, as it does not make sense to check for collisions between non-neighbouring values
+
+        let treshold = (self.sorted as usize /2) / 16;
         let mut collision_count = 0;
 
         let mut heads_first = true;
         let mut heads_second = true;
 
-        for i in 1..(self.common.count/2) as usize {
+        for i in 1..(self.sorted/2) as usize {
             let key1 = self.heap_key(i-1);
             let key2 = self.heap_key(i);
 
@@ -248,7 +255,7 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeStatic<'bm, BM> for HashLeaf 
                 break;
             }
         }
-        for i in (self.common.count as usize/2)..self.common.count as usize {
+        for i in (self.sorted as usize/2)..self.sorted as usize {
             let key1 = self.heap_key(i-1);
             let key2 = self.heap_key(i);
 
@@ -380,6 +387,10 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeDynamic<'bm, BM> for HashLeaf
         callback: &mut dyn FnMut(&[u8], &[u8]) -> bool
     ) -> bool {
         increase_scan_counter(&mut self.common);
+
+
+        // always sort. if the node is already sorted, the sort function just returns.
+        self.sort();
 
         let mut lf : usize = 0;
 
