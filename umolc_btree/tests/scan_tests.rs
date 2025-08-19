@@ -11,6 +11,7 @@ fn basic_scan() {
     const PAGE_COUNT: usize = 512;
     let bm = SimpleBm::<Page>::new(PAGE_COUNT);
     let tree = Tree::new(&bm);
+    let amount_inserts = 10000;
 
 
 
@@ -26,7 +27,7 @@ fn basic_scan() {
 
 
 
-    for i in 0..10000 {
+    for i in 0..amount_inserts {
         let key = generate_key(i, 8);
         let value = i.to_be_bytes().to_vec();
         tree.insert(key.as_slice(), value.as_slice());
@@ -51,7 +52,8 @@ fn basic_scan() {
                       i += 1;
                       false
                   }
-        )
+        );
+        assert_eq!(amount_inserts, i, "The scan did not find all required values.");
     }
 }
 
@@ -78,16 +80,9 @@ fn adaptive_promotion () {
             let value = i.to_be_bytes().to_vec();
             tree.insert(key.as_slice(), value.as_slice());
         }
-        // we just overwrite the values, doesnt matter
         for i in 0..100 {
             let key = generate_key(i, 4);
-            let value = i.to_be_bytes().to_vec();
-            tree.insert(key.as_slice(), value.as_slice());
-        }
-        for i in 0..100 {
-            let key = generate_key(i, 4);
-            let value = i.to_be_bytes().to_vec();
-            tree.insert(key.as_slice(), value.as_slice());
+            tree.remove(key.as_slice());
         }
         for i in 0..100 {
             let key = generate_key(i, 4);

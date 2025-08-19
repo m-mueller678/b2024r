@@ -116,33 +116,6 @@ impl fmt::Display for PromoteError {
     }
 }
 
-pub fn increase_scan_counter(common: &mut CommonNodeHead){
-    if common.scan_counter == 255 {
-        return;
-    }
-    if fastrand::u8(..100) < 15 {
-        if common.scan_counter < 3 {
-            common.scan_counter += 1;
-            return;
-        }
-        else {
-            return;
-        }
-    }
-}
-
-pub fn decrease_scan_counter(common: &mut CommonNodeHead) {
-    if fastrand::u8(..100) < 5 {
-        if common.scan_counter > 0 {
-            common.scan_counter -= 1;
-            return;
-        }
-        else {
-            return;
-        }
-    }
-}
-
 impl Debug for PromoteError {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         std::fmt::Display::fmt(self, f)
@@ -293,7 +266,7 @@ pub trait NodeDynamic<'bm, BM: BufferManager<'bm, Page = Page>>: ToFromPage + No
     fn validate(&self);
     fn leaf_remove(&mut self, k: &[u8]) -> Option<()>;
 
-    fn scan_with_callback(&mut self, buffer: &mut [MaybeUninit<u8>; 512], start : Option<&[u8]>, callback: &mut dyn FnMut(&[u8], &[u8]) -> bool) -> bool;
+    fn scan_with_callback(&self, buffer: &mut [MaybeUninit<u8>; 512], start : Option<&[u8]>, callback: &mut dyn FnMut(&[u8], &[u8]) -> bool) -> bool;
 
     fn get_node_tag(&self) -> u8;
 
@@ -533,6 +506,25 @@ impl Page {
         }
         invoke_all_nodes!(impl_case);
         panic!("unexpected node tag: {tag}");
+    }
+
+
+    pub fn increase_scan_counter(&mut self){
+        if self.common.scan_counter == 255 {
+            return;
+        }
+        if self.common.scan_counter < 3 {
+            self.common.scan_counter += 1;
+        }
+    }
+
+    pub fn decrease_scan_counter(&mut self) {
+        if self.common.scan_counter == 255 {
+            return;
+        }
+        else if self.common.scan_counter > 0 {
+            self.common.scan_counter -= 1;
+        }
     }
 }
 

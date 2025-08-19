@@ -632,7 +632,7 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeDynamic<'bm, BM> for FullyDen
     }
 
     fn scan_with_callback(
-        &mut self,
+        &self,
         buffer: &mut [MaybeUninit<u8>; 512],
         start: Option<&[u8]>,
         callback: &mut dyn FnMut(&[u8], &[u8]) -> bool

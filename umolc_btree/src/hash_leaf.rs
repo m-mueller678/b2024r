@@ -1,6 +1,6 @@
 use crate::heap_node::{HeapNode, HeapNodeInfo, HeapLength, ConstHeapLength};
 use crate::key_source::SourceSlice;
-use crate::node::{find_separator, insert_upper_sibling, node_tag, page_cast_mut, DebugNode, NodeDynamic, NodeStatic, ToFromPageExt, PAGE_SIZE, PromoteError, CommonNodeHead, decrease_scan_counter, increase_scan_counter};
+use crate::node::{find_separator, insert_upper_sibling, node_tag, page_cast_mut, DebugNode, NodeDynamic, NodeStatic, ToFromPageExt, PAGE_SIZE, PromoteError, CommonNodeHead};
 use crate::key_source::common_prefix;
 use crate::util::Supreme;
 use crate::fully_dense_leaf::FullyDenseLeaf;
@@ -55,7 +55,7 @@ impl HashLeaf {
         crc32fast::hash(k) as u8
     }
 
-    fn sort(&mut self) {
+    pub fn sort(&mut self) {
         let count = self.common.count as usize;
         if self.sorted as usize == count {
             return;
@@ -381,23 +381,18 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeDynamic<'bm, BM> for HashLeaf
     }
 
     fn scan_with_callback(
-        &mut self,
+        &self,
         buffer: &mut [MaybeUninit<u8>; 512],
         start: Option<&[u8]>,
         callback: &mut dyn FnMut(&[u8], &[u8]) -> bool
     ) -> bool {
-        increase_scan_counter(&mut self.common);
-
-
-        // always sort. if the node is already sorted, the sort function just returns.
-        self.sort();
 
         let mut lf : usize = 0;
 
         match start {
             None => {},
             Some(key) => {
-                let (index, _hash) = Self::find::<BM::OlcEH>(OPtr::from_mut(self), key);
+                let (index, _hash) = Self::find::<BM::OlcEH>(unsafe { OPtr::from_ref(self) }, key);
                 lf = index.unwrap_or(0);
             }
         }

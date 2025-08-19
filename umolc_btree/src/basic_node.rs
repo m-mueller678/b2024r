@@ -1,7 +1,7 @@
 use crate::define_node;
 use crate::heap_node::{HeapLength, HeapLengthError, HeapNode, HeapNodeInfo};
 use crate::key_source::{key_head, HeadSourceSlice, SourceSlice, SourceSlicePair};
-use crate::node::{decrease_scan_counter, find_separator, increase_scan_counter, insert_upper_sibling, node_tag, page_cast_mut, page_id_from_bytes, page_id_from_olc_bytes, CommonNodeHead, DebugNode, KindInner, KindLeaf, NodeDynamic, NodeDynamicAuto, NodeKind, NodeStatic, Page, PromoteError, ToFromPageExt, PAGE_ID_LEN, PAGE_SIZE};
+use crate::node::{find_separator, insert_upper_sibling, node_tag, page_cast_mut, page_id_from_bytes, page_id_from_olc_bytes, CommonNodeHead, DebugNode, KindInner, KindLeaf, NodeDynamic, NodeDynamicAuto, NodeKind, NodeStatic, Page, PromoteError, ToFromPageExt, PAGE_ID_LEN, PAGE_SIZE};
 use crate::util::Supreme;
 use bstr::{BStr, BString, ByteSlice};
 use bytemuck::{Pod, Zeroable};
@@ -271,10 +271,6 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>, V: NodeKind> NodeStatic<'bm, BM> 
     type TruncatedKey<'a> = SourceSlicePair<u8, HeadSourceSlice, &'a [u8]>;
 
     fn insert(&mut self, key: &[u8], val: &[u8]) -> Result<Option<()>, ()> {
-        if !<Self as NodeStatic<'bm, BM>>::IS_INNER {
-            decrease_scan_counter(&mut self.common);
-        }
-
 
         let index = Self::find::<BM::OlcEH>(OPtr::from_mut(self), key);
         let count = self.common.count as usize;
@@ -664,20 +660,19 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>, V: NodeKind> NodeDynamic<'bm, BM>
     }
 
     fn scan_with_callback(
-        &mut self,
+        &self,
         buffer: &mut [MaybeUninit<u8>; 512],
         start: Option<&[u8]>,
         callback: &mut dyn FnMut(&[u8], &[u8]) -> bool
     ) -> bool {
-        increase_scan_counter(&mut self.common);
 
         let mut lf : usize = 0;
 
         match start {
             None => {},
             Some(key) => {
-
-                let index= Self::find::<BM::OlcEH>(OPtr::from_mut(self), key);
+                
+                let index = Self::find::<BM::OlcEH>(unsafe { OPtr::from_ref(self) }, key);
                 lf = index.unwrap_or(0);
             }
         }

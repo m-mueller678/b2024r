@@ -74,23 +74,19 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> Tree<'bm, BM> {
 
         loop {
             let [parent, node] = self.descend(key, None);
+
+
             let mut node: BM::GuardX = node.upgrade();
             parent.release_unchecked();
 
-            match node.as_dyn_node::<BM>().qualifies_for_promote() {
-                None => {},
-                Some(to) => {
-                    println!("We need to promote because of scans: {to}");
-                    if node.as_dyn_node::<BM>().can_promote(to).is_ok() {
-                        node.as_dyn_node_mut::<BM>().promote(to);
-                    }
-                    else {
-                        node.as_dyn_node_mut::<BM>().retry_later();
-                    }
-                },
+            self.increase_scan_counter_x(&mut node);
+
+
+            if node.common.tag == node_tag::HASH_LEAF {
+                node.cast_mut::<HashLeaf>().sort();
             }
 
-            let ret = node.as_dyn_node_mut::<BM>().scan_with_callback(&mut buffer_for_callback, lf, &mut callback);
+            let ret = node.as_dyn_node::<BM>().scan_with_callback(&mut buffer_for_callback, lf, &mut callback);
 
             lf = None;
 
@@ -101,10 +97,12 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> Tree<'bm, BM> {
             let upper = node.upper_fence_combined();
 
             let upper_len = upper.len();
+
             key = {
                 upper.to_vec()
                     .write_to_uninit(&mut buffer[..upper_len])
             };
+
             if key.is_empty() {
                 return;
             }
@@ -123,6 +121,7 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> Tree<'bm, BM> {
 
         loop {
             let [parent, node] = self.descend(key, None);
+
             let mut node: BM::GuardX = node.upgrade();
             parent.release_unchecked();
 
@@ -143,14 +142,17 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> Tree<'bm, BM> {
                 return;
             }
 
-
         }
 
     }
 
     fn try_remove(&self, k: &[u8], removed: &mut bool) {
         let [parent, node] = self.descend(k, None);
+
         let mut node: BM::GuardX = node.upgrade();
+
+        self.decrease_scan_counter_x(&mut node);
+
         if node.as_dyn_node_mut::<BM>().leaf_remove(k).is_some() {
             *removed = true;
         }
@@ -223,24 +225,12 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> Tree<'bm, BM> {
         let [parent, node] = self.descend(k, None);
         let mut node: BM::GuardX = node.upgrade();
 
-        match node.as_dyn_node::<BM>().qualifies_for_promote() {
-            Some(to) => {
-
-                println!("This shit actually fired, holy fuck! {:?}", to);
-                if node.as_dyn_node::<BM>().can_promote(to).is_ok() {
-                    node.as_dyn_node_mut::<BM>().promote(to);
-                }
-                else {
-                    println!("This shit actually fired :(");
-                    node.as_dyn_node_mut::<BM>().retry_later();
-                }
-            },
-            None => {}
-        }
 
         match node.as_dyn_node_mut::<BM>().insert_leaf(k, val) {
             Ok(x) => {
+
                 parent.release_unchecked();
+                self.decrease_scan_counter_x(&mut node);
                 x
             }
             Err(error) => {
@@ -285,6 +275,7 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> Tree<'bm, BM> {
         let [parent, node] = self.descend(k, None);
         drop(parent);
         let val = o_ptr_lookup_leaf::<BM>(node.o_ptr_bm(), k)?;
+
         Some((node, val))
     }
 
@@ -313,6 +304,93 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> Tree<'bm, BM> {
         path.push(node);
         path
     }
+
+    fn decrease_scan_counter(&self, node: BM::GuardO) {
+        if fastrand::u8(..100) < 5 {
+            let mut node: BM::GuardX = node.upgrade();
+            node.decrease_scan_counter();
+
+            match node.as_dyn_node::<BM>().qualifies_for_promote() {
+                None => {
+                },
+                Some(to) => {
+                    println!("We need to promote because of scans: {to}");
+                    if node.as_dyn_node::<BM>().can_promote(to).is_ok() {
+                        node.as_dyn_node_mut::<BM>().promote(to);
+                    }
+                    else {
+                        node.as_dyn_node_mut::<BM>().retry_later();
+                    }
+                },
+            }
+        }
+    }
+
+
+    fn increase_scan_counter(&self, node: BM::GuardO) {
+        if fastrand::u8(..100) < 15 {
+            let mut node: BM::GuardX = node.upgrade();
+            node.increase_scan_counter();
+
+
+            match node.as_dyn_node::<BM>().qualifies_for_promote() {
+                None => {
+                },
+                Some(to) => {
+                    println!("We need to promote because of scans: {to}");
+                    if node.as_dyn_node::<BM>().can_promote(to).is_ok() {
+                        node.as_dyn_node_mut::<BM>().promote(to);
+                    }
+                    else {
+                        node.as_dyn_node_mut::<BM>().retry_later();
+                    }
+                },
+            }
+            drop(node);
+        }
+    }
+
+    fn decrease_scan_counter_x(&self, node: &mut BM::GuardX) {
+        if fastrand::u8(..100) < 5 {
+            node.decrease_scan_counter();
+
+            match node.as_dyn_node::<BM>().qualifies_for_promote() {
+                None => {
+                },
+                Some(to) => {
+                    println!("We need to promote because of scans: {to}");
+                    if node.as_dyn_node::<BM>().can_promote(to).is_ok() {
+                        node.as_dyn_node_mut::<BM>().promote(to);
+                    }
+                    else {
+                        node.as_dyn_node_mut::<BM>().retry_later();
+                    }
+                },
+            }
+        }
+    }
+
+
+    fn increase_scan_counter_x(&self, mut node:&mut BM::GuardX) {
+        if fastrand::u8(..100) < 15 {
+            node.increase_scan_counter();
+
+
+            match node.as_dyn_node::<BM>().qualifies_for_promote() {
+                None => {},
+                Some(to) => {
+                    println!("We need to promote because of scans: {to}");
+                    if node.as_dyn_node::<BM>().can_promote(to).is_ok() {
+                        node.as_dyn_node_mut::<BM>().promote(to);
+                    }
+                    else {
+                        node.as_dyn_node_mut::<BM>().retry_later();
+                    }
+                },
+            }
+        }
+    }
+
 }
 
 impl<'bm, BM: BufferManager<'bm, Page = Page>> Drop for Tree<'bm, BM> {
@@ -405,7 +483,7 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeDynamic<'bm, BM> for Metadata
         unimplemented!()
     }
 
-    fn scan_with_callback(&mut self, _buffer: &mut [MaybeUninit<u8>; 512], _start : Option<&[u8]>, _callback: &mut dyn FnMut(&[u8], &[u8]) -> bool) -> bool {
+    fn scan_with_callback(&self, _buffer: &mut [MaybeUninit<u8>; 512], _start : Option<&[u8]>, _callback: &mut dyn FnMut(&[u8], &[u8]) -> bool) -> bool {
         unimplemented!()
     }
 
