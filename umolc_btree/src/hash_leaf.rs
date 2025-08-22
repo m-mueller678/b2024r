@@ -1,21 +1,18 @@
-use crate::heap_node::{HeapNode, HeapNodeInfo, HeapLength, ConstHeapLength};
+use crate::heap_node::{HeapNode, HeapNodeInfo};
 use crate::key_source::SourceSlice;
-use crate::node::{find_separator, insert_upper_sibling, node_tag, page_cast_mut, DebugNode, NodeDynamic, NodeStatic, ToFromPageExt, PAGE_SIZE, PromoteError, CommonNodeHead};
-use crate::key_source::common_prefix;
+use crate::node::{find_separator, insert_upper_sibling, node_tag, page_cast_mut, NodeDynamic, NodeStatic, ToFromPageExt, PAGE_SIZE, PromoteError, CommonNodeHead};
 use crate::util::Supreme;
 use crate::fully_dense_leaf::FullyDenseLeaf;
 use crate::{define_node, Page};
 use arrayvec::ArrayVec;
-use bstr::{BStr, BString, ByteSlice};
-use bytemuck::{Pod, Zeroable};
+use bstr::{BStr, BString};
+use bytemuck::{Zeroable};
 use itertools::Itertools;
 use std::fmt::{Debug, Display, Formatter};
-use std::fmt;
 use std::vec::Vec;
 use std::mem::{offset_of, MaybeUninit};
 use std::ops::Range;
-use indxvec::Printing;
-use umolc::{o_project, BufferManager, BufferManagerGuard, OPtr, OlcErrorHandler, PageId};
+use umolc::{o_project, BufferManager, OPtr, OlcErrorHandler, PageId};
 use crate::basic_node::BasicLeaf;
 use crate::hash_leaf::PromoteError::{Capacity, Keys, ValueLen};
 
@@ -226,7 +223,7 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeStatic<'bm, BM> for HashLeaf 
         (keys, values)
     }
 
-    fn hasGoodHeads(&self) -> (bool, bool) {
+    fn has_good_heads(&self) -> (bool, bool) {
 
         // contrary to other nodes we use sorted here instead of common.count, as it does not make sense to check for collisions between non-neighbouring values
 
@@ -284,7 +281,7 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeStatic<'bm, BM> for HashLeaf 
 
 impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeDynamic<'bm, BM> for HashLeaf {
     fn split(&mut self, bm: BM, parent: &mut dyn NodeDynamic<'bm, BM>, _key: &[u8]) -> Result<(), ()> {
-        let (lft,rgth) = NodeStatic::<BM>::hasGoodHeads(self);
+        let (lft,rgth) = NodeStatic::<BM>::has_good_heads(self);
 
         let scan_counter = self.common.scan_counter;
 
@@ -451,7 +448,6 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeDynamic<'bm, BM> for HashLeaf
                 let mut val_error: bool = false;
 
 
-                let prefix_len = self.prefix().len();
                 if key_len > 4 {
                     return Err(Keys);
                 }
@@ -531,8 +527,6 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeDynamic<'bm, BM> for HashLeaf
                 let hint_size = 64;
 
                 let new_size = slots * 2 + heads + hint_size + size_of::<CommonNodeHead>() as u16 + size_of::<HeapNodeInfo>() as u16;
-
-                println!("new_size: {} vs bump: {}", new_size, new_bump);
 
                 if new_size >= new_bump{
                     return Err(Capacity);

@@ -1,19 +1,18 @@
 use crate::define_node;
 use crate::heap_node::{HeapLength, HeapLengthError, HeapNode, HeapNodeInfo};
 use crate::key_source::{key_head, HeadSourceSlice, SourceSlice, SourceSlicePair};
-use crate::node::{find_separator, insert_upper_sibling, node_tag, page_cast_mut, page_id_from_bytes, page_id_from_olc_bytes, CommonNodeHead, DebugNode, KindInner, KindLeaf, NodeDynamic, NodeDynamicAuto, NodeKind, NodeStatic, Page, PromoteError, ToFromPageExt, PAGE_ID_LEN, PAGE_SIZE};
+use crate::node::{find_separator, insert_upper_sibling, node_tag, page_cast_mut, page_id_from_bytes, page_id_from_olc_bytes, CommonNodeHead, KindInner, KindLeaf, NodeDynamic, NodeKind, NodeStatic, Page, PromoteError, ToFromPageExt, PAGE_ID_LEN, PAGE_SIZE};
 use crate::util::Supreme;
-use bstr::{BStr, BString, ByteSlice};
+use bstr::{BStr, BString};
 use bytemuck::{Pod, Zeroable};
 use indxvec::Search;
 use itertools::Itertools;
-use std::fmt::{Debug, Formatter, Octal};
+use std::fmt::{Debug, Formatter};
 use std::mem::{offset_of, size_of, MaybeUninit};
 use std::ops::Range;
-use umolc::{o_project, BufferManager, BufferManagerGuard, OPtr, OlcErrorHandler, PageId};
+use umolc::{o_project, BufferManager, OPtr, OlcErrorHandler, PageId};
 use crate::fully_dense_leaf::FullyDenseLeaf;
 use crate::hash_leaf::HashLeaf;
-use crate::node::node_tag::HASH_LEAF;
 use crate::node::PromoteError::{Capacity, Keys, Node, ValueLen};
 
 const HINT_COUNT: usize = 16;
@@ -358,7 +357,7 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>, V: NodeKind> NodeStatic<'bm, BM> 
         self.common.scan_counter = counter;
     }
 
-    fn hasGoodHeads(&self) -> (bool, bool) {
+    fn has_good_heads(&self) -> (bool, bool) {
         let treshold = self.common.count as usize / 16;
         let mut collision_count = 0;
 
@@ -429,7 +428,7 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>, V: NodeKind> NodeDynamic<'bm, BM>
 
     fn split(&mut self, bm: BM, parent: &mut dyn NodeDynamic<'bm, BM>, _key: &[u8]) -> Result<(), ()> {
 
-        let (lft, rght) = NodeStatic::<BM>::hasGoodHeads(self);
+        let (lft, rght) = NodeStatic::<BM>::has_good_heads(self);
 
         let mut left = BasicNode::<V>::zeroed();
 
@@ -461,7 +460,7 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>, V: NodeKind> NodeDynamic<'bm, BM>
 
         left.common.scan_counter = if lft {255} else if scan_counter == 255 {3} else {scan_counter};
 
-        right.common.scan_counter = if lft {255} else if scan_counter == 255 {3} else {scan_counter};
+        right.common.scan_counter = if rght {255} else if scan_counter == 255 {3} else {scan_counter};
 
         left.validate();
         right.validate();
@@ -496,7 +495,6 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>, V: NodeKind> NodeDynamic<'bm, BM>
                 let mut val_error: bool = false;
 
 
-                let prefix_len = self.prefix().len();
                 if key_len > 4 {
                     return Err(Keys);
                 }
@@ -549,8 +547,6 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>, V: NodeKind> NodeDynamic<'bm, BM>
                     max_suffix = max_suffix.max(index);
                 }
                 let area = max_suffix - min_suffix + 1;
-                println!("area: {}", area);
-
 
                 if area as usize >
                     FullyDenseLeaf::get_capacity_fdl(self.lower_fence().len(),
@@ -595,7 +591,6 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>, V: NodeKind> NodeDynamic<'bm, BM>
     fn promote(&mut self, to: u8) {
         match to {
             node_tag::FULLY_DENSE_LEAF => {
-                println!("Promoting to FDL");
                 let count = self.common.count as usize;
                 let prefix_len = self.common.prefix_len as usize;
 

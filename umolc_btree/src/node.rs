@@ -255,7 +255,7 @@ pub trait NodeStatic<'bm, BM: BufferManager<'bm, Page = Page>>: NodeDynamic<'bm,
 
     fn set_scan_counter(&mut self, counter: u8);
 
-    fn hasGoodHeads(&self) -> (bool, bool);
+    fn has_good_heads(&self) -> (bool, bool);
 }
 
 pub trait NodeDynamic<'bm, BM: BufferManager<'bm, Page = Page>>: ToFromPage + NodeDynamicAuto<'bm, BM> + Debug {

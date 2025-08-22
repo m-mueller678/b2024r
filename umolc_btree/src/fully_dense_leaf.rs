@@ -1,12 +1,10 @@
 use crate::basic_node::{BasicLeaf, BasicNode};
 use crate::fully_dense_leaf::insert_resolver::{resolve, Resolution};
 use crate::hash_leaf::HashLeaf;
-use crate::heap_node::HeapNode;
 use crate::key_source::{HeadSourceSlice, SourceSlice, SourceSlicePair, ZeroKey};
 use crate::node::PromoteError::Node;
-use crate::node::{insert_upper_sibling, node_tag, page_cast_mut, page_id_from_bytes, page_id_to_bytes, CommonNodeHead, KindLeaf, NodeDynamic, NodeDynamicAuto, NodeKind, NodeStatic, PromoteError, ToFromPageExt, PAGE_ID_LEN, PAGE_SIZE};
+use crate::node::{insert_upper_sibling, node_tag, page_cast_mut, CommonNodeHead, KindLeaf, NodeDynamic, NodeStatic, PromoteError, ToFromPageExt, PAGE_ID_LEN, PAGE_SIZE};
 use crate::{define_node, Page, MAX_KEY_SIZE};
-use arrayvec::ArrayVec;
 use bstr::{BStr, BString};
 use bytemuck::Zeroable;
 use indxvec::Printing;
@@ -14,10 +12,8 @@ use itertools::Itertools;
 use std::cell::Cell;
 use std::fmt::{Debug, Display, Formatter};
 use std::mem::{offset_of, MaybeUninit};
-use std::sync::atomic::fence;
 use std::usize;
-use umolc::{o_project, BufferManager, BufferManagerGuard, OPtr, OlcErrorHandler, PageId};
-use crate::fully_dense_leaf::insert_resolver::Resolution::SplitHigh;
+use umolc::{o_project, BufferManager, OPtr, OlcErrorHandler, PageId};
 
 define_node! {
     pub struct FullyDenseLeaf {
@@ -256,12 +252,11 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeStatic<'bm, BM> for FullyDens
     const TAG: u8 = node_tag::FULLY_DENSE_LEAF;
     const IS_INNER: bool = false;
     type TruncatedKey<'a>
-    where
-        Self: 'a,
-    = SourceSlicePair<u8, &'a [u8], HeadSourceSlice>;
+    = SourceSlicePair<u8, &'a [u8], HeadSourceSlice>
+    where Self: 'a,;
 
     fn insert(&mut self, key: &[u8], val: &[u8]) -> Result<Option<()>, ()> {
-        let mut index = Cell::new(usize::MAX);
+        let index = Cell::new(usize::MAX);
         let resolution = resolve(
             || {
 
@@ -316,7 +311,7 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeStatic<'bm, BM> for FullyDens
         }
     }
 
-    fn init(&mut self, lf: impl SourceSlice, uf: impl SourceSlice, lower: Option<&[u8; 5]>) {
+    fn init(&mut self, _lf: impl SourceSlice, _uf: impl SourceSlice, _lower: Option<&[u8; 5]>) {
         unimplemented!()
         // unimplemented, as we need to gather the key_len, which is why we immediately use the wrapper
     }
@@ -341,7 +336,7 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeStatic<'bm, BM> for FullyDens
         }
     }
 
-    fn lookup_inner(this: OPtr<'_, Self, BM::OlcEH>, key: &[u8], high_on_equal: bool) -> PageId {
+    fn lookup_inner(_this: OPtr<'_, Self, BM::OlcEH>, _key: &[u8], _high_on_equal: bool) -> PageId {
         unimplemented!()
     }
 
@@ -357,7 +352,7 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeStatic<'bm, BM> for FullyDens
         self.common.scan_counter = counter;
     }
 
-    fn hasGoodHeads(&self) -> (bool, bool) {
+    fn has_good_heads(&self) -> (bool, bool) {
         (true, true)
     }
 }
@@ -604,7 +599,6 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeDynamic<'bm, BM> for FullyDen
                 *self.as_page_mut() = tmp.copy_page();
             },
             node_tag::HASH_LEAF => {
-                //println!("Self: {:?}", self);
 
                 let mut buffer: [MaybeUninit<u8>; 512] = unsafe { MaybeUninit::uninit().assume_init() };
                 let mut tmp: HashLeaf = HashLeaf::zeroed();
@@ -720,18 +714,12 @@ impl Display for FullyDenseLeaf {
 mod insert_resolver;
 
 mod test {
-    use std::collections::HashSet;
-    use std::hash::Hash;
     use bytemuck::Zeroable;
-    use umolc::{BufferManager, OPtr, SimpleBm};
-    use crate::basic_node::{BasicInner, BasicLeaf};
+    use umolc::{BufferManager, SimpleBm};
     use crate::fully_dense_leaf::FullyDenseLeaf;
-    use crate::hash_leaf::HashLeaf;
-    use crate::key_source::SourceSlice;
     use crate::node;
-    use crate::node::{node_tag, page_id_from_bytes, page_id_to_bytes, NodeDynamic, NodeKind, NodeStatic, Page, ToFromPageExt, PAGE_ID_LEN};
+    use crate::node::{node_tag, NodeDynamic, NodeStatic, Page, ToFromPageExt};
 
-    type BM<'a> = &'a SimpleBm<Page>;
 
 
     fn generate_key(i: u32, key_len: usize) -> Vec<u8> {
@@ -748,8 +736,8 @@ mod test {
         let mut page = Page::zeroed();
         let leaf = page.cast_mut::<FullyDenseLeaf>();
 
-        let mut lowerfence = generate_key(0, key_len);
-        let mut upperfence = generate_key(4096, key_len);
+        let lowerfence = generate_key(0, key_len);
+        let upperfence = generate_key(4096, key_len);
 
 
         let res = leaf.init(lowerfence.as_slice(), upperfence.as_slice(), key_len, val_len);
@@ -761,14 +749,14 @@ mod test {
         let max = leaf.capacity as usize;
 
         for i in 0..leaf.capacity as usize {
-            let mut key = generate_key(i as u32, key_len);
+            let key = generate_key(i as u32, key_len);
             let val: &[u8] = &(0..).map(|i| i as u8).take(val_len).collect::<Vec<u8>>();
             leaf.force_insert::<BM::OlcEH>(key.as_slice(), val);
         }
 
         let mut i : u32 = 0;
         loop {
-            let mut key = generate_key(i, key_len);
+            let key = generate_key(i, key_len);
             i+=1;
 
             let result = leaf.as_page_mut().as_dyn_node_mut::<BM>().leaf_remove(key.as_slice());
@@ -791,7 +779,7 @@ mod test {
             if i>=max as u32 {
                 break;
             }
-            let mut key = generate_key(i, key_len);
+            let key = generate_key(i, key_len);
             i+=1;
 
             let result = leaf.as_page_mut().as_dyn_node_mut::<BM>().leaf_remove(key.as_slice());
@@ -812,10 +800,10 @@ mod test {
         Initial: node::ToFromPage + node::NodeStatic<'bm, BM>,
     {
         let mut page = Page::zeroed();
-        let mut leaf = page.cast_mut::<Initial>();
+        let leaf = page.cast_mut::<Initial>();
 
-        let mut lowerfence = generate_key(0, key_len);
-        let mut upperfence = generate_key(4096, key_len);
+        let lowerfence = generate_key(0, key_len);
+        let upperfence = generate_key(4096, key_len);
 
 
         NodeStatic::<BM>::init(leaf, lowerfence.as_slice(), upperfence.as_slice(), None);
@@ -824,7 +812,7 @@ mod test {
         let mut count : u32 = 0;
 
         loop {
-            let mut key = generate_key(count as u32, key_len);
+            let key = generate_key(count as u32, key_len);
             let val: &[u8] = &(0..).map(|i| i as u8).take(val_len).collect::<Vec<u8>>();
             let res = NodeStatic::<BM>::insert(leaf, key.as_slice(), val);
             if res.is_err() {
@@ -838,7 +826,7 @@ mod test {
             if count == 0 {
                 panic!("Error: Leaf never became promotable");
             }
-            let mut key = generate_key(i, key_len);
+            let key = generate_key(i, key_len);
             i+=1;
             count-=1;
             let result = leaf.as_page_mut().as_dyn_node_mut::<BM>().leaf_remove(key.as_slice());
@@ -860,7 +848,7 @@ mod test {
             if i>=count as u32 {
                 break;
             }
-            let mut key = generate_key(i, key_len);
+            let key = generate_key(i, key_len);
             i+=1;
 
             let result = leaf.as_page_mut().as_dyn_node_mut::<BM>().leaf_remove(key.as_slice());
@@ -875,7 +863,6 @@ mod test {
         for val_len in 0..100 {
             for key_len in 1..10 {
                 test_leaf::<&'static SimpleBm<Page>>(node_tag::BASIC_LEAF, key_len*4, val_len);
-                //println!("Passed for Key len: {key_len}, Val len: {val_len}")
             }
         }
     }
@@ -886,26 +873,25 @@ mod test {
         for val_len in 0..100 {
             for key_len in 1..10 {
                 test_leaf::<&'static SimpleBm<Page>>(node_tag::HASH_LEAF, key_len*4, val_len);
-                //println!("Passed for Key len: {key_len}, Val len: {val_len}")
             }
         }
     }
 
     #[test]
     fn hash_leaf_to_basic_leaf() {
+        use crate::hash_leaf::HashLeaf;
         for val_len in 0..100 {
             for key_len in 1..10 {
                 test_heap_promotions::<&'static SimpleBm<Page>, HashLeaf>(key_len*4, val_len, node_tag::BASIC_LEAF);
-                println!("Passed for Key len: {key_len}, Val len: {val_len}")
             }
         }
     }
     #[test]
     fn basic_leaf_to_hash_leaf() {
+        use crate::basic_node::BasicLeaf;
         for val_len in 0..100 {
             for key_len in 1..10 {
                 test_heap_promotions::<&'static SimpleBm<Page>, BasicLeaf>(key_len*4, val_len, node_tag::HASH_LEAF);
-                println!("Passed for Key len: {key_len}, Val len: {val_len}")
             }
         }
     }

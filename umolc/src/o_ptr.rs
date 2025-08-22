@@ -105,7 +105,7 @@ impl<'a, T: Pod, O: OlcErrorHandler> OPtr<'a, [T], O> {
     ) -> OPtr<'a, <I as SliceIndex<[T]>>::Output, O> {
         unsafe {
             let p = slice_from_raw_parts(self.p as *const UnsafeCell<T>, self.p.len());
-            if (*p).get(i.clone()).is_none() {
+            if (&(*p)).get(i.clone()).is_none() {
                 // bounds check
                 O::optimistic_fail()
             };
@@ -139,8 +139,9 @@ impl<O: OlcErrorHandler> OPtr<'_, [u8], O> {
         unsafe {
             assert_eq!(self.p.len(), dst.len());
             std::ptr::copy(self.p as *const u8, dst.as_mut_ptr() as *mut u8, self.p.len());
-            MaybeUninit::slice_assume_init_mut(dst)
+            std::slice::from_raw_parts_mut(dst.as_mut_ptr() as *mut u8, dst.len())
         }
+
     }
 
     pub fn load_slice_to_vec(self) -> Vec<u8> {

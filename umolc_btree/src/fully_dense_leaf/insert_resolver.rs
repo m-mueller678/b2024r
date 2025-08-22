@@ -1,4 +1,3 @@
-use std::cell::Cell;
 
 #[derive(Debug, Eq, PartialEq, Copy, Clone)]
 enum FillDegree {
@@ -79,10 +78,12 @@ pub fn resolve(
 #[cfg(test)]
 #[test]
 fn fdl_resolver() {
+    use std::cell::Cell;
+
     for len_match in [true, false] {
         for fill in [FillDegree::Low, FillDegree::Mid, FillDegree::NoConvert] {
             for range in [KeyRange::Coverable, KeyRange::Oob, KeyRange::OutsideNnp] {
-                let mut allow_bounds_check = Cell::new(false);
+                let allow_bounds_check = Cell::new(false);
                 let resolve_lazy = resolve(
                     || fill != FillDegree::NoConvert,
                     || fill == FillDegree::Low,

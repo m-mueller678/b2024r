@@ -58,7 +58,9 @@ pub unsafe trait SourceSlice<T: Pod = u8>: Default + Copy {
         for (i, b) in self.iter().enumerate() {
             dst[i].write(b);
         }
-        unsafe { MaybeUninit::slice_assume_init_mut(dst) }
+        unsafe {
+            std::slice::from_raw_parts_mut(dst.as_mut_ptr() as *mut T, dst.len())
+        }
     }
 
     fn slice(mut self, b: impl RangeBounds<usize>) -> Self {
