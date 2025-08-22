@@ -139,8 +139,9 @@ impl Debug for HashLeaf {
         macro_rules! fields {
             ($base:expr => $($f:ident),*) => {$(s.field(std::stringify!($f),&$base.$f);)*};
         }
-        fields!(self.common => count, lower_fence_len, upper_fence_len, prefix_len);
+        fields!(self.common => count, lower_fence_len, upper_fence_len, prefix_len, scan_counter);
         fields!(self => heap);
+        fields!(self => sorted);
         s.field("lf", &BStr::new(self.lower_fence()));
         s.field("uf", &BString::new(self.upper_fence_combined().to_vec()));
         let records_fmt = (0..self.common.count as usize).format_with(",\n", |i, f| {
@@ -271,6 +272,9 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeStatic<'bm, BM> for HashLeaf 
                 break;
             }
         }
+        if heads_first || heads_second {
+            println!("{:?}", self);
+        }
         (heads_first, heads_second)
     }
 
@@ -281,6 +285,11 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeStatic<'bm, BM> for HashLeaf 
 
 impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeDynamic<'bm, BM> for HashLeaf {
     fn split(&mut self, bm: BM, parent: &mut dyn NodeDynamic<'bm, BM>, _key: &[u8]) -> Result<(), ()> {
+
+        if self.sorted <= self.common.count / 8 as u16 {
+            self.sort();
+        }
+
         let (lft,rgth) = NodeStatic::<BM>::has_good_heads(self);
 
         let scan_counter = self.common.scan_counter;

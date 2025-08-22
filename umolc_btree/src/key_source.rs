@@ -226,14 +226,6 @@ impl ZeroKey {
 }
 
 unsafe impl SourceSlice for ZeroKey {
-    fn len(self) -> usize {
-        self.len
-    }
-
-    fn iter(self) -> impl Iterator<Item = u8> {
-        std::iter::repeat(0).take(self.len)
-    }
-
     fn slice_start(mut self, start: usize) -> Self {
         assert!(start <= self.len);
         self.len -= start;
@@ -244,5 +236,13 @@ unsafe impl SourceSlice for ZeroKey {
         assert!(end <= self.len);
         self.len = end;
         self
+    }
+
+    fn len(self) -> usize {
+        self.len
+    }
+
+    fn iter(self) -> impl Iterator<Item = u8> {
+        std::iter::repeat(0).take(self.len)
     }
 }

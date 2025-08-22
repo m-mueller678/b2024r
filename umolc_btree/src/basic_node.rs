@@ -302,6 +302,7 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>, V: NodeKind> NodeStatic<'bm, BM> 
     fn init(&mut self, lf: impl SourceSlice, uf: impl SourceSlice, lower: Option<&[u8; 5]>) {
         if V::IS_LEAF {
             assert!(lower.is_none());
+            self.common.scan_counter = 3;
         } else {
             self.slice_mut(Self::LOWER_OFFSET, 5).copy_from_slice(lower.unwrap());
         }
@@ -734,6 +735,7 @@ mod tests {
     use rand::SeedableRng;
     use std::collections::HashSet;
     use umolc::{BufferManager, BufferManagerExt, BufferManagerGuard, OPtr, PageId, SimpleBm};
+    use crate::fully_dense_leaf::FullyDenseLeaf;
 
     type BM<'a> = &'a SimpleBm<Page>;
 

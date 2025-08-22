@@ -63,31 +63,47 @@ fn adaptive_promotion () {
     let bm = SimpleBm::<Page>::new(PAGE_COUNT);
     let tree = Tree::new(&bm);
 
-    fn generate_key(i: u32, key_len: usize) -> Vec<u8> {
+    let amount_keys = 200;
+
+    let generate_key = |i: u32, key_len: usize| -> Vec<u8> {
         if key_len < 4 {
             panic!("Key length must be at least 4");
         }
-        let mut key= (0..).map(|i| i as u8).take(key_len-4).collect::<Vec<u8>>();
+        let mut key = match i % 10 {
+            0 => "AAAA".as_bytes().to_vec(),
+            2 => "CCCC".as_bytes().to_vec(),
+            3 => "DDDD".as_bytes().to_vec(),
+            1 => "BBBB".as_bytes().to_vec(),
+            4 => "EEEE".as_bytes().to_vec(),
+            5 => "FFFF".as_bytes().to_vec(),
+            6 => "GGGG".as_bytes().to_vec(),
+            7 => "HHHH".as_bytes().to_vec(),
+            8 => "IIII".as_bytes().to_vec(),
+            9 => "JJJJ".as_bytes().to_vec(),
+            _ => "KKKK".as_bytes().to_vec(),
+        };
         key.extend_from_slice(&i.to_be_bytes());
         key
-    }   
+    };
 
 
 
-    for r in 0..200 {
-        for i in 0..100 {
+    for iteration in 0..20 {
+        for i in 0..amount_keys {
             let key = generate_key(i, 4);
             let value = i.to_be_bytes().to_vec();
-            tree.insert(key.as_slice(), value.as_slice());
-        }
-        for i in 0..100 {
-            let key = generate_key(i, 4);
-            tree.remove(key.as_slice());
-        }
-        for i in 0..100 {
-            let key = generate_key(i, 4);
-            let value = i.to_be_bytes().to_vec();
-            tree.insert(key.as_slice(), value.as_slice());
+            match iteration%3 {
+                0 => {
+                    tree.insert(key.as_slice(), value.as_slice());
+                },
+                1 => {
+                    tree.lookup_to_vec(key.as_slice());
+                },
+                2 => {
+                    tree.remove(key.as_slice());
+                },
+                _ => unreachable!()
+            }
         }
 
 
@@ -95,13 +111,16 @@ fn adaptive_promotion () {
             if scan_counter == 255 {
                 panic!("Node should not have good heads by default");
             }
-            assert_eq!(252, x, "Node Tag should be 252 = HashLeaf after spamming inserts");
+
+            let action = match iteration%3 { 0=> "insert", 1=> "lookup", 2=> "remove", _ => unreachable!() };
+
+            assert_eq!(252, x, "Iteration {iteration}: Node Tag should be 252 = HashLeaf after spamming {action}. Scan counter: {scan_counter}");
             false
         });
 
         println!("Starting to spam scans");
 
-        for i in 0..5000 {
+        for _ in 0..5000 {
             let key = generate_key(0, 4);
             tree.scan(key.as_slice(), |x,val| {
                 true
@@ -113,7 +132,7 @@ fn adaptive_promotion () {
             if scan_counter == 255 {
                 panic!("Node should not have good heads by default");
             }
-            assert_eq!(251, x, "Node Tag should be 251 = Basic_Leaf after spamming scans");
+            assert_eq!(251, x, "Iteration {iteration}: Node Tag should be 251 = Basic_Leaf after spamming scans. Scan counter: {scan_counter}");
             false
         });
     }

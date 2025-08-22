@@ -716,6 +716,7 @@ mod insert_resolver;
 mod test {
     use bytemuck::Zeroable;
     use umolc::{BufferManager, SimpleBm};
+    use crate::basic_node::BasicLeaf;
     use crate::fully_dense_leaf::FullyDenseLeaf;
     use crate::node;
     use crate::node::{node_tag, NodeDynamic, NodeStatic, Page, ToFromPageExt};
@@ -896,5 +897,39 @@ mod test {
         }
     }
 
+    #[test]
+    fn has_good_heads_test() {
+        type BM = &'static SimpleBm<Page>;
+        let mut page = Page::zeroed();
+        let leaf = page.cast_mut::<FullyDenseLeaf>();
 
+        let lowerfence = generate_key(0, 4);
+        let upperfence = generate_key(4096, 4);
+
+
+        leaf.cast_mut::<FullyDenseLeaf>().init(lowerfence.as_slice(), upperfence.as_slice(), 4, 4).unwrap();
+
+        assert_eq!((true, true), NodeStatic::<BM>::has_good_heads(leaf));
+    }
+
+    #[test]
+    fn wrong_keys() {
+        type BM = &'static SimpleBm<Page>;
+        let mut page = Page::zeroed();
+        let leaf = page.cast_mut::<FullyDenseLeaf>();
+
+        let lowerfence = generate_key(0, 4);
+        let upperfence = generate_key(4096, 4);
+
+        leaf.cast_mut::<FullyDenseLeaf>().init(lowerfence.as_slice(), upperfence.as_slice(), 4, 4).unwrap();
+
+
+        let mut insert = generate_key(123, 4);
+        insert.extend_from_slice(&123u32.to_be_bytes());
+
+        let res = NodeStatic::<BM>::insert(leaf, insert.as_slice(), insert.as_slice());
+        assert!(res.is_err());
+
+
+    }
 }
