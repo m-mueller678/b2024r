@@ -84,32 +84,55 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> Tree<'bm, BM> {
 
 
             if tag == node_tag::HASH_LEAF {
-                let mut node_temp : BM::GuardX = node.upgrade();
-                node_temp.cast_mut::<HashLeaf>().sort();
-                node = self.downgrade_guard(node_temp);
+                let mut node : BM::GuardX = node.upgrade();
+                node.cast_mut::<HashLeaf>().sort();
+                // in theory we could demote the lock here, but for hash_leafs, being sorted is relevant that we just keep the lock on
+                let ret = node.as_dyn_node::<BM>().scan_with_callback(&mut buffer_for_callback, lf, &mut callback);
+
+                lf = None;
+
+                if ret {
+                    return;
+                }
+
+                let upper = node.upper_fence_combined();
+
+                let upper_len = upper.len();
+
+                key = {
+                    upper.to_vec()
+                        .write_to_uninit(&mut buffer[..upper_len])
+                };
+
+                if key.is_empty() {
+                    return;
+                }
             }
 
-            let node: BM::GuardS = node.upgrade();
+            else {
 
-            let ret = node.as_dyn_node::<BM>().scan_with_callback(&mut buffer_for_callback, lf, &mut callback);
+                let node: BM::GuardS = node.upgrade();
 
-            lf = None;
+                let ret = node.as_dyn_node::<BM>().scan_with_callback(&mut buffer_for_callback, lf, &mut callback);
 
-            if ret {
-                return;
-            }
+                lf = None;
 
-            let upper = node.upper_fence_combined();
+                if ret {
+                    return;
+                }
 
-            let upper_len = upper.len();
+                let upper = node.upper_fence_combined();
 
-            key = {
-                upper.to_vec()
-                    .write_to_uninit(&mut buffer[..upper_len])
-            };
+                let upper_len = upper.len();
 
-            if key.is_empty() {
-                return;
+                key = {
+                    upper.to_vec()
+                        .write_to_uninit(&mut buffer[..upper_len])
+                };
+
+                if key.is_empty() {
+                    return;
+                }
             }
 
 
@@ -131,11 +154,13 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> Tree<'bm, BM> {
             parent.release_unchecked();
 
 
+
             let ret = callback(node.as_dyn_node::<BM>().get_node_tag(), node.as_dyn_node::<BM>().get_scan_counter());
 
             if ret {
                 return;
             }
+
 
             let upper = node.upper_fence_combined();
 
@@ -239,7 +264,7 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> Tree<'bm, BM> {
                 self.decrease_scan_counter_x(&mut node);
                 x
             }
-            Err(error) => {
+            Err(_) => {
                 node.reset_written();
                 let mut parent = parent.upgrade();
                 self.ensure_parent_not_meta(&mut parent);
@@ -321,18 +346,7 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> Tree<'bm, BM> {
             let mut node: BM::GuardX = node.upgrade();
             node.decrease_scan_counter();
 
-            match node.as_dyn_node::<BM>().qualifies_for_promote() {
-                None => {
-                },
-                Some(to) => {
-                    if node.as_dyn_node::<BM>().can_promote(to).is_ok() {
-                        node.as_dyn_node_mut::<BM>().promote(to);
-                    }
-                    else {
-                        node.as_dyn_node_mut::<BM>().retry_later();
-                    }
-                },
-            }
+            self.adaptive_promotion(&mut node);
 
             return self.downgrade_guard(node);
         }
@@ -345,20 +359,7 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> Tree<'bm, BM> {
             let mut node: BM::GuardX = node.upgrade();
             node.increase_scan_counter();
 
-
-            match node.as_dyn_node::<BM>().qualifies_for_promote() {
-                None => {
-                },
-                Some(to) => {
-                    if node.as_dyn_node::<BM>().can_promote(to).is_ok() {
-                        node.as_dyn_node_mut::<BM>().promote(to);
-                    }
-                    else {
-                        node.as_dyn_node_mut::<BM>().retry_later();
-                    }
-                },
-            }
-
+            self.adaptive_promotion(&mut node);
 
             return self.downgrade_guard(node);
         }
@@ -369,40 +370,26 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> Tree<'bm, BM> {
         if fastrand::u8(..100) < 5 {
             node.decrease_scan_counter();
 
-            match node.as_dyn_node::<BM>().qualifies_for_promote() {
-                None => {
-                },
-                Some(to) => {
-                    if node.as_dyn_node::<BM>().can_promote(to).is_ok() {
-                        node.as_dyn_node_mut::<BM>().promote(to);
-                    }
-                    else {
-                        node.as_dyn_node_mut::<BM>().retry_later();
-                    }
-                },
-            }
+
+            self.adaptive_promotion(node);
         }
     }
 
-
-    fn increase_scan_counter_x(&self, mut node:&mut BM::GuardX) {
-        if fastrand::u8(..100) < 15 {
-            node.increase_scan_counter();
-
-
-            match node.as_dyn_node::<BM>().qualifies_for_promote() {
-                None => {},
-                Some(to) => {
-                    if node.as_dyn_node::<BM>().can_promote(to).is_ok() {
-                        node.as_dyn_node_mut::<BM>().promote(to);
-                    }
-                    else {
-                        node.as_dyn_node_mut::<BM>().retry_later();
-                    }
-                },
-            }
+    fn adaptive_promotion (&self, node: &mut BM::GuardX) {
+        match node.as_dyn_node::<BM>().qualifies_for_promote() {
+            None => {
+            },
+            Some(to) => {
+                if node.as_dyn_node::<BM>().can_promote(to).is_ok() {
+                    node.as_dyn_node_mut::<BM>().promote(to);
+                }
+                else {
+                    node.as_dyn_node_mut::<BM>().retry_later();
+                }
+            },
         }
     }
+
 
     fn downgrade_guard(&self, x: BM::GuardX) -> BM::GuardO {
         let pid = x.page_id();
@@ -471,8 +458,8 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeStatic<'bm, BM> for MetadataP
         (Vec::new(), vec![page_id_to_bytes(self.root).to_vec()])
     }
 
-    fn set_scan_counter(&mut self, counter: u8) {
-        todo!()
+    fn set_scan_counter(&mut self, _counter: u8) {
+        unimplemented!()
     }
 
     fn has_good_heads(&self) -> (bool, bool) {
@@ -495,6 +482,18 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeDynamic<'bm, BM> for Metadata
         unimplemented!()
     }
 
+    fn scan_with_callback(&self, _buffer: &mut [MaybeUninit<u8>; 512], _start : Option<&[u8]>, _callback: &mut dyn FnMut(&[u8], &[u8]) -> bool) -> bool {
+        unimplemented!()
+    }
+
+    fn get_node_tag(&self) -> u8 {
+        unimplemented!()
+    }
+
+    fn get_scan_counter(&self) -> u8 {
+        unimplemented!()
+    }
+
     fn can_promote(&self, _to: u8) -> Result<(), PromoteError> {
         unimplemented!()
     }
@@ -503,23 +502,11 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeDynamic<'bm, BM> for Metadata
         unimplemented!()
     }
 
-    fn scan_with_callback(&self, _buffer: &mut [MaybeUninit<u8>; 512], _start : Option<&[u8]>, _callback: &mut dyn FnMut(&[u8], &[u8]) -> bool) -> bool {
-        unimplemented!()
-    }
-
     fn qualifies_for_promote(&self) -> Option<u8> {
         unimplemented!()
     }
 
     fn retry_later(&mut self) {
-        todo!()
-    }
-
-    fn get_node_tag(&self) -> u8 {
-        todo!()
-    }
-
-    fn get_scan_counter(&self) -> u8 {
         todo!()
     }
 }

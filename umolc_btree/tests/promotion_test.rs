@@ -1,5 +1,3 @@
-use bstr::ByteSlice;
-use umolc::{BufferManager, CommonSeqLockBM, OPtr};
 use umolc_btree::{Page, Tree};
 
 
@@ -13,7 +11,7 @@ fn fdl_promotion() {
     let bm = SimpleBm::<Page>::new(PAGE_COUNT);
     let tree = Tree::new(&bm);
 
-    let mut insert_key = |prefix: &[u8], i: u32, insert: bool| {
+    let insert_key = |prefix: &[u8], i: u32, insert: bool| {
         let mut key = prefix.to_vec();
         key.extend_from_slice(&i.to_be_bytes());
         let value = i.to_le_bytes().to_vec();
@@ -26,7 +24,7 @@ fn fdl_promotion() {
             tree.remove(&key);
             let index_bytes: [u8; 4] = key[(b"Test").len()..].try_into().expect("Key does not contain valid u32 suffix");
             let key_index = u32::from_be_bytes(index_bytes);
-            assert_eq!(tree.lookup_to_vec(&key), None, "Key is still present and hasn't been removed");
+            assert_eq!(tree.lookup_to_vec(&key), None, "Key is {} still present and hasn't been removed", key_index);
         }
     };
     for i in 0..=100 {
@@ -79,7 +77,7 @@ fn fdl_demotion() {
             tree.remove(&key);
             let index_bytes: [u8; 4] = key[(b"Test").len()..].try_into().expect("Key does not contain valid u32 suffix");
             let key_index = u32::from_be_bytes(index_bytes);
-            assert_eq!(tree.lookup_to_vec(&key), None, "Key is still present and hasn't been removed");
+            assert_eq!(tree.lookup_to_vec(&key), None, "Key {} is still present and hasn't been removed", key_index);
         }
     };
     for i in 0..=100 {
@@ -125,7 +123,7 @@ fn fdl_split_high() {
     let bm = SimpleBm::<Page>::new(PAGE_COUNT);
     let tree = Tree::new(&bm);
 
-    let mut insert_key = |prefix: &[u8], i: u32, insert: bool| {
+    let insert_key = |prefix: &[u8], i: u32, insert: bool| {
         let mut key = prefix.to_vec();
         key.extend_from_slice(&i.to_be_bytes());
         let value = i.to_le_bytes().to_vec();
@@ -138,7 +136,7 @@ fn fdl_split_high() {
             let key_index = u32::from_be_bytes(index_bytes);
             assert_eq!(res, Some(value), "Key {key_index} is not present in HashMap");
             tree.remove(&key);
-            assert_eq!(tree.lookup_to_vec(&key), None, "Key {key_index} is still present and hasn't been removed");
+            assert_eq!(tree.lookup_to_vec(&key), None, "Key {} is still present and hasn't been removed", key_index);
         }
     };
 

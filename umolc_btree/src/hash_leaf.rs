@@ -395,6 +395,10 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeDynamic<'bm, BM> for HashLeaf
 
         let mut lf : usize = 0;
 
+        if self.sorted != self.common.count {
+            panic!("While not inherent, the sort function should always immediately be called after sorting for hash_leaf")
+        }
+
         match start {
             None => {},
             Some(key) => {

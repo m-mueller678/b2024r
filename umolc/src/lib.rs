@@ -29,7 +29,7 @@ pub struct PageId {
     pub x: u64,
 }
 
-pub trait BufferManager<'bm>: 'bm + Copy + Send + Sync + Sized {
+pub trait   BufferManager<'bm>: 'bm + Copy + Send + Sync + Sized {
     type Page;
     type GuardO: OptimisticGuard<'bm, Self>
         + BufferManageGuardUpgrade<'bm, Self, Self::GuardS>

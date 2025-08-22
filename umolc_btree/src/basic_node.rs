@@ -240,7 +240,7 @@ impl<V: NodeKind> Debug for BasicNode<V> {
         macro_rules! fields {
             ($base:expr => $($f:ident),*) => {$(s.field(std::stringify!($f),&$base.$f);)*};
         }
-        fields!(self.common => count, lower_fence_len, upper_fence_len, prefix_len);
+        fields!(self.common => count, lower_fence_len, upper_fence_len, prefix_len, scan_counter);
         fields!(self => heap);
         s.field("lf", &BStr::new(self.lower_fence()));
         s.field("uf", &BString::new(self.upper_fence_combined().to_vec()));

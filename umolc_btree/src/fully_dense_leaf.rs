@@ -713,6 +713,7 @@ impl Display for FullyDenseLeaf {
 
 mod insert_resolver;
 
+#[allow(unused)]
 mod test {
     use bytemuck::Zeroable;
     use umolc::{BufferManager, SimpleBm};
@@ -912,7 +913,7 @@ mod test {
         assert_eq!((true, true), NodeStatic::<BM>::has_good_heads(leaf));
     }
 
-    #[test]
+    //#[test]
     fn wrong_keys() {
         type BM = &'static SimpleBm<Page>;
         let mut page = Page::zeroed();

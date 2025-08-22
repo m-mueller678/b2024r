@@ -1,3 +1,5 @@
+mod keyset_generator;
+
 use minstant::Instant;
 use rand::distributions::{Distribution, Uniform};
 use rand::rngs::SmallRng;
