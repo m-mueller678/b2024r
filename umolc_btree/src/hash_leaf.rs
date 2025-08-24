@@ -272,9 +272,6 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeStatic<'bm, BM> for HashLeaf 
                 break;
             }
         }
-        if heads_first || heads_second {
-            println!("{:?}", self);
-        }
         (heads_first, heads_second)
     }
 

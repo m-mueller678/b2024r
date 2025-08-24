@@ -12,3 +12,6 @@ pfm = "0.1.2"
 minstant = "0.1.7"
 zipf="7.0.1"
 rip_shuffle = "0.2.0"
+umolc = {path = "../umolc"}
+umolc_btree = {path = "../umolc_btree"}
+fastrand = "2.3.0"

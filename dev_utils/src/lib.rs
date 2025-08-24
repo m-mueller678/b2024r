@@ -1,4 +1,7 @@
-mod keyset_generator;
+extern crate core;
+
+pub mod keyset_generator;
+pub mod tree_utils;
 
 use minstant::Instant;
 use rand::distributions::{Distribution, Uniform};

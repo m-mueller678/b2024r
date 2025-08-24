@@ -2,7 +2,8 @@ extern crate core;
 
 use umolc_btree::{Page, Tree};
 use umolc::SimpleBm;
-
+use dev_utils::keyset_generator::{KeyGenerator, BadHeadsKeyset, GoodHeadsKeyset, DenseKeyset};
+use dev_utils::tree_utils::check_node_tag_percentage;
 
 #[test]
 fn basic_scan() {
@@ -56,53 +57,19 @@ fn basic_scan() {
     }
 }
 
-#[test]
-fn adaptive_promotion () {
+fn adaptive_promotion<KG: KeyGenerator>(point_op_tag: u8, scan_tag: u8, allow_good_heads: bool, amount_keys: usize, PAGE_COUNT: usize, iterations: usize, margin: f32) {
 
     fastrand::seed(42);
-    const PAGE_COUNT: usize = 512;
     let bm = SimpleBm::<Page>::new(PAGE_COUNT);
     let tree = Tree::new(&bm);
 
-    let amount_keys = 10000;
+    let keyset: Vec<(Vec<u8>, Vec<u8>)> = KG::generate_keyset(amount_keys);
 
-    let generate_key = |i: u32| -> Vec<u8> {
-        let mut key = match i % 10 {
-            0 => "AA".as_bytes().to_vec(),
-            2 => "CC".as_bytes().to_vec(),
-            3 => "DD".as_bytes().to_vec(),
-            1 => "BB".as_bytes().to_vec(),
-            4 => "EE".as_bytes().to_vec(),
-            5 => "FF".as_bytes().to_vec(),
-            6 => "GG".as_bytes().to_vec(),
-            7 => "HH".as_bytes().to_vec(),
-            8 => "II".as_bytes().to_vec(),
-            9 => "JJ".as_bytes().to_vec(),
-            _ => "KK".as_bytes().to_vec(),
-        };
-        let mut key = match (i/10) % 10 {
-            0 => "AA".as_bytes().to_vec(),
-            2 => "CC".as_bytes().to_vec(),
-            3 => "DD".as_bytes().to_vec(),
-            1 => "BB".as_bytes().to_vec(),
-            4 => "EE".as_bytes().to_vec(),
-            5 => "FF".as_bytes().to_vec(),
-            6 => "GG".as_bytes().to_vec(),
-            7 => "HH".as_bytes().to_vec(),
-            8 => "II".as_bytes().to_vec(),
-            9 => "JJ".as_bytes().to_vec(),
-            _ => "KK".as_bytes().to_vec(),
-        };
-        key.extend_from_slice(&i.to_be_bytes());
-        key
-    };
+    let first_key = b"\0";
 
-
-
-    for iteration in 0..30 {
+    for iteration in 0..iterations {
         for i in 0..amount_keys {
-            let key = generate_key(i);
-            let value = i.to_be_bytes().to_vec();
+            let (key, value) = keyset.get(i).unwrap();
             match iteration%3 {
                 0 => {
                     tree.insert(key.as_slice(), value.as_slice());
@@ -116,74 +83,57 @@ fn adaptive_promotion () {
                 _ => unreachable!()
             }
 
-            if i % 250 == 0 {
-                // we randomly scan to trigger the sorting logic.
-
+            if i % amount_keys/4 == 0 {
                 tree.scan(key.as_slice(), |x,val| {
-                    true
+                    false
                 });
             }
         }
 
 
         if iteration % 3 == 0 {
-            // if the nodes are full, the hash_leaf might be unable to promote to a basic_leaf
+            let mut x = 0;
+            tree.scan(first_key.as_slice(), |_,_| {
+                x+=1;
+                false
+            });
+
+            assert_eq!(amount_keys, x, "The scan did not find all required values.");
+
             for i in 0..amount_keys/5 {
-                let key = generate_key(i);
+                let (key, _) = keyset.get(i).unwrap();
                 tree.remove(key.as_slice());
             }
         }
 
-        let mut total_count: f32 = 0.0;
-        let mut correct : f32 = 0.0;
         let action = match iteration%3 { 0=> "insert", 1=> "lookup", 2=> "remove", _ => unreachable!() };
-        tree.scan_node_types(generate_key(0).as_slice(), |x,scan_counter| {
-            total_count += 1.0;
-            if scan_counter == 255 {
-                panic!("Node should not have good heads by default");
-            }
+        check_node_tag_percentage(point_op_tag, margin, action, allow_good_heads, &tree);
 
 
-            if x == 252 {
-                correct += 1.0;
-            }
-            false
-        });
-
-        let margin = correct/total_count;
-
-        assert!(margin > 0.8, "Not enough Nodes had the correct Tag after spamming {action}: 80 > {:?}%", margin*100.0);
-
-
-        println!("Promoted correctly after spamming {action} with {:?}% correct nodes", margin*100.0);
-
-        println!("Starting to spam scans");
-
-
-        //This has a decent chance to not promote the node properly, which is why we use seeded fastrand. If this test still fails, one could think about increasing this number, it would make the test more failsafe, but would increase time
         for _ in 0..100 {
-            let key = generate_key(0);
-            tree.scan(key.as_slice(), |x,val| {
+            tree.scan(first_key.as_slice(), |x,val| {
                 false
             });
         }
 
 
-        let mut total_count: f32 = 0.0;
-        let mut correct : f32 = 0.0;
-        tree.scan_node_types(generate_key(0).as_slice(), |x,scan_counter| {
-            if scan_counter == 255 {
-                panic!("Node should not have good heads by default");
-            }
-            if x == 251 {
-                correct += 1.0;
-            }
-            false
-        });
+        check_node_tag_percentage(scan_tag, margin, "scan", allow_good_heads, &tree);
 
-        let margin = correct/total_count;
-
-        assert!(margin > 0.8, "Not enough Nodes had the correct Tag after spamming scans: 80 > {:?}%", margin*100.0);
-        println!("Promoted correctly after spamming scans with {:?}% correct nodes", margin*100.0);
     }
+}
+
+
+#[test]
+fn adaptive_promotion_bad_heads () {
+    adaptive_promotion::<BadHeadsKeyset>(252, 251, false, 10000, 512, 30, 0.8);
+}
+
+#[test]
+fn adaptive_promotion_good_heads () {
+    adaptive_promotion::<GoodHeadsKeyset>(251, 251, true, 10000, 512, 30, 0.8);
+}
+
+#[test]
+fn adaptive_promotion_dense_heads () {
+    adaptive_promotion::<DenseKeyset>(253, 253, true, 100000, 4096, 6, 0.75);
 }
