@@ -22,8 +22,9 @@ define_node! {
         key_len:u16,
         capacity:u16, // if reference is close to u32::MAX or upper fence, capacity will not be lowered
         val_len:u16,
+        bitmap_len: u16,
         split_mode:u8,
-        _data: [u8; PAGE_SIZE-size_of::<CommonNodeHead>()-11],
+        _data: [u8; PAGE_SIZE-size_of::<CommonNodeHead>()-13],
     }
 }
 
@@ -97,15 +98,15 @@ impl FullyDenseLeaf {
         capacity.div_ceil(64)
     }
 
-    fn first_val_start(&self, capacity: usize) -> usize {
-        offset_of!(Self, _data) + Self::bitmap_u64_count(capacity) * 8
+    fn first_val_start(&self) -> usize {
+        offset_of!(Self, _data) + self.bitmap_len as usize
     }
 
     pub fn force_insert<O: OlcErrorHandler>(&mut self, key: &[u8], val: &[u8]) {
         let index = Self::key_to_index::<O>(
             unsafe { OPtr::from_ref(self) }, key).expect("Index computation failed");
 
-        let was_present = self.set_bit::<true>(index, false);
+        let was_present = self.set_bit::<true>(index);
         self.common.count += (!was_present) as u16;
         self.val_mut(index).copy_from_slice(val);
     }
@@ -136,8 +137,8 @@ impl FullyDenseLeaf {
     }
 
     // boolean ignores the debug_assert which needs to be done in split and other operations
-    fn set_bit<const SET: bool>(&mut self, i: usize, ignore: bool) -> bool {
-        debug_assert!(i < self.capacity as usize || ignore, "{i} was larger than capacity {}\n {}", self.capacity, self);
+    fn set_bit<const SET: bool>(&mut self, i: usize) -> bool {
+        debug_assert!(i < self.capacity as usize, "{i} was larger than capacity {}\n {}", self.capacity, self);
         let mask = 1 << (i % 8);
         let ret = self._data[i / 8] & mask != 0;
         if SET {
@@ -176,6 +177,7 @@ impl FullyDenseLeaf {
         }
         debug_assert!(!is_ok(capacity + 1));
         self.capacity = capacity as u16;
+        self.bitmap_len = Self::bitmap_u64_count(capacity) as u16 * 8;
         for i in 0..Self::bitmap_u64_count(capacity) {
             self.store_unaligned_u64(offset_of!(Self, _data) + i * 8, 0);
         }
@@ -233,11 +235,11 @@ impl FullyDenseLeaf {
     }
 
     fn val_mut(&mut self, i: usize) -> &mut [u8] {
-        self.slice_mut(self.first_val_start(self.capacity as usize) + self.val_len as usize * i, self.val_len as usize)
+        self.slice_mut(self.first_val_start() + self.val_len as usize * i, self.val_len as usize)
     }
 
     fn val(&self, i: usize) -> &[u8] {
-        self.slice(self.first_val_start(self.capacity as usize) + self.val_len as usize * i, self.val_len as usize)
+        self.slice(self.first_val_start() + self.val_len as usize * i, self.val_len as usize)
     }
 
     fn val_opt<O: OlcErrorHandler>(this: OPtr<Self, O>, i: usize) -> OPtr<[u8], O> {
@@ -284,7 +286,7 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeStatic<'bm, BM> for FullyDens
         match resolution {
             Resolution::Ok => {
                 println!("Key: {:?}", BStr::new(key));
-                let was_present = self.set_bit::<true>(index, false);
+                let was_present = self.set_bit::<true>(index);
                 self.common.count += (!was_present) as u16;
                 self.val_mut(index).copy_from_slice(val);
                 Ok(if was_present { Some(()) } else { None })
@@ -409,30 +411,40 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeDynamic<'bm, BM> for FullyDen
         right.init(sep_key, self.upper_fence_combined(), self.key_len as usize, self.val_len as usize).unwrap();
         self.as_page_mut().init_upper_fence(sep_key);
 
+        println!("Before Split {:?}", self);
+
+        right.capacity = self.capacity as u16 - split_at as u16;
+
+
         let old_capacity = self.capacity as usize;
         let old_count = self.common.count;
 
+        right.common.count = 0;
+
+        for i in split_at as usize..self.capacity as usize {
+            //TODO fix out of bounds
+            if self.get_bit_direct(i) {
+                let ri = i - split_at as usize;
+                right.val_mut(ri).copy_from_slice(self.val(i));
+                self.set_bit::<false>(i);
+                right.set_bit::<true>(ri);
+                right.common.count += 1;
+                self.common.count -= 1;
+            }
+        }
+
+
         self.capacity = split_at as u16;
-        right.capacity = old_capacity as u16 - split_at as u16;
-        self.common.count = count as u16;
+        debug_assert!(old_count == self.common.count + right.common.count, "Counts don't add up: {:?} + {:?} != {:?}", old_count, self.common.count, right.common.count);
 
 
         debug_assert!(self.capacity as usize + right.capacity as usize == old_capacity, "Capacities don't add up: {:?} + {:?} != {old_capacity}", self.capacity, right.capacity);
         debug_assert!(self.common.upper_fence_len <= 4);
         debug_assert!(right.reference == self.reference + self.capacity as u32, "References do not match: {:?} + {:?} != {:?}", self.reference, self.capacity, right.reference);
-        for i in split_at as usize..old_capacity as usize {
-            //TODO fix out of bounds
-            if self.set_bit::<false>(i, true) {
-                let ri = i - split_at as usize;
-                right.set_bit::<true>(ri, false);
-                right.val_mut(ri).copy_from_slice(self.val(i));
-                right.common.count += 1;
-            }
-        }
 
-        debug_assert!(old_count == self.common.count + right.common.count, "Counts don't add up: {:?} + {:?} != {:?}", old_count, self.common.count, right.common.count);
-        self.capacity = split_at as u16;
 
+        println!("Left {:?}", self);
+        println!("Right {:?}", right);
 
         right.common.scan_counter = 255;
         self.common.scan_counter = 255;
@@ -478,12 +490,58 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeDynamic<'bm, BM> for FullyDen
         if i >= self.capacity as usize {
             return None;
         }
-        if self.set_bit::<false>(i, false) {
+        if self.set_bit::<false>(i) {
             self.common.count -= 1;
             Some(())
         } else {
             None
         }
+    }
+
+    fn scan_with_callback(
+        &self,
+        buffer: &mut [MaybeUninit<u8>; 512],
+        start: Option<&[u8]>,
+        callback: &mut dyn FnMut(&[u8], &[u8]) -> bool
+    ) -> bool {
+
+        let mut lf : usize = 0;
+
+        match start {
+            None => {},
+            Some(key) => {
+                let res = Self::key_to_index::<BM::OlcEH>(unsafe { OPtr::from_ref(self) }, key);
+                if let Ok(i) = res {
+                    lf = i;
+                }
+            }
+        }
+
+        for i in lf..self.capacity as usize {
+            if self.get_bit_direct(i) {
+                let key_src = self.key_from_numeric_part(self.reference + i as u32);
+                let key_src_len = key_src.len();
+                let val = self.val(i);
+
+                key_src.write_to_uninit(&mut buffer[..key_src_len]);
+                let full_key : &mut [u8] = unsafe {
+                    std::slice::from_raw_parts_mut(buffer.as_mut_ptr() as *mut u8, key_src_len)
+                };
+
+                if callback(&full_key, val) {
+                    return true;
+                }
+            }
+        }
+        false
+    }
+
+    fn get_node_tag(&self) -> u8 {
+        self.common.tag
+    }
+
+    fn get_scan_counter(&self) -> u8 {
+        self.common.scan_counter
     }
 
     fn can_promote(&self, to: u8) -> Result<(), PromoteError> {
@@ -546,6 +604,7 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeDynamic<'bm, BM> for FullyDen
             _ => Err(Node),
         }
     }
+
 
     fn promote(&mut self, to: u8) {
         match to {
@@ -627,58 +686,11 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeDynamic<'bm, BM> for FullyDen
         }
     }
 
-    fn scan_with_callback(
-        &self,
-        buffer: &mut [MaybeUninit<u8>; 512],
-        start: Option<&[u8]>,
-        callback: &mut dyn FnMut(&[u8], &[u8]) -> bool
-    ) -> bool {
-
-        let mut lf : usize = 0;
-
-        match start {
-            None => {},
-            Some(key) => {
-                let res = Self::key_to_index::<BM::OlcEH>(unsafe { OPtr::from_ref(self) }, key);
-                if let Ok(i) = res {
-                    lf = i;
-                }
-            }
-        }
-
-        for i in lf..self.capacity as usize {
-            if self.get_bit_direct(i) {
-                let key_src = self.key_from_numeric_part(self.reference + i as u32);
-                let key_src_len = key_src.len();
-                let val = self.val(i);
-
-                key_src.write_to_uninit(&mut buffer[..key_src_len]);
-                let full_key : &mut [u8] = unsafe {
-                    std::slice::from_raw_parts_mut(buffer.as_mut_ptr() as *mut u8, key_src_len)
-                };
-
-                if callback(&full_key, val) {
-                    return true;
-                }
-            }
-        }
-        false
-    }
-
     fn qualifies_for_promote(&self) -> Option<u8> {
         None
     }
-
-
     fn retry_later(&mut self) {
         unreachable!();
-    }
-
-    fn get_node_tag(&self) -> u8 {
-        self.common.tag
-    }
-    fn get_scan_counter(&self) -> u8 {
-        self.common.scan_counter
     }
 
 }

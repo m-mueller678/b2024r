@@ -83,38 +83,27 @@ fn fdl_demotion() {
             assert_eq!(tree.lookup_to_vec(&key), None, "Key {} is still present and hasn't been removed", key_index);
         }
     };
-    for i in 0..=100 {
-        insert_key(b"Test", 2*i, true, true);
-        insert_key(b"Test", 2*i+1, true, true);
+    for i in 0..=200 {
+        insert_key(b"Test", i, true, true);
     }
-    for i in 900..=1000 {
-        insert_key(b"Test", 2*i, true, true);
-        insert_key(b"Test", 2*i+1, true, true);
+    for i in 1800..=2000 {
+        insert_key(b"Test", i, true, true);
     }
-    for i in 100..=300 {
-        insert_key(b"Test", 2*i, true, true);
-        insert_key(b"Test", 2*i+1, true, true);
+    for i in 200..=600 {
+        insert_key(b"Test", i, true, true);
     }
 
-    for i in 600..=900 {
-        insert_key(b"Test", 2*i, true, true);
-        insert_key(b"Test", 2*i+1, true, true);
+    for i in 1200..=1800 {
+        insert_key(b"Test", i, true, true);
     }
 
-    for i in 300..=600 {
-        insert_key(b"Test", 2*i, true, true);
-        insert_key(b"Test", 2*i+1, true, true);
+    for i in 600..=1200 {
+        insert_key(b"Test", i, true, true);
     }
 
     check_node_tag_percentage(253, 0.5, "insert", true, &tree);
 
     // remove 2/3 values -> it is now sparse enough for a demotion to be possible
-    for i in 0..999 {
-        if i % 3 != 0 {
-            insert_key(b"Test", 2*i, false, true);
-            insert_key(b"Test", 2*i+1, false, true);
-        }
-    }
 
     for i in 0..20 {
         println!("Inserting incorrect Keys");
@@ -122,11 +111,9 @@ fn fdl_demotion() {
     }
     check_node_tag_percentage(251, 0.45, "insert", true, &tree);
 
-    for i in 0..999 {
-        if i % 3 == 0 {
-            insert_key(b"Test", 2*i, false, true);
-            insert_key(b"Test", 2*i+1, false, true);
-        }
+    for i in 0..2000 {
+        insert_key(b"Test", i, false, true);
+
     }
 }
 
