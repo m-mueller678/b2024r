@@ -137,7 +137,7 @@ impl FullyDenseLeaf {
 
     // boolean ignores the debug_assert which needs to be done in split and other operations
     fn set_bit<const SET: bool>(&mut self, i: usize, ignore: bool) -> bool {
-        debug_assert!(i < self.capacity as usize || ignore, "{i} was larger than capacity {}", self.capacity);
+        debug_assert!(i < self.capacity as usize || ignore, "{i} was larger than capacity {}\n {}", self.capacity, self);
         let mask = 1 << (i % 8);
         let ret = self._data[i / 8] & mask != 0;
         if SET {
@@ -283,6 +283,7 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeStatic<'bm, BM> for FullyDens
         let index = index.get();
         match resolution {
             Resolution::Ok => {
+                println!("Key: {:?}", BStr::new(key));
                 let was_present = self.set_bit::<true>(index, false);
                 self.common.count += (!was_present) as u16;
                 self.val_mut(index).copy_from_slice(val);
@@ -420,8 +421,9 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeDynamic<'bm, BM> for FullyDen
         debug_assert!(self.common.upper_fence_len <= 4);
         debug_assert!(right.reference == self.reference + self.capacity as u32, "References do not match: {:?} + {:?} != {:?}", self.reference, self.capacity, right.reference);
         for i in split_at as usize..old_capacity as usize {
+            //TODO fix out of bounds
             if self.set_bit::<false>(i, true) {
-                let ri = i - count as usize;
+                let ri = i - split_at as usize;
                 right.set_bit::<true>(ri, false);
                 right.val_mut(ri).copy_from_slice(self.val(i));
                 right.common.count += 1;
