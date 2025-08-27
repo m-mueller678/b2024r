@@ -410,6 +410,7 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeDynamic<'bm, BM> for HashLeaf
         for i in lf..self.common.count as usize {
             let val = self.heap_val(i as usize);
 
+
             let suffix = self.heap_key(i as usize);
 
             let total_len = prefix_len + suffix.len();
@@ -417,7 +418,6 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeDynamic<'bm, BM> for HashLeaf
             let full_key : &mut [u8] = unsafe {
                 std::slice::from_raw_parts_mut(buffer.as_mut_ptr() as *mut u8, total_len)
             };
-
 
             if callback(&full_key, val) {
                 return true;

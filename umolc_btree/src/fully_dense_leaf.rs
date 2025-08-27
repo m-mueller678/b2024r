@@ -285,7 +285,6 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeStatic<'bm, BM> for FullyDens
         let index = index.get();
         match resolution {
             Resolution::Ok => {
-                println!("Key: {:?}", BStr::new(key));
                 let was_present = self.set_bit::<true>(index);
                 self.common.count += (!was_present) as u16;
                 self.val_mut(index).copy_from_slice(val);
@@ -411,7 +410,6 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeDynamic<'bm, BM> for FullyDen
         right.init(sep_key, self.upper_fence_combined(), self.key_len as usize, self.val_len as usize).unwrap();
         self.as_page_mut().init_upper_fence(sep_key);
 
-        println!("Before Split {:?}", self);
 
         right.capacity = self.capacity as u16 - split_at as u16;
 
@@ -441,10 +439,7 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeDynamic<'bm, BM> for FullyDen
         debug_assert!(self.capacity as usize + right.capacity as usize == old_capacity, "Capacities don't add up: {:?} + {:?} != {old_capacity}", self.capacity, right.capacity);
         debug_assert!(self.common.upper_fence_len <= 4);
         debug_assert!(right.reference == self.reference + self.capacity as u32, "References do not match: {:?} + {:?} != {:?}", self.reference, self.capacity, right.reference);
-
-
-        println!("Left {:?}", self);
-        println!("Right {:?}", right);
+        
 
         right.common.scan_counter = 255;
         self.common.scan_counter = 255;

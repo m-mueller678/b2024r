@@ -1,4 +1,5 @@
-use dev_utils::keyset_generator::{BadHeadsKeyset, DenseKeyset, GoodHeadsKeyset, KeyGenerator};
+use bstr::BStr;
+use dev_utils::keyset_generator::{BadHeadsKeyset, ScrambledDenseKeyset, GoodHeadsKeyset, KeyGenerator};
 use dev_utils::tree_utils::check_node_tag_percentage;
 use umolc::SimpleBm;
 use umolc_btree::{Page, Tree};
@@ -6,6 +7,7 @@ use umolc_btree::{Page, Tree};
 
 #[test]
 fn fdl_promotion() {
+    fastrand::seed(42);
     use crate::Tree;
     use crate::Page;
     use umolc::SimpleBm;
@@ -14,47 +16,34 @@ fn fdl_promotion() {
     let bm = SimpleBm::<Page>::new(PAGE_COUNT);
     let tree = Tree::new(&bm);
 
-    let insert_key = |prefix: &[u8], i: u32, insert: bool| {
-        let mut key = prefix.to_vec();
-        key.extend_from_slice(&i.to_be_bytes());
-        let value = i.to_le_bytes().to_vec();
-        if(insert) {
-            tree.insert(&key, &value);
-        }
-        else {
-            let res = tree.lookup_to_vec(&key);
-            assert_eq!(res, Some(value), "Key is not present in HashMap");
-            tree.remove(&key);
-            let index_bytes: [u8; 4] = key[(b"Test").len()..].try_into().expect("Key does not contain valid u32 suffix");
-            let key_index = u32::from_be_bytes(index_bytes);
-            assert_eq!(tree.lookup_to_vec(&key), None, "Key is {} still present and hasn't been removed", key_index);
-        }
-    };
-    for i in 0..=100 {
-        insert_key(b"Test", i, true);
-    }
-    for i in 900..=999 {
-        insert_key(b"Test", i, true);
-    }
-    for i in 100..=300 {
-        insert_key(b"Test", i, true);
+    let keyset = ScrambledDenseKeyset::generate_keyset(50000);
+
+
+    for i in 0..keyset.len() {
+        let (key, _) = keyset.get(i).unwrap();
+        let val = (i as u32).to_be_bytes().to_vec();
+        tree.insert(key.as_slice(), val.as_slice());
     }
 
-    for i in 600..=900 {
-        insert_key(b"Test", i, true);
-    }
+    check_node_tag_percentage(253, 0.6f32, "insert", true, true, &tree);
 
-    for i in 300..=600 {
-        insert_key(b"Test", i, true);
-    }
 
-    for i in 0..999 {
-        insert_key(b"Test", i, false);
+    for i in 0..keyset.len() {
+        let (key, _) = keyset.get(i).unwrap();
+        let val = (i as u32).to_be_bytes().to_vec();
+        let res = tree.lookup_to_vec(key.as_slice());
+        assert!(res.is_some(), "Value not present after promoting to dense deaf");
+        assert_eq!(val, res.unwrap(), "Key-Value pairs are no longer corresponding after promoting to dense leaf");
+        tree.remove(key.as_slice());
+        let res = tree.lookup_to_vec(key.as_slice());
+        assert!(res.is_none(), "Value still present after removing from dense leaf");
+
     }
 }
 
 #[test]
-fn fdl_demotion() {
+fn fdl_demotion_and_split_half() {
+    fastrand::seed(42);
     use crate::Tree;
     use crate::Page;
     use umolc::SimpleBm;
@@ -63,58 +52,56 @@ fn fdl_demotion() {
     let bm = SimpleBm::<Page>::new(PAGE_COUNT);
     let tree = Tree::new(&bm);
 
-    let insert_key = |prefix: &[u8], i: u32, insert: bool, valid_length: bool| {
-        let mut key = prefix.to_vec();
-        key.extend_from_slice(&i.to_be_bytes());
-        if !valid_length {
-            let tmp: u32 = 0;
-            key.extend_from_slice(&tmp.to_be_bytes().as_slice());
+    let keyset = ScrambledDenseKeyset::generate_keyset(50000);
+
+
+    for i in 0..keyset.len() {
+        let (key, _) = keyset.get(i).unwrap();
+        let val = (i as u32).to_be_bytes().to_vec();
+        tree.insert(key.as_slice(), val.as_slice());
+    }
+
+    check_node_tag_percentage(253, 0.6f32, "insert", true, true, &tree);
+
+
+    for i in 0..keyset.len() {
+        if i % 50 == 0 {
+            let (key, _) = keyset.get(i).unwrap();
+            let mut val = (i as u32).to_be_bytes().to_vec();
+            val.extend_from_slice(b"This will invalidate the data :)");
+            tree.insert(key.as_slice(), val.as_slice());
         }
-        let value = i.to_le_bytes().to_vec();
-        if(insert) {
-            tree.insert(&key, &value);
+    }
+    check_node_tag_percentage(253, 0.1, "insertion of wrong values", true,  false, &tree);
+
+
+    for i in 0..keyset.len() {
+        if i % 50 == 0 {
+            let (key, _) = keyset.get(i).unwrap();
+            let mut val = (i as u32).to_be_bytes().to_vec();
+            val.extend_from_slice(b"This will invalidate the data :)");
+            tree.insert(key.as_slice(), val.as_slice());
         }
-        else {
-            let res = tree.lookup_to_vec(&key);
-            assert_eq!(Some(value.clone()), res, "Key {:?} is not present in HashMap", value);
-            tree.remove(&key);
-            let index_bytes: [u8; 4] = key[(b"Test").len()..].try_into().expect("Key does not contain valid u32 suffix");
-            let key_index = u32::from_be_bytes(index_bytes);
-            assert_eq!(tree.lookup_to_vec(&key), None, "Key {} is still present and hasn't been removed", key_index);
+    }
+
+    for i in 0..keyset.len() {
+
+        let (key, _) = keyset.get(i).unwrap();
+        let mut val = (i as u32).to_be_bytes().to_vec();
+        if i % 50 == 0 {
+            val.extend_from_slice(b"This will invalidate the data :)");
         }
-    };
-    for i in 0..=200 {
-        insert_key(b"Test", i, true, true);
-    }
-    for i in 1800..=2000 {
-        insert_key(b"Test", i, true, true);
-    }
-    for i in 200..=600 {
-        insert_key(b"Test", i, true, true);
+        let res = tree.lookup_to_vec(key.as_slice());
+
+        assert!(res.is_some(), "Value not present after promoting to dense deaf");
+        assert_eq!(val, res.unwrap(), "Key-Value pairs are no longer corresponding after promoting to dense leaf");
+        tree.remove(key.as_slice());
+        let res = tree.lookup_to_vec(key.as_slice());
+        assert!(res.is_none(), "Value still present after removing from dense leaf");
     }
 
-    for i in 1200..=1800 {
-        insert_key(b"Test", i, true, true);
-    }
 
-    for i in 600..=1200 {
-        insert_key(b"Test", i, true, true);
-    }
 
-    check_node_tag_percentage(253, 0.5, "insert", true, &tree);
-
-    // remove 2/3 values -> it is now sparse enough for a demotion to be possible
-
-    for i in 0..20 {
-        println!("Inserting incorrect Keys");
-        insert_key(b"Test", i * 100, true, false);
-    }
-    check_node_tag_percentage(251, 0.45, "insert", true, &tree);
-
-    for i in 0..2000 {
-        insert_key(b"Test", i, false, true);
-
-    }
 }
 
 
@@ -152,60 +139,11 @@ fn fdl_split_high() {
         }
     }
 
+    check_node_tag_percentage(253, 0.6f32, "insert", true, true, &tree);
     for i in 0..4001 {
         insert_key(b"Test", i, false);
     }
 }
-
-#[test]
-fn fdl_split_half() {
-    use crate::Tree;
-    use crate::Page;
-    use umolc::SimpleBm;
-
-    const PAGE_COUNT: usize = 1024;
-    let bm = SimpleBm::<Page>::new(PAGE_COUNT);
-    let tree = Tree::new(&bm);
-
-    let mut insert_key = |prefix: &[u8], i: u32, insert: bool, correct_len: bool| {
-        let mut key = prefix.to_vec();
-        key.extend_from_slice(&i.to_be_bytes());
-
-        if !correct_len {
-            key.extend_from_slice("Test".as_bytes().iter().as_slice());
-        }
-
-        let value = i.to_le_bytes().to_vec();
-        if(insert) {
-            tree.insert(&key, &value);
-        }
-        else {
-            let res = tree.lookup_to_vec(&key);
-            assert_eq!(res, Some(value), "Key is not present in HashMap");
-            tree.remove(&key);
-            assert_eq!(tree.lookup_to_vec(&key), None, "Key is still present and hasn't been removed");
-        }
-    };
-
-    for i in 0..=60 {
-        for j in 0..=20 {
-            insert_key(b"Test", i * 20 + j, true, true );
-            insert_key(b"Test", (100*20*2) - (i * 20 + j), true, true);
-        }
-    }
-
-
-    for i in 0..60*20+1 {
-        insert_key(b"Test", i, true, false);
-    }
-
-
-
-    for i in 0..60*20+1 {
-        insert_key(b"Test", i, false, false);
-    }
-}
-
 
 
 fn adaptive_promotion<KG: KeyGenerator>(point_op_tag: u8, scan_tag: u8, allow_good_heads: bool, amount_keys: usize, PAGE_COUNT: usize, iterations: usize, margin: f32) {
@@ -258,7 +196,7 @@ fn adaptive_promotion<KG: KeyGenerator>(point_op_tag: u8, scan_tag: u8, allow_go
         }
 
         let action = match iteration%3 { 0=> "insert", 1=> "lookup", 2=> "remove", _ => unreachable!() };
-        check_node_tag_percentage(point_op_tag, margin, action, allow_good_heads, &tree);
+        check_node_tag_percentage(point_op_tag, margin, action, allow_good_heads, true, &tree);
 
 
         for _ in 0..100 {
@@ -268,7 +206,7 @@ fn adaptive_promotion<KG: KeyGenerator>(point_op_tag: u8, scan_tag: u8, allow_go
         }
 
 
-        check_node_tag_percentage(scan_tag, margin, "scan", allow_good_heads, &tree);
+        check_node_tag_percentage(scan_tag, margin, "scan", allow_good_heads, true, &tree);
 
     }
 }
@@ -286,6 +224,6 @@ fn adaptive_promotion_good_heads () {
 
 #[test]
 fn adaptive_promotion_dense_heads () {
-    adaptive_promotion::<DenseKeyset>(253, 253, true, 100000, 4096, 6, 0.75);
+    adaptive_promotion::<ScrambledDenseKeyset>(253, 253, true, 100000, 4096, 6, 0.65);
 }
 

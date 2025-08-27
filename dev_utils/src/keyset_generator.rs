@@ -1,4 +1,6 @@
-
+use std::mem::MaybeUninit;
+use bstr::{BStr, BString};
+use crate::generate_keys;
 
 pub trait KeyGenerator {
     fn generate_keyset(amount: usize) -> Vec<(Vec<u8>, Vec<u8>)>;
@@ -8,6 +10,8 @@ pub struct BadHeadsKeyset;
 pub struct GoodHeadsKeyset;
 
 pub struct DenseKeyset;
+
+pub struct ScrambledDenseKeyset;
 
 impl KeyGenerator for BadHeadsKeyset {
     fn generate_keyset(amount: usize) -> Vec<(Vec<u8>, Vec<u8>)> {
@@ -106,7 +110,7 @@ impl KeyGenerator for DenseKeyset {
     fn generate_keyset(amount: usize) -> Vec<(Vec<u8>, Vec<u8>)> {
 
         // we want to have a large amount of dense keys per block to create enough fdls in between
-        let DENSE_LENGTH = 20000;
+        let DENSE_LENGTH = 10000;
 
         let dense_fields = amount / DENSE_LENGTH;
 
@@ -114,41 +118,63 @@ impl KeyGenerator for DenseKeyset {
 
         let words = load_words();
 
-        let mut ret :Vec<(Vec<u8>, Vec<u8>)> = Vec::with_capacity(amount);
 
-        for i in 0..amount {
-            let mut padding = length;
-            let mut index = i;
-            let mut key = b"".to_vec();
 
-            let appendix = ((index%DENSE_LENGTH)as u32).to_be_bytes();
-            index /= DENSE_LENGTH;
-            while padding > 0 {
+        fn generate_keys (remaining: u32, buffer: &mut Vec<u8>, words: &Vec<String>, DENSE_LENGTH: usize, counter: &mut u32, ret: &mut Vec<(Vec<u8>, Vec<u8>)>) {
 
-                let mut word_index = (index%2) as u32 +2*(length-padding);
-                word_index %= words.len() as u32;
+            let len = buffer.len();
+            if remaining == 0 {
+                for i in 0..DENSE_LENGTH {
+                    let uuid = counter.to_be_bytes();
+                    buffer.extend_from_slice(b"/");
+                    buffer.extend_from_slice(&uuid);
 
-                let word = words[word_index as usize].as_bytes();
-                key.extend_from_slice(b"/");
-                key.extend_from_slice(word);
 
-                index/=2;
-                padding -=1;
+                    ret.push((buffer.clone(), counter.to_be_bytes().to_vec()));
+
+                    buffer.truncate(len);
+                    *counter += 1;
+                }
+                return;
             }
+            for i in 0..2 {
 
+                let index = fastrand::usize(0..words.len());
 
-            key.extend_from_slice(appendix.as_slice());
+                let word = words.get(index).unwrap();
 
-            let value = appendix.to_vec();
-            ret.push((key, value));
+                buffer.extend_from_slice(b"/");
+                buffer.extend_from_slice(word.as_bytes());
+
+                generate_keys(remaining-1, buffer, words, DENSE_LENGTH, counter, ret);
+
+                buffer.truncate(len);
+            }
         }
 
-        fastrand::shuffle(&mut ret);
+        let mut ret :Vec<(Vec<u8>, Vec<u8>)> = Vec::with_capacity(amount);
 
-        println!("Finished Keyset generation");
+        let mut buffer = b"".to_vec();
+
+        let mut counter = 0;
+        generate_keys(length, &mut buffer, &words, DENSE_LENGTH, &mut counter, &mut ret);
+
+        if ret.len() > amount {
+            ret.truncate(amount);
+        }
+
         ret
     }
 }
+
+impl KeyGenerator for ScrambledDenseKeyset {
+    fn generate_keyset(amount: usize) -> Vec<(Vec<u8>, Vec<u8>)> {
+        let mut ret = DenseKeyset::generate_keyset(amount);
+        fastrand::shuffle(&mut ret);
+        ret
+    }
+}
+
 
 fn load_words() -> Vec<String> {
     let content = include_str!("word1000.txt");
