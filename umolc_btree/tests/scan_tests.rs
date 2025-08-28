@@ -8,7 +8,7 @@ use umolc_btree::{Page, Tree};
 use umolc::SimpleBm;
 
 #[test]
-fn basic_scan() {
+fn basic_scan_test() {
 
     const PAGE_COUNT: usize = 512;
     let bm = SimpleBm::<Page>::new(PAGE_COUNT);
@@ -140,21 +140,118 @@ fn scan_on_node_type<KG: KeyGenerator>(amount: usize, node_tag: u8, margin: f32)
 
         assert_eq!(check[upper].0, last, "Did not stop in time.");
     }
-
-
 }
 
 #[test]
 fn test_scan_hash_leaf (){
+    fastrand::seed(5510);
     scan_on_node_type::<BadHeadsKeyset>(5000, 252, 0.7);
 }
 
 #[test]
 fn test_scan_basic_leaf (){
+    fastrand::seed(5510);
     scan_on_node_type::<GoodHeadsKeyset>(5000, 251, 0.7);
 }
 
 #[test]
 fn test_scan_dense_leaf (){
-    scan_on_node_type::<DenseKeyset>(10000, 253, 0.15);
+    fastrand::seed(5510);
+    scan_on_node_type::<DenseKeyset>(10000, 253, 0.50);
+}
+
+
+fn scan_on_node_type_sparse<KG: KeyGenerator>(amount: usize, node_tag: u8, margin: f32) {
+
+    let page_count: usize = amount / 100;
+    let bm = SimpleBm::<Page>::new(page_count);
+    let tree = Tree::new(&bm);
+
+    let mut keyset = KG::generate_keyset(amount);
+    keyset.sort_by(|a, b| a.0.cmp(&b.0));
+
+    for (i, (_, val)) in keyset.iter_mut().enumerate() {
+        let bytes = (i as u32).to_be_bytes();
+        val.clear();
+        val.extend_from_slice(&bytes);
+    }
+
+    let check = keyset.clone();
+    let mut remaining = check.clone();
+
+    fastrand::shuffle(&mut keyset);
+
+    println!("Prepared Keysets for scan test");
+
+    for (key, val) in keyset.iter() {
+        tree.insert(key.as_slice(), val.as_slice());
+    }
+
+    check_node_tag_percentage(node_tag, margin, "insert", true, true, &tree);
+
+    let to_remove = check.len()/2;
+
+    for _ in 0..to_remove {
+        let index = fastrand::usize(..remaining.len());
+        tree.remove(remaining[index].0.as_slice());
+        remaining.remove(index);
+    }
+
+
+    for lower in 0..check.len() {
+        let mut index = 0;
+        let mut first = true;
+
+        // this index should not be reset every iteration
+        // but I cannot find a solution that works at 1:30
+        // if I keep it persistent to iterations, for some reason it will lose track sometimes
+        // the runtime of this test changes from O(n*n/2) to O(n*n) (not even really), so it doesnt matter
+        let mut remaining_index: usize = 0;
+        tree.scan(check[lower].0.as_slice(),|key, val| {
+            if val.len() != 4 {
+                panic!("A scanned value was not long enough");
+            }
+
+            if first {
+                while remaining_index < remaining.len() {
+                    if remaining[remaining_index].0 == key {
+                        break;
+                    }
+                    remaining_index += 1;
+                    //println!("Remaining index: {}", remaining_index);
+                }
+
+                if remaining_index >= remaining.len() {
+                    panic!("Key was present after removed.");
+                }
+                index = remaining_index;
+            }
+            first = false;
+
+            assert_eq!(remaining[index].0, key, "There is keys present, that should have been removed!");
+            assert_eq!(remaining[index].1, val, "There is values present, that should have been removed!");
+
+            index += 1;
+
+            false
+        })
+    }
+}
+
+#[test]
+fn test_scan_sparse_hash_leaf (){
+    fastrand::seed(5510);
+    scan_on_node_type_sparse::<BadHeadsKeyset>(5000, 252, 0.7);
+}
+
+#[test]
+fn test_scan_sparse_basic_leaf (){
+    fastrand::seed(5510);
+    scan_on_node_type_sparse::<GoodHeadsKeyset>(5000, 251, 0.7);
+}
+
+#[test]
+fn test_scan_sparse_dense_leaf (){
+    fastrand::seed(5510);
+    scan_on_node_type_sparse::<DenseKeyset>(10000, 253, 0.50);
 }
