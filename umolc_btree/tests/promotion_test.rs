@@ -172,7 +172,7 @@ fn adaptive_promotion<KG: KeyGenerator>(point_op_tag: u8, scan_tag: u8, allow_go
                 _ => unreachable!()
             }
 
-            if i % amount_keys/4 == 0 {
+            if i % (amount_keys/4) == 0 {
                 tree.scan(key.as_slice(), |x,val| {
                     false
                 });

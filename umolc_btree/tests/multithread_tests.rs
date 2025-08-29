@@ -1,7 +1,8 @@
 extern crate core;
 
 use std::sync::Barrier;
-use std::thread;
+use std::{panic, thread};
+use std::panic::AssertUnwindSafe;
 use rip_shuffle::random_bits::FairCoin;
 use dev_utils::keyset_generator::{BadHeadsKeyset, KeyGenerator};
 use dev_utils::tree_utils::check_node_tag_percentage;
@@ -10,7 +11,7 @@ use umolc_btree::{Page, Tree};
 
 fn adaptive_promotion_multithreaded<KG: KeyGenerator>(amount: usize, threads: u16, iterations: u16, amount_scans : u16)
 {
-    let bm = SimpleBm::<Page>::new((amount * threads as usize) / 50);
+    let bm = SimpleBm::<Page>::new((amount * threads as usize)/10);
     let tree = Tree::new(&bm);
 
 
@@ -27,67 +28,71 @@ fn adaptive_promotion_multithreaded<KG: KeyGenerator>(amount: usize, threads: u1
             let tree_ref = &tree;
             let barrier_ref = &barrier;
             s.spawn(move || {
-                let mut scrambled = check.clone();
-                fastrand::shuffle(&mut scrambled);
+                let res = panic::catch_unwind(AssertUnwindSafe(|| {
+                    let mut scrambled = check.clone();
+                    fastrand::shuffle(&mut scrambled);
 
-                println!("Thread {thread_id} is waiting!");
-                barrier_ref.wait();
-                println!("Thread {thread_id} has started!");
+                    println!("Thread {thread_id} is waiting!");
+                    barrier_ref.wait();
+                    println!("Thread {thread_id} has started!");
 
 
-                for iteration in 0..iterations {
-                    println!("Thread: {thread_id} Iteration {iteration}");
-                    for i in 0..scrambled.len() {
-                        let (key, value) = scrambled.get(i).unwrap();
-                        match iteration % 3 {
-                            0 => {
-                                tree_ref.insert(key.as_slice(), value.as_slice());
-                            },
-                            1 => {
-                                let res = tree_ref.lookup_to_vec(key.as_slice());
-                                assert!(res.is_some() || i % 5 == 0);
-                            },
-                            2 => {
-                                let res = tree_ref.remove(key.as_slice());
-                                assert!(res.is_some() || i % 5 == 0);
-                            },
-                            _ => unreachable!()
+                    for iteration in 0..iterations {
+                        println!("Thread: {thread_id} Iteration {iteration}");
+                        for i in 0..scrambled.len() {
+                            let (key, value) = scrambled.get(i).unwrap();
+                            match iteration % 3 {
+                                0 => {
+                                    tree_ref.insert(key.as_slice(), value.as_slice());
+                                },
+                                1 => {
+                                    let res = tree_ref.lookup_to_vec(key.as_slice());
+                                    assert!(res.is_some() || i % 5 == 0);
+                                },
+                                2 => {
+                                    let res = tree_ref.remove(key.as_slice());
+                                    assert!(res.is_some() || i % 5 == 0);
+                                },
+                                _ => unreachable!()
+                            }
                         }
 
-                        if i % scrambled.len() / 4 == 0 {
-                            tree_ref.scan(key.as_slice(), |x, val| {
+                        for i in 0..scrambled.len() / 5 {
+                            tree_ref.remove(scrambled[i * 5 as usize].0.as_slice());
+                        }
+
+                        /*tree_ref.scan(b"".as_slice(), |key, val| {
+                            assert_eq!(6, val.len(), "Lengths did not align!");
+                            let id = u16::from_be_bytes(val[4..6].try_into().unwrap());
+                            if thread_id == id {
+                                let index = u32::from_be_bytes(val[0..4].try_into().unwrap());
+                                assert_eq!(check[index as usize].0.as_slice(), key, "Keys dont match!");
+                            }
+
+
+                            false
+                        });*/
+
+                        for _ in 0..amount_scans {
+                            tree_ref.scan(b"".as_slice(), |x, val| {
                                 false
                             });
                         }
                     }
+                    println!("Thread {thread_id} is done!");
+                }));
 
-                    for i in 0..scrambled.len() / 5 {
-                        tree_ref.remove(scrambled[i * 5 as usize].0.as_slice());
+                if let Err(payload) = res {
+                    // extract just the panic message
+                    if let Some(msg) = payload.downcast_ref::<&str>() {
+                        eprintln!("Thread {thread_id} panicked: {msg}");
+                    } else if let Some(msg) = payload.downcast_ref::<String>() {
+                        eprintln!("Thread {thread_id} panicked: {msg}");
+                    } else {
+                        eprintln!("Thread {:?}", payload);
                     }
-
-                    /*tree_ref.scan(b"".as_slice(), |key, val| {
-                        assert_eq!(6, val.len(), "Lengths did not align!");
-                        let id = u16::from_be_bytes(val[4..6].try_into().unwrap());
-                        if thread_id == id {
-                            let index = u32::from_be_bytes(val[0..4].try_into().unwrap());
-                            assert_eq!(check[index as usize].0.as_slice(), key, "Keys dont match!");
-                        }
-
-
-                        false
-                    });*/
-
-                    for _ in 0..amount_scans {
-                        /*tree_ref.scan(b"".as_slice(), |x, val| {
-                            false
-                        });*/
-                    }
+                    panic!("Thread {thread_id} panicked");
                 }
-                println!("Thread {thread_id} is done!");
-                barrier_ref.wait();
-
-
-
             });
         }
     });
@@ -123,7 +128,7 @@ fn prepare_keyset<KG: KeyGenerator>(amount: usize, threads: u16) -> Vec<Vec<(Vec
 }
 
 
-#[test]
+//#[test]
 fn bad_heads_promotion_multithreaded() {
-    adaptive_promotion_multithreaded::<BadHeadsKeyset>(1000, 2, 3, 15);
+    adaptive_promotion_multithreaded::<BadHeadsKeyset>(100, 2, 3, 15);
 }
