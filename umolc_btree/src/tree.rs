@@ -104,6 +104,8 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> Tree<'bm, BM> {
                         .write_to_uninit(&mut buffer[..upper_len])
                 };
 
+                node.release();
+
                 if key.is_empty() {
                     return;
                 }
@@ -130,6 +132,7 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> Tree<'bm, BM> {
                         .write_to_uninit(&mut buffer[..upper_len])
                 };
 
+                node.release();
                 if key.is_empty() {
                     return;
                 }
