@@ -8,10 +8,12 @@ use crate::{define_node, MAX_KEY_SIZE, MAX_VAL_SIZE};
 use std::fmt::{Debug, Formatter};
 use std::marker::PhantomData;
 use std::mem::{size_of, MaybeUninit};
+use bstr::BStr;
 use umolc::{
     o_project, BufferManageGuardUpgrade, BufferManager, BufferManagerExt, BufferManagerGuard, ExclusiveGuard, OPtr,
     OlcErrorHandler, OptimisticGuard, PageId,
 };
+use crate::node::node_tag::HASH_LEAF;
 
 pub struct Tree<'bm, BM: BufferManager<'bm, Page = Page>> {
     meta: PageId,
@@ -63,83 +65,88 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> Tree<'bm, BM> {
     where
             for<'a> F: FnMut(&[u8], &'a [u8]) -> bool {
         let mut buffer: [MaybeUninit<u8>; 512] = unsafe { MaybeUninit::uninit().assume_init() };
-
-        // in theory you could just reuse the buffer from the keys
-        let mut buffer_for_callback: [MaybeUninit<u8>; 512] = unsafe { MaybeUninit::uninit().assume_init() };
+;
         let mut key = lower_bound;
-
-        let mut lf = Some(lower_bound);
-
         loop {
-            let [parent, node] = self.descend(key, None);
 
-
-            parent.release_unchecked();
-
-            let mut node = self.increase_scan_counter(node);
-
-            let o = node.o_ptr();
-            let tag = o_project!(o.common.tag).r();
-
-
-
-            if tag == node_tag::HASH_LEAF {
-                let mut node : BM::GuardX = node.upgrade();
-                node.cast_mut::<HashLeaf>().sort();
-                // in theory we could demote the lock here, but for hash_leafs, being sorted is relevant that we just keep the lock on
-                let ret = node.as_dyn_node::<BM>().scan_with_callback(&mut buffer_for_callback, lf, &mut callback);
-
-                lf = None;
-
-                if ret {
-                    return;
-                }
-
-                let upper = node.upper_fence_combined();
-
-                let upper_len = upper.len();
-
-                key = {
-                    upper.to_vec()
-                        .write_to_uninit(&mut buffer[..upper_len])
-                };
-
-                node.release();
-
-                if key.is_empty() {
-                    return;
-                }
+            let (len, breakof) = BM::repeat(|| self.try_scan(key, &mut buffer, &mut callback));
+            if breakof || len == 0 {
+                return;
             }
-
-            else {
-
-                let node: BM::GuardS = node.upgrade();
-
-                let ret = node.as_dyn_node::<BM>().scan_with_callback(&mut buffer_for_callback, lf, &mut callback);
-
-                lf = None;
-
-                if ret {
-                    return;
-                }
-
-                let upper = node.upper_fence_combined();
-
-                let upper_len = upper.len();
-
-                key = {
-                    upper.to_vec()
-                        .write_to_uninit(&mut buffer[..upper_len])
-                };
-
-                node.release();
-                if key.is_empty() {
-                    return;
-                }
-            }
-
-
+            key = unsafe {
+                std::slice::from_raw_parts_mut(
+                    buffer.as_mut_ptr() as *mut u8,
+                    len
+                )
+            };
         }
+
+    }
+
+    fn try_scan<F>(&self, key: &[u8], buffer: &mut [MaybeUninit<u8>; 512], mut callback: F) -> (usize, bool)
+    where
+            for<'a> F: FnMut(&[u8], &'a [u8]) -> bool {
+
+        let [parent, node] = self.descend(key, None);
+
+        parent.release_unchecked();
+
+
+        let mut node = self.increase_scan_counter(node);
+        let o = node.o_ptr();
+        let tag = o_project!(o.common.tag).r();
+
+        if tag == node_tag::HASH_LEAF {
+            let mut node: BM::GuardX = node.upgrade();
+            node.cast_mut::<HashLeaf>().sort();
+
+            // in theory we could demote the lock here, but for hash_leafs, being sorted is relevant that we just keep the lock on
+            let ret = node.as_dyn_node::<BM>().scan_with_callback(buffer, key, &mut callback);
+
+            if ret {
+                return (0, true);
+            }
+
+            let upper = node.upper_fence_combined();
+
+            let upper_len = upper.len();
+
+            upper.to_vec()
+                .write_to_uninit(&mut buffer[..upper_len]);
+
+
+            if upper_len == 0 {
+                return (0, true);
+            }
+
+            (upper_len, false)
+        }
+
+        else {
+
+            let mut node: BM::GuardX = node.upgrade();
+
+            let ret = node.as_dyn_node::<BM>().scan_with_callback(buffer, key, &mut callback);
+
+            if ret {
+                return (0, true);
+            }
+
+            let upper = node.upper_fence_combined();
+
+            let upper_len = upper.len();
+
+            upper.to_vec()
+                .write_to_uninit(&mut buffer[..upper_len]);
+
+
+            if upper_len == 0 {
+                return (0, true);
+            }
+
+            (upper_len, false)
+        }
+
 
     }
 
@@ -258,13 +265,12 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> Tree<'bm, BM> {
     fn try_insert(&self, k: &[u8], val: &[u8]) -> Option<()> {
         let [parent, node] = self.descend(k, None);
         let mut node: BM::GuardX = node.upgrade();
+        self.decrease_scan_counter_x(&mut node);
 
 
         match node.as_dyn_node_mut::<BM>().insert_leaf(k, val) {
             Ok(x) => {
-
                 parent.release_unchecked();
-                self.decrease_scan_counter_x(&mut node);
                 x
             }
             Err(_) => {
@@ -367,6 +373,15 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> Tree<'bm, BM> {
             return self.downgrade_guard(node);
         }
         node
+    }
+
+
+    fn increase_scan_counter_x(&self, node: &mut BM::GuardX){
+        if fastrand::u8(..100) < 15 {
+            node.increase_scan_counter();
+
+            self.adaptive_promotion(node);
+        }
     }
 
     fn decrease_scan_counter_x(&self, node: &mut BM::GuardX) {
@@ -485,7 +500,7 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeDynamic<'bm, BM> for Metadata
         unimplemented!()
     }
 
-    fn scan_with_callback(&self, _buffer: &mut [MaybeUninit<u8>; 512], _start : Option<&[u8]>, _callback: &mut dyn FnMut(&[u8], &[u8]) -> bool) -> bool {
+    fn scan_with_callback(&self, _buffer: &mut [MaybeUninit<u8>; 512], _start : &[u8], _callback: &mut dyn FnMut(&[u8], &[u8]) -> bool) -> bool {
         unimplemented!()
     }
 

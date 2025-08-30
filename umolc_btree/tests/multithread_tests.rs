@@ -3,10 +3,8 @@ extern crate core;
 use std::sync::Barrier;
 use std::{panic, thread};
 use std::backtrace::Backtrace;
-use std::panic::AssertUnwindSafe;
 use std::thread::yield_now;
 use bstr::BStr;
-use rip_shuffle::random_bits::FairCoin;
 use dev_utils::keyset_generator::{BadHeadsKeyset, DenseKeyset, GoodHeadsKeyset, KeyGenerator, ScrambledDenseKeyset};
 use dev_utils::tree_utils::check_node_tag_percentage;
 use umolc::{BufferManager, SimpleBm};
@@ -61,7 +59,6 @@ fn adaptive_promotion_multithreaded<KG: KeyGenerator>(amount: usize, threads: u1
 
 
                 for iteration in 0..iterations {
-                    println!("Thread: {thread_id} Iteration {iteration}");
                     for i in 0..scrambled.len() {
                         let (key, value) = scrambled.get(i).unwrap();
                         match iteration % 3 {
@@ -84,7 +81,7 @@ fn adaptive_promotion_multithreaded<KG: KeyGenerator>(amount: usize, threads: u1
                         tree_ref.remove(scrambled[i * 5 as usize].0.as_slice());
                     }
 
-                    /*tree_ref.scan(b"".as_slice(), |key, val| {
+                    tree_ref.scan(b"".as_slice(), |key, val| {
                         assert_eq!(6, val.len(), "Lengths did not align!");
                         let id = u16::from_be_bytes(val[4..6].try_into().unwrap());
                         if thread_id == id {
@@ -94,7 +91,7 @@ fn adaptive_promotion_multithreaded<KG: KeyGenerator>(amount: usize, threads: u1
 
 
                         false
-                    });*/
+                    });
 
                     for _ in 0..amount_scans {
                         tree_ref.scan(b"".as_slice(), |x, val| {
@@ -111,10 +108,18 @@ fn adaptive_promotion_multithreaded<KG: KeyGenerator>(amount: usize, threads: u1
 
 
 #[test]
-fn combined_multithread_tests() {
-    adaptive_promotion_multithreaded::<BadHeadsKeyset>(1000, 100, 12, 10);
+fn combined_multithread_tests_bad_heads() {
+    adaptive_promotion_multithreaded::<BadHeadsKeyset>(1000, 16, 15, 1);
 }
 
+#[test]
+fn combined_multithread_tests_good_heads() {
+    adaptive_promotion_multithreaded::<GoodHeadsKeyset>(1000, 16, 15, 1);
+}
+#[test]
+fn combined_multithread_tests_dense_data() {
+    adaptive_promotion_multithreaded::<DenseKeyset>(1000, 16, 15, 1);
+}
 
 fn point_operations_multithreaded<KG: KeyGenerator>(amount: usize, threads: u16, iterations: u16)
 {
@@ -151,7 +156,6 @@ fn point_operations_multithreaded<KG: KeyGenerator>(amount: usize, threads: u16,
                         let mut val: Vec<u8> = b"".to_vec();
                         match iteration % 3 {
                             0 => {
-                                //println!("Thread {thread_id} is inserting Key {:?}!", BStr::new(&key));
                                 tree_ref.insert(key.as_slice(), value.as_slice());
                             },
                             1 => {
@@ -177,7 +181,6 @@ fn point_operations_multithreaded<KG: KeyGenerator>(amount: usize, threads: u16,
 
                             },
                             2 => {
-                                //println!("Thread {thread_id} is removing Key {:?}!", BStr::new(&key));
                                 let res = tree_ref.remove(key.as_slice());
                                 assert!(res.is_some());
                             },
@@ -221,26 +224,19 @@ fn prepare_keyset<KG: KeyGenerator>(amount: usize, threads: u16) -> Vec<Vec<(Vec
 }
 
 
-//#[test]
-fn bad_heads_promotion_multithreaded() {
-    adaptive_promotion_multithreaded::<BadHeadsKeyset>(100, 2, 3, 15);
-}
-
-
-
 #[test]
 fn hash_leaf_point_operations_multithreaded() {
-    point_operations_multithreaded::<BadHeadsKeyset>(10000, 16, 12);
+    point_operations_multithreaded::<BadHeadsKeyset>(1000, 16, 12);
 }
 
 #[test]
 fn dense_leaf_point_operations_multithreaded() {
-    point_operations_multithreaded::<DenseKeyset>(10000, 16, 12);
+    point_operations_multithreaded::<DenseKeyset>(1000, 16, 12);
 }
 
 #[test]
 fn basic_leaf_point_operations_multithreaded() {
-    point_operations_multithreaded::<GoodHeadsKeyset>(10000, 16, 12);
+    point_operations_multithreaded::<GoodHeadsKeyset>(1000, 16, 12);
 }
 
 fn scan_while_insert<KG: KeyGenerator>(amount: usize, threads: u16) {
@@ -268,7 +264,6 @@ fn scan_while_insert<KG: KeyGenerator>(amount: usize, threads: u16) {
 
                 for i in 0..scrambled.len() {
 
-                    println!("Inserting key {:?}", BStr::new(&scrambled[i].0));
                     let (key, value) = scrambled.get(i).unwrap();
                     tree_ref.insert(key.as_slice(), value.as_slice());
                     yield_now();
@@ -288,7 +283,6 @@ fn scan_while_insert<KG: KeyGenerator>(amount: usize, threads: u16) {
             loop {
                 let mut counter: usize = 0;
                 tree_ref.scan(b"".as_slice(), |x, x1| {
-                    println!("GUGUGAGA");
                     counter += 1;
                     false
                 });
@@ -304,7 +298,15 @@ fn scan_while_insert<KG: KeyGenerator>(amount: usize, threads: u16) {
 }
 #[test]
 fn hash_leaf_scan_while_insert() {
-    scan_while_insert::<BadHeadsKeyset>(1000, 100);
+    scan_while_insert::<BadHeadsKeyset>(1000, 16);
+}
+#[test]
+fn dense_leaf_scan_while_insert() {
+    scan_while_insert::<DenseKeyset>(1000, 16);
+}
+#[test]
+fn basic_leaf_scan_while_insert() {
+    scan_while_insert::<GoodHeadsKeyset>(1000, 16);
 }
 
 
@@ -384,6 +386,14 @@ fn scan_while_lookup<KG: KeyGenerator>(amount: usize, threads: u16) {
 #[test]
 fn hash_leaf_scan_while_lookup() {
     scan_while_lookup::<BadHeadsKeyset>(1000, 100);
+}
+#[test]
+fn basic_leaf_scan_while_lookup() {
+    scan_while_lookup::<GoodHeadsKeyset>(1000, 100);
+}
+#[test]
+fn denses_leaf_scan_while_lookup() {
+    scan_while_lookup::<DenseKeyset>(1000, 100);
 }
 
 
@@ -466,4 +476,12 @@ fn scan_while_remove<KG: KeyGenerator>(amount: usize, threads: u16) {
 #[test]
 fn hash_leaf_scan_while_remove() {
     scan_while_remove::<BadHeadsKeyset>(1000, 10);
+}
+#[test]
+fn basic_leaf_scan_while_remove() {
+    scan_while_remove::<GoodHeadsKeyset>(1000, 10);
+}
+#[test]
+fn dense_leaf_scan_while_remove() {
+    scan_while_remove::<DenseKeyset>(1000, 10);
 }

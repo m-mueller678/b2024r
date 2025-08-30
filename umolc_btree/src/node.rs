@@ -266,7 +266,7 @@ pub trait NodeDynamic<'bm, BM: BufferManager<'bm, Page = Page>>: ToFromPage + No
     fn validate(&self);
     fn leaf_remove(&mut self, k: &[u8]) -> Option<()>;
 
-    fn scan_with_callback(&self, buffer: &mut [MaybeUninit<u8>; 512], start : Option<&[u8]>, callback: &mut dyn FnMut(&[u8], &[u8]) -> bool) -> bool;
+    fn scan_with_callback(&self, buffer: &mut [MaybeUninit<u8>; 512], start : &[u8], callback: &mut dyn FnMut(&[u8], &[u8]) -> bool) -> bool;
 
     fn get_node_tag(&self) -> u8;
 

@@ -658,19 +658,17 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>, V: NodeKind> NodeDynamic<'bm, BM>
     fn scan_with_callback(
         &self,
         buffer: &mut [MaybeUninit<u8>; 512],
-        start: Option<&[u8]>,
+        start: &[u8],
         callback: &mut dyn FnMut(&[u8], &[u8]) -> bool
     ) -> bool {
 
         let mut lf : usize = 0;
 
-        match start {
-            None => {},
-            Some(key) => {
-                
-                let index = Self::find::<BM::OlcEH>(unsafe { OPtr::from_ref(self) }, key);
-                lf = index.unwrap_or(0);
-            }
+        if self.lower_fence() != start {
+
+            let index = Self::find::<BM::OlcEH>(unsafe { OPtr::from_ref(self) }, start);
+            lf = index.unwrap_or(0);
+
         }
 
         let prefix = self.prefix();

@@ -386,7 +386,7 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeDynamic<'bm, BM> for HashLeaf
     fn scan_with_callback(
         &self,
         buffer: &mut [MaybeUninit<u8>; 512],
-        start: Option<&[u8]>,
+        start: &[u8],
         callback: &mut dyn FnMut(&[u8], &[u8]) -> bool
     ) -> bool {
 
@@ -396,13 +396,11 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeDynamic<'bm, BM> for HashLeaf
             panic!("While not inherent, the sort function should always immediately be called after sorting for hash_leaf")
         }
 
-        match start {
-            None => {},
-            Some(key) => {
-                let (index, _hash) = Self::find::<BM::OlcEH>(unsafe { OPtr::from_ref(self) }, key);
-                lf = index.unwrap_or(0);
-            }
+        if start != self.lower_fence() {
+            let (index, _hash) = Self::find::<BM::OlcEH>(unsafe { OPtr::from_ref(self) }, start);
+            lf = index.unwrap_or(0);
         }
+
 
         let prefix = self.prefix();
         let prefix_len = prefix.len();

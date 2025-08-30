@@ -496,21 +496,22 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeDynamic<'bm, BM> for FullyDen
     fn scan_with_callback(
         &self,
         buffer: &mut [MaybeUninit<u8>; 512],
-        start: Option<&[u8]>,
+        start: &[u8],
         callback: &mut dyn FnMut(&[u8], &[u8]) -> bool
     ) -> bool {
 
-        let mut lf : usize = 0;
 
-        match start {
-            None => {},
-            Some(key) => {
-                let res = Self::key_to_index::<BM::OlcEH>(unsafe { OPtr::from_ref(self) }, key);
-                if let Ok(i) = res {
-                    lf = i;
-                }
+        let lf = if start == self.lower_fence() { 0 }
+        else {
+            let res = Self::key_to_index::<BM::OlcEH>(unsafe { OPtr::from_ref(self) }, start);
+            if let Ok(i) = res {
+                i
             }
-        }
+            else {
+                0
+            }
+        };
+
 
         for i in lf..self.capacity as usize {
             if self.get_bit_direct(i) {
