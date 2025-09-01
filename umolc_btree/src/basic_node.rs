@@ -715,6 +715,9 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>, V: NodeKind> NodeDynamic<'bm, BM>
     fn get_scan_counter(&self) -> u8 {
         self.common.scan_counter
     }
+    fn get_count(&self) -> u16 {
+        self.common.count
+    }
 }
 
 const HEAD_RESERVATION: usize = 16;

@@ -150,7 +150,7 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> Tree<'bm, BM> {
     }
 
     pub fn scan_node_types<F>(&self, lower_bound: &[u8], mut callback: F)
-    where F: FnMut(u8, u8) -> bool {
+    where F: FnMut(u8, u8, u16) -> bool {
         let mut buffer: [MaybeUninit<u8>; 512] = unsafe { MaybeUninit::uninit().assume_init() };
 
         let mut key = lower_bound;
@@ -164,7 +164,7 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> Tree<'bm, BM> {
 
 
 
-            let ret = callback(node.as_dyn_node::<BM>().get_node_tag(), node.as_dyn_node::<BM>().get_scan_counter());
+            let ret = callback(node.as_dyn_node::<BM>().get_node_tag(), node.as_dyn_node::<BM>().get_scan_counter(), node.as_dyn_node::<BM>().get_count());
 
             if ret {
                 return;
@@ -277,9 +277,14 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> Tree<'bm, BM> {
                 let mut parent = parent.upgrade();
                 self.ensure_parent_not_meta(&mut parent);
 
-                let can_promote = node.as_dyn_node::<BM>().can_promote(node_tag::FULLY_DENSE_LEAF);
+                #[cfg(not(feature = "disallow_promotions"))]
+                let can_promote = node.as_dyn_node::<BM>().can_promote(node_tag::FULLY_DENSE_LEAF).is_ok();
 
-                if can_promote.is_ok() {
+                #[cfg(feature = "disallow_promotions")]
+                let can_promote = false;
+
+
+                if can_promote {
                     node.as_dyn_node_mut::<BM>().promote(node_tag::FULLY_DENSE_LEAF);
                 }
 
@@ -393,6 +398,7 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> Tree<'bm, BM> {
     }
 
     fn adaptive_promotion (&self, node: &mut BM::GuardX) {
+        #[cfg(not(feature = "disallow_promotions"))]
         match node.as_dyn_node::<BM>().qualifies_for_promote() {
             None => {
             },
@@ -508,6 +514,10 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeDynamic<'bm, BM> for Metadata
     }
 
     fn get_scan_counter(&self) -> u8 {
+        unimplemented!()
+    }
+
+    fn get_count(&self) -> u16 {
         unimplemented!()
     }
 

@@ -14,7 +14,7 @@ pub fn check_node_tag_percentage<'bm, BM>(
     let mut total = 0.0f32;
     let mut correct = 0.0f32;
 
-    tree.scan_node_types(b"\0", |x, scan_counter|{
+    tree.scan_node_types(b"\0", |x, scan_counter, _|{
 
 
         if !allow_good_heads && scan_counter == 255 {
@@ -39,3 +39,39 @@ pub fn check_node_tag_percentage<'bm, BM>(
     }
 }
 
+pub fn average_leaf_count<'bm, BM>(
+    tree: &Tree<'bm, BM>,
+) -> u16 where
+    BM: BufferManager<'bm, Page = Page>,
+{
+    let mut nodes = 0;
+    let mut total = 0;
+
+    tree.scan_node_types(b"\0", |_, _, count|{
+
+
+        nodes += 1;
+        total += count;
+        false
+    });
+
+    total / nodes
+}
+
+
+pub fn total_leaf_count<'bm, BM>(
+    tree: &Tree<'bm, BM>,
+) -> u16 where
+    BM: BufferManager<'bm, Page = Page>,
+{
+    let mut nodes = 0;
+
+    tree.scan_node_types(b"\0", |_, _, _|{
+
+
+        nodes += 1;
+        false
+    });
+
+    nodes
+}

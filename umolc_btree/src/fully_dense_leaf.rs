@@ -539,6 +539,9 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeDynamic<'bm, BM> for FullyDen
     fn get_scan_counter(&self) -> u8 {
         self.common.scan_counter
     }
+    fn get_count(&self) -> u16 {
+        self.common.count
+    }
 
     fn can_promote(&self, to: u8) -> Result<(), PromoteError> {
         match to {

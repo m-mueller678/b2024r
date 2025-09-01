@@ -34,8 +34,14 @@ validate_node=[]
 validate_tree=[]
 page_4k=[]
 page_1k=[]
+disallow_promotions=["page_4k"]
 
 
 [[bench]]
 name="multithread"
+harness = false
+
+
+[[bench]]
+name="promotion_benches"
 harness = false

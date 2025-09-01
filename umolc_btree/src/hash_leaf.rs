@@ -433,6 +433,10 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeDynamic<'bm, BM> for HashLeaf
         self.common.scan_counter
     }
 
+    fn get_count(&self) -> u16 {
+        self.common.count
+    }
+
     fn can_promote(&self, to: u8) -> Result<(), PromoteError> {
         match to {
             node_tag::FULLY_DENSE_LEAF => {

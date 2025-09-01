@@ -272,6 +272,8 @@ pub trait NodeDynamic<'bm, BM: BufferManager<'bm, Page = Page>>: ToFromPage + No
 
     fn get_scan_counter(&self) -> u8;
 
+    fn get_count(&self) -> u16;
+
     fn can_promote(&self, to: u8) -> Result<(), PromoteError>;
 
     fn promote(&mut self, to: u8);
