@@ -13,7 +13,6 @@ use umolc::{
     o_project, BufferManageGuardUpgrade, BufferManager, BufferManagerExt, BufferManagerGuard, ExclusiveGuard, OPtr,
     OlcErrorHandler, OptimisticGuard, PageId,
 };
-use crate::node::node_tag::HASH_LEAF;
 
 pub struct Tree<'bm, BM: BufferManager<'bm, Page = Page>> {
     meta: PageId,

@@ -605,6 +605,11 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeDynamic<'bm, BM> for FullyDen
     fn promote(&mut self, to: u8) {
         match to {
             node_tag::BASIC_LEAF => {
+
+                // yo this is the code that I initially planned on working with
+                // it works via copying over the raw data
+                // but was way too annoying to implement, so we just use manual insertion now
+                // might fix if I am feeling it
                 /*
                 let mut tmp: BasicLeaf = BasicLeaf::zeroed();
                 NodeStatic::<BM>::init(&mut tmp, self.lower_fence(), self.upper_fence_combined(), None);

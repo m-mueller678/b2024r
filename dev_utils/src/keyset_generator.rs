@@ -180,3 +180,34 @@ fn load_words() -> Vec<String> {
     let content = include_str!("word1000.txt");
     content.lines().map(|s| s.to_string()).collect()
 }
+
+fn check_collision_percentage <KG: KeyGenerator> (amount: usize){
+    let mut keyset = KG::generate_keyset(amount);
+    let mut total: f32 = 0.;
+    let mut collisions:f32 = 0.;
+
+    keyset.sort_by(|x, x1| {x.0.as_slice().cmp(x1.0.as_slice())});
+
+    for i in 1..=keyset.len()-1 {
+        let key1 = &keyset[i].0;
+        let key2 = &keyset[i-1].0;
+
+        let head1 = &key1.as_slice()[key1.len().saturating_sub(8)..key1.len().saturating_sub(4)];
+        let head2 = &key2.as_slice()[key2.len().saturating_sub(8)..key2.len().saturating_sub(4)];
+
+        println!("Head1: {:?}, Head2: {:?}", BStr::new(&head1), BStr::new(&head2));
+
+        if head2 == head1 {
+            collisions += 1.;
+        }
+        total += 1.;
+    }
+
+    println!("Collisions margin: {}", collisions/total);
+}
+
+#[test]
+fn print_bad_heads_collisions() {
+    println!("BadHeads:");
+    check_collision_percentage::<BadHeadsKeyset>(5000);
+}

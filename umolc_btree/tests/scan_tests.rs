@@ -236,6 +236,10 @@ fn scan_on_node_type_sparse<KG: KeyGenerator>(amount: usize, node_tag: u8, margi
             false
         })
     }
+
+    let mut counter = 0;
+    tree.scan(b"".as_slice(), |_,_| {counter+=1; false});
+    assert_eq!(remaining.len(), counter, "A scan over an empty slice does not catch all values.");
 }
 
 #[test]
