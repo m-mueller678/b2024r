@@ -1,7 +1,7 @@
 use std::fmt::format;
 use std::thread;
 use std::time::{Duration, Instant};
-use dev_utils::keyset_generator::{BadHeadsKeyset, KeyGenerator};
+use dev_utils::keyset_generator::{BadHeadsKeyset, DenseKeyset, GoodHeadsKeyset, KeyGenerator};
 use dev_utils::PerfCounters;
 use dev_utils::tree_utils::{average_leaf_count, check_node_tag_percentage, total_leaf_count};
 use umolc::SimpleBm;
@@ -14,7 +14,6 @@ where for<'a> F: Fn() {
     perf.reset();
     perf.enable();
 
-    println!("Starting benchmark: {name}");
 
     let start_instant = Instant::now();
 
@@ -86,26 +85,30 @@ fn adaptive_promotion<KG: KeyGenerator>(amount_keys: usize, iterations: usize, r
     // 1/4th of operations are insert and remove, 1/2 are scan
     let max_inserts = 15*amount_nodes as usize;
     let lookups = point_operation_count - max_inserts*2;
+    let max_fill = amount_keys - (amount_keys / 5);
     assert!(max_inserts < amount_keys - (amount_keys / 5));
 
 
     measure_time(|| {
+        let mut index = 0;
 
         for iteration in 0..iterations {
-            let mut counter = 0;
             // 3 * as many operations because of 1/3rd chance of triggering counter compared to scans
-            for i in 0..max_inserts {
+            for k in 0..max_inserts {
+                let i = (index + k) % max_fill;
                 let (key, value) = &keyset[i];
 
                 tree.remove(key.as_slice());
             }
-            for i in 0..max_inserts {
+            for k in 0..max_inserts {
+                let i = (index + k) % max_fill;
                 let (key, value) = &keyset[i];
 
                 tree.insert(key.as_slice(), value.as_slice());
             }
-
-            for i in 0..lookups {
+            index = (index + max_inserts) % max_fill;
+            for k in 0..lookups {
+                let i = (index + k) % max_fill;
 
                 let (key, value) = &keyset[i%amount_keys];
 
@@ -133,8 +136,20 @@ fn bad_heads_performance_bench() {
         adaptive_promotion::<BadHeadsKeyset>(10000, 5000, i);
     }
 }
+fn good_heads_performance_bench() {
+    for i in 10..30 {
+        adaptive_promotion::<GoodHeadsKeyset>(10000, 5000, i);
+    }
+}
+fn dense_heads_performance_bench() {
+    for i in 10..30 {
+        adaptive_promotion::<DenseKeyset>(10000, 5000, i);
+    }
+}
 
 
 fn main() {
-    bad_heads_performance_bench()
+    bad_heads_performance_bench();
+    good_heads_performance_bench();
+    dense_heads_performance_bench();
 }
