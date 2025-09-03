@@ -395,7 +395,7 @@ fn print_results(res: &[(usize, (f64, Duration))], name: &str) {
 
 const ADAPTIVE_PROMOTION_AMOUNT: usize = 100000;
 const FDL_AMOUNT: usize = 51200000;
-const HASH_AMOUNT: usize = 5000000;
+const HASH_AMOUNT: usize =10000000;
 
 fn main() {
     warmup();
