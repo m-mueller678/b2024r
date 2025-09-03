@@ -166,6 +166,8 @@ macro_rules! o_project {
             let ptr:OPtr<_,_> = $this;
             unsafe{ptr.project(|p|{
                 // TODO make sure you cannot sneak in a union field access here
+                // would be crazy if I actully ever added this.
+                // as the optimistic pointers are not exposed, this is fine to keep
                 &raw const (*p)$(.$member)+
             })}
         }

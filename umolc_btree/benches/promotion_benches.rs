@@ -1,12 +1,11 @@
 use std::fmt::format;
 use std::thread;
 use std::time::{Duration, Instant};
-use dev_utils::keyset_generator::{BadHeadsKeyset, DenseKeyset, GoodHeadsKeyset, KeyGenerator};
+use dev_utils::keyset_generator::{BadHeadsKeyset, BadHeadsPercentage, DenseKeyset, GoodHeadsKeyset, KeyGenerator};
 use dev_utils::PerfCounters;
 use dev_utils::tree_utils::{average_leaf_count, check_node_tag_percentage, total_leaf_count};
 use umolc::SimpleBm;
 use umolc_btree::{Page, Tree};
-
 fn measure_time<F>(bench: F, name: &str)
 where for<'a> F: Fn() {
     let mut perf = PerfCounters::with_counters(["cycles", "instructions", "cache-misses"]);
@@ -29,7 +28,7 @@ where for<'a> F: Fn() {
         .get("cycles")
         .and_then(|v| v.as_f64())
         .unwrap_or(0.0);
-    println!("The benchmark {name} took {:?} CPU cycles and {:?} ms", cycles, elapsed.as_millis());
+    println!("The benchmark \"{name}\" took {:.0} CPU cycles and {:?} ms", cycles, elapsed.as_millis());
 
     cool_down(elapsed, 1.0, Duration::from_millis(50), Duration::from_secs(5));
 }
@@ -41,7 +40,7 @@ fn cool_down(prev: Duration, factor: f32, min: Duration, max: Duration) {
 }
 
 
-fn adaptive_promotion<KG: KeyGenerator>(amount_keys: usize, iterations: usize, repetitions: usize) {
+fn most_promotions<KG: KeyGenerator>(amount_keys: usize, iterations: usize, repetitions: usize, name: &str) {
     fastrand::seed(42);
     let iterations  = iterations / repetitions;
 
@@ -79,42 +78,34 @@ fn adaptive_promotion<KG: KeyGenerator>(amount_keys: usize, iterations: usize, r
     let amount_nodes = total_leaf_count(&tree);
 
     // inserting amount_nodes values will on average trigger one operation per node.
-
     let point_operation_count = repetitions * amount_nodes as usize *3;
 
-    // 1/4th of operations are insert and remove, 1/2 are scan
-    let max_inserts = 15*amount_nodes as usize;
-    let lookups = point_operation_count - max_inserts*2;
+    // 1/4 of operations are insert, 1/4 are remove, 1/2 lookup
     let max_fill = amount_keys - (amount_keys / 5);
-    assert!(max_inserts < amount_keys - (amount_keys / 5));
+    let inserts = point_operation_count / 4;
+    let lookups = point_operation_count - inserts;
 
 
     measure_time(|| {
         let mut index = 0;
 
-        for iteration in 0..iterations {
-            // 3 * as many operations because of 1/3rd chance of triggering counter compared to scans
-            for k in 0..max_inserts {
-                let i = (index + k) % max_fill;
+        for _ in 0..iterations {
+            for _ in 0..lookups {
+                let i = (index) % max_fill;
                 let (key, value) = &keyset[i];
 
+                let res = tree.lookup_to_vec(key.as_slice());
+
+                index += 1;
+            }
+            for _ in 0..lookups {
+                let i = (index) % max_fill;
+                let (key, value) = &keyset[i];
                 tree.remove(key.as_slice());
-            }
-            for k in 0..max_inserts {
-                let i = (index + k) % max_fill;
-                let (key, value) = &keyset[i];
-
                 tree.insert(key.as_slice(), value.as_slice());
+
+                index += 1;
             }
-            index = (index + max_inserts) % max_fill;
-            for k in 0..lookups {
-                let i = (index + k) % max_fill;
-
-                let (key, value) = &keyset[i%amount_keys];
-
-                tree.lookup_to_vec(key.as_slice());
-            }
-
 
             let mut scan_counter = 0;
             for _ in 0..repetitions {
@@ -127,29 +118,65 @@ fn adaptive_promotion<KG: KeyGenerator>(amount_keys: usize, iterations: usize, r
         }
 
 
-    }, format!("Adaptive_promotion with {:?} repetitions", {repetitions}).as_str());
+    }, name);
 
 }
 
-fn bad_heads_performance_bench() {
-    for i in 10..30 {
-        adaptive_promotion::<BadHeadsKeyset>(10000, 5000, i);
+
+fn warmup () {
+
+    // spammed six times, as the wait afterwards goes for each individual test as long as the test did
+    most_promotions::<BadHeadsPercentage< 0>>(10000, 5000, 50, "Warmup");
+    most_promotions::<BadHeadsPercentage< 0>>(10000, 5000, 50, "Warmup");
+    most_promotions::<BadHeadsPercentage< 0>>(10000, 5000, 50, "Warmup");
+    most_promotions::<BadHeadsPercentage< 0>>(10000, 5000, 50, "Warmup");
+    most_promotions::<BadHeadsPercentage< 0>>(10000, 5000, 50, "Warmup");
+    most_promotions::<BadHeadsPercentage< 0>>(10000, 5000, 50, "Warmup");
+}
+
+
+fn scan_scenario(name: &str, repetitions: usize) {
+    most_promotions::<BadHeadsPercentage< 0>>(10000, 5000, repetitions, "Spamming {name} promotions with a  0% Collisions in the Set");
+    most_promotions::<BadHeadsPercentage< 5>>(10000, 5000, repetitions, "Spamming {name} promotions with a  5% Collisions in the Set");
+    most_promotions::<BadHeadsPercentage<10>>(10000, 5000, repetitions, "Spamming {name} promotions with a 10% Collisions in the Set");
+    most_promotions::<BadHeadsPercentage<15>>(10000, 5000, repetitions, "Spamming {name} promotions with a 15% Collisions in the Set");
+    most_promotions::<BadHeadsPercentage<20>>(10000, 5000, repetitions, "Spamming {name} promotions with a 20% Collisions in the Set");
+    most_promotions::<BadHeadsPercentage<25>>(10000, 5000, repetitions, "Spamming {name} promotions with a 25% Collisions in the Set");
+    most_promotions::<BadHeadsPercentage<30>>(10000, 5000, repetitions, "Spamming {name} promotions with a 30% Collisions in the Set");
+    most_promotions::<BadHeadsPercentage<35>>(10000, 5000, repetitions, "Spamming {name} promotions with a 35% Collisions in the Set");
+    most_promotions::<BadHeadsPercentage<40>>(10000, 5000, repetitions, "Spamming {name} promotions with a 40% Collisions in the Set");
+    most_promotions::<BadHeadsPercentage<45>>(10000, 5000, repetitions, "Spamming {name} promotions with a 45% Collisions in the Set");
+    most_promotions::<BadHeadsPercentage<50>>(10000, 5000, repetitions, "Spamming {name} promotions with a 50% Collisions in the Set");
+    most_promotions::<BadHeadsPercentage<55>>(10000, 5000, repetitions, "Spamming {name} promotions with a 55% Collisions in the Set");
+    most_promotions::<BadHeadsPercentage<60>>(10000, 5000, repetitions, "Spamming {name} promotions with a 60% Collisions in the Set");
+    most_promotions::<BadHeadsPercentage<65>>(10000, 5000, repetitions, "Spamming {name} promotions with a 65% Collisions in the Set");
+    most_promotions::<BadHeadsPercentage<70>>(10000, 5000, repetitions, "Spamming {name} promotions with a 70% Collisions in the Set");
+    most_promotions::<BadHeadsPercentage<75>>(10000, 5000, repetitions, "Spamming {name} promotions with a 75% Collisions in the Set");
+    most_promotions::<BadHeadsPercentage<80>>(10000, 5000, repetitions, "Spamming {name} promotions with a 80% Collisions in the Set");
+    most_promotions::<BadHeadsPercentage<85>>(10000, 5000, repetitions, "Spamming {name} promotions with a 85% Collisions in the Set");
+    most_promotions::<BadHeadsPercentage<90>>(10000, 5000, repetitions, "Spamming {name} promotions with a 90% Collisions in the Set");
+}
+fn worst_case_scenario() {
+    scan_scenario("worst case", 20);
+    scan_scenario("bad case", 50);
+    scan_scenario("better case", 20);
+}
+
+fn differing_repetition_count() {
+    for i in 1..40 {
+        let repetitions = i * 10;
+        most_promotions::<BadHeadsPercentage<15>>(10000, 5000,   repetitions, format!("Spamming 15% Collisions with {:>3} repetitions of action", repetitions).as_str());
     }
 }
-fn good_heads_performance_bench() {
-    for i in 10..30 {
-        adaptive_promotion::<GoodHeadsKeyset>(10000, 5000, i);
-    }
-}
-fn dense_heads_performance_bench() {
-    for i in 10..30 {
-        adaptive_promotion::<DenseKeyset>(10000, 5000, i);
-    }
+
+
+fn test_fdl_perfomance() {
+    
 }
 
 
 fn main() {
-    bad_heads_performance_bench();
-    good_heads_performance_bench();
-    dense_heads_performance_bench();
+    warmup();
+    worst_case_scenario();
+    differing_repetition_count();
 }

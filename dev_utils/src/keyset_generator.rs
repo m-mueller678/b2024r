@@ -1,4 +1,5 @@
 use std::mem::MaybeUninit;
+use std::u32::MAX;
 use bstr::{BStr, BString};
 use crate::generate_keys;
 
@@ -8,10 +9,9 @@ pub trait KeyGenerator {
 
 pub struct BadHeadsKeyset;
 pub struct GoodHeadsKeyset;
-
-pub struct DenseKeyset;
-
+pub struct DenseKeyset<const DENSE_LENGTH: usize>;
 pub struct ScrambledDenseKeyset;
+pub struct BadHeadsPercentage<const PERCENTAGE: u8>;
 
 impl KeyGenerator for BadHeadsKeyset {
     fn generate_keyset(amount: usize) -> Vec<(Vec<u8>, Vec<u8>)> {
@@ -106,11 +106,9 @@ impl KeyGenerator for GoodHeadsKeyset {
 }
 
 
-impl KeyGenerator for DenseKeyset {
+impl <const DENSE_LENGTH: usize>KeyGenerator for DenseKeyset<DENSE_LENGTH> {
     fn generate_keyset(amount: usize) -> Vec<(Vec<u8>, Vec<u8>)> {
 
-        // we want to have a large amount of dense keys per block to create enough fdls in between
-        let DENSE_LENGTH = 10000;
 
         let dense_fields = amount / DENSE_LENGTH;
 
@@ -169,7 +167,7 @@ impl KeyGenerator for DenseKeyset {
 
 impl KeyGenerator for ScrambledDenseKeyset {
     fn generate_keyset(amount: usize) -> Vec<(Vec<u8>, Vec<u8>)> {
-        let mut ret = DenseKeyset::generate_keyset(amount);
+        let mut ret = DenseKeyset::<10000>::generate_keyset(amount);
         fastrand::shuffle(&mut ret);
         ret
     }
@@ -181,21 +179,21 @@ fn load_words() -> Vec<String> {
     content.lines().map(|s| s.to_string()).collect()
 }
 
-fn check_collision_percentage <KG: KeyGenerator> (amount: usize){
+// checks probable heads position (key[4..8] is seen as heads)
+fn check_collision_percentage <KG: KeyGenerator> (amount: usize) -> f32 {
     let mut keyset = KG::generate_keyset(amount);
     let mut total: f32 = 0.;
-    let mut collisions:f32 = 0.;
+    let mut collisions: f32 = 0.;
 
-    keyset.sort_by(|x, x1| {x.0.as_slice().cmp(x1.0.as_slice())});
+    keyset.sort_by(|x, x1| { x.0.as_slice().cmp(x1.0.as_slice()) });
 
-    for i in 1..=keyset.len()-1 {
+    for i in 1..=keyset.len() - 1 {
         let key1 = &keyset[i].0;
-        let key2 = &keyset[i-1].0;
+        let key2 = &keyset[i - 1].0;
 
-        let head1 = &key1.as_slice()[key1.len().saturating_sub(8)..key1.len().saturating_sub(4)];
-        let head2 = &key2.as_slice()[key2.len().saturating_sub(8)..key2.len().saturating_sub(4)];
+        let head1 = &key1.as_slice()[4..8];
+        let head2 = &key2.as_slice()[4..8];
 
-        println!("Head1: {:?}, Head2: {:?}", BStr::new(&head1), BStr::new(&head2));
 
         if head2 == head1 {
             collisions += 1.;
@@ -203,11 +201,73 @@ fn check_collision_percentage <KG: KeyGenerator> (amount: usize){
         total += 1.;
     }
 
-    println!("Collisions margin: {}", collisions/total);
+    collisions / total
 }
 
+
+// this is not a real test, it just checks how bad the collisions are for keysets and can be used however you like.
+// if you want to create your own keyset, just slap it in here to get the percentage of collisions
 #[test]
 fn print_bad_heads_collisions() {
-    println!("BadHeads:");
-    check_collision_percentage::<BadHeadsKeyset>(5000);
+    let res = check_collision_percentage::<BadHeadsPercentage::<0>>(5000);
+    assert!(res < 0.01);
+    let res = check_collision_percentage::<BadHeadsPercentage::<10>>(5000);
+    assert!(res < 0.11 && res > 0.09);
+    let res = check_collision_percentage::<BadHeadsPercentage::<20>>(5000);
+    assert!(res < 0.21 && res > 0.19);
+    let res = check_collision_percentage::<BadHeadsPercentage::<40>>(5000);
+    assert!(res < 0.41 && res > 0.39);
+    let res = check_collision_percentage::<BadHeadsPercentage::<60>>(5000);
+    assert!(res < 0.61 && res > 0.59);
+    let res = check_collision_percentage::<BadHeadsPercentage::<80>>(5000);
+    assert!(res < 0.81 && res > 0.79);
+
+}
+
+
+fn expand_by(data: &mut Vec<u8>, byte: u8) {
+    let expand = [byte, byte, byte, byte];
+    data.extend_from_slice(&expand);
+}
+
+
+// rounds PERCENTAGE down by steps of 5%
+impl<const PERCENTAGE: u8> KeyGenerator for BadHeadsPercentage<PERCENTAGE> {
+    fn generate_keyset(amount: usize) -> Vec<(Vec<u8>, Vec<u8>)> {
+        // just because I am lazy with handling that otherwise.
+        assert!(amount >= 5000);
+        assert!(PERCENTAGE <= 100);
+
+        let mut ret : Vec<(Vec<u8>, Vec<u8>)> = Vec::with_capacity(amount);
+
+        let mut counter = 0;
+        for prefix in 0..u32::MAX {
+            for byte in 0..u8::MAX {
+                for i in 0..20 {
+                    if counter >= amount {
+                        return ret;
+                    }
+
+                    let mut key: Vec<u8> = Vec::with_capacity(9);
+                    let mut value: Vec<u8> = Vec::with_capacity(4);
+                    value.extend_from_slice((counter as u32).to_be_bytes().as_slice());
+
+                    key.extend_from_slice((prefix as u32).to_be_bytes().as_slice());
+                    expand_by(&mut key, byte);
+
+                    if i > PERCENTAGE as usize/5 {
+                        // slice last byte off, to "destroy" the colliding head
+                        key.truncate(key.len() - 1);
+                    }
+
+                    key.extend_from_slice((i as u8).to_be_bytes().as_slice());
+
+                    ret.push((key, value));
+
+                    counter+=1;
+                }
+            }
+        }
+        unreachable!("Did you seriously just request more than 2^40 * 100 values in a keyset?");
+    }
 }

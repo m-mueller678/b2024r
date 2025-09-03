@@ -157,7 +157,7 @@ fn test_scan_basic_leaf (){
 #[test]
 fn test_scan_dense_leaf (){
     fastrand::seed(5510);
-    scan_on_node_type::<DenseKeyset>(10000, 253, 0.50);
+    scan_on_node_type::<DenseKeyset::<10000>>(10000, 253, 0.50);
 }
 
 
@@ -257,5 +257,5 @@ fn test_scan_sparse_basic_leaf (){
 #[test]
 fn test_scan_sparse_dense_leaf (){
     fastrand::seed(5510);
-    scan_on_node_type_sparse::<DenseKeyset>(10000, 253, 0.50);
+    scan_on_node_type_sparse::<DenseKeyset::<10000>>(10000, 253, 0.50);
 }

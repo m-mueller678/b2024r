@@ -118,7 +118,7 @@ fn combined_multithread_tests_good_heads() {
 }
 #[test]
 fn combined_multithread_tests_dense_data() {
-    adaptive_promotion_multithreaded::<DenseKeyset>(1000, 16, 15, 1);
+    adaptive_promotion_multithreaded::<DenseKeyset::<10000>>(1000, 16, 15, 1);
 }
 
 fn point_operations_multithreaded<KG: KeyGenerator>(amount: usize, threads: u16, iterations: u16)
@@ -231,7 +231,7 @@ fn hash_leaf_point_operations_multithreaded() {
 
 #[test]
 fn dense_leaf_point_operations_multithreaded() {
-    point_operations_multithreaded::<DenseKeyset>(1000, 16, 12);
+    point_operations_multithreaded::<DenseKeyset::<10000>>(1000, 16, 12);
 }
 
 #[test]
@@ -302,7 +302,7 @@ fn hash_leaf_scan_while_insert() {
 }
 #[test]
 fn dense_leaf_scan_while_insert() {
-    scan_while_insert::<DenseKeyset>(1000, 16);
+    scan_while_insert::<DenseKeyset::<10000>>(1000, 16);
 }
 #[test]
 fn basic_leaf_scan_while_insert() {
@@ -393,7 +393,7 @@ fn basic_leaf_scan_while_lookup() {
 }
 #[test]
 fn denses_leaf_scan_while_lookup() {
-    scan_while_lookup::<DenseKeyset>(1000, 100);
+    scan_while_lookup::<DenseKeyset::<10000>>(1000, 100);
 }
 
 
@@ -483,5 +483,5 @@ fn basic_leaf_scan_while_remove() {
 }
 #[test]
 fn dense_leaf_scan_while_remove() {
-    scan_while_remove::<DenseKeyset>(1000, 10);
+    scan_while_remove::<DenseKeyset::<10000>>(1000, 10);
 }
