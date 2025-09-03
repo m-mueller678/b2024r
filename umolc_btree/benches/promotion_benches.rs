@@ -25,10 +25,10 @@ where for<'a> F: Fn() {
 
 
     let cycles = results
-        .get("cycles")
+        .get("cache-misses")
         .and_then(|v| v.as_f64())
         .unwrap_or(0.0);
-    println!("The benchmark \"{name}\" took {:.0} CPU cycles and {:?} ms", cycles, elapsed.as_millis());
+    println!("The benchmark \"{name}\" caused {:.2} cache-misses and took {:?} ms", cycles, elapsed.as_millis());
 
     cool_down(elapsed, 1.0, Duration::from_secs(1), Duration::from_secs(10));
 }
@@ -241,7 +241,80 @@ fn fdl_performance() {
 }
 
 
+fn hash_performance_dispatcher<const PERCENTAGE: u8>() {
+
+    let amount_keys = 1600000;
+    let bm = SimpleBm::<Page>::new(amount_keys/100);
+    let tree = Tree::new(&bm);
+
+    let mut keyset: Vec<(Vec<u8>, Vec<u8>)> = BadHeadsPercentage::<PERCENTAGE>::generate_keyset(amount_keys);
+    fastrand::shuffle(&mut keyset);
+
+    measure_time(|| {
+
+        for i in 0..keyset.len() {
+            let (key, val) = &keyset[i];
+            tree.insert(key.as_slice(), val.as_slice());
+        }
+
+        for i in 0..keyset.len() {
+            let (key, val) = &keyset[i];
+            tree.remove(key.as_slice());
+        }
+
+    }, format!("HashLeaf {:?}% collisions Warmup", PERCENTAGE).as_str());
+
+    assert_eq!(0, amount_values(&tree));
+
+    measure_time(|| {
+
+        for i in 0..keyset.len() {
+            let (key, val) = &keyset[i];
+            tree.insert(key.as_slice(), val.as_slice());
+        }
+
+    }, format!("HashLeaf {:?}% collisions Insert", PERCENTAGE).as_str());
+
+
+    assert_eq!(keyset.len(), amount_values(&tree));
+
+    measure_time(|| {
+
+        for i in 0..keyset.len() {
+            let (key, val) = &keyset[i];
+            tree.lookup_to_vec(key.as_slice());
+        }
+
+    }, format!("HashLeaf {:?}% collisions Lookup", PERCENTAGE).as_str());
+
+    assert_eq!(keyset.len(), amount_values(&tree));
+
+    measure_time(|| {
+
+        for i in 0..keyset.len() {
+            let (key, val) = &keyset[i];
+            tree.remove(key.as_slice());
+        }
+
+    }, format!("HashLeaf {:?}% collisions Remove", PERCENTAGE).as_str());
+
+    assert_eq!(0, amount_values(&tree));
+}
+
+fn hash_performance() {
+    hash_performance_dispatcher::<10>();
+    hash_performance_dispatcher::<20>();
+    hash_performance_dispatcher::<30>();
+    hash_performance_dispatcher::<40>();
+    hash_performance_dispatcher::<50>();
+    hash_performance_dispatcher::<60>();
+    hash_performance_dispatcher::<70>();
+    hash_performance_dispatcher::<80>();
+    hash_performance_dispatcher::<90>();
+}
+
 fn main() {
-    warmup();
-    fdl_performance();
+    //warmup();
+    //fdl_performance();
+    hash_performance();
 }
