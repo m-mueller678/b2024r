@@ -3,7 +3,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 use dev_utils::keyset_generator::{BadHeadsKeyset, BadHeadsPercentage, DenseKeyset, GoodHeadsKeyset, KeyGenerator};
 use dev_utils::PerfCounters;
-use dev_utils::tree_utils::{average_leaf_count, check_node_tag_percentage, total_leaf_count};
+use dev_utils::tree_utils::{amount_values, average_leaf_count, check_node_tag_percentage, total_leaf_count};
 use umolc::SimpleBm;
 use umolc_btree::{Page, Tree};
 fn measure_time<F>(bench: F, name: &str)
@@ -30,7 +30,7 @@ where for<'a> F: Fn() {
         .unwrap_or(0.0);
     println!("The benchmark \"{name}\" took {:.0} CPU cycles and {:?} ms", cycles, elapsed.as_millis());
 
-    cool_down(elapsed, 1.0, Duration::from_millis(50), Duration::from_secs(5));
+    cool_down(elapsed, 1.0, Duration::from_secs(1), Duration::from_secs(10));
 }
 
 fn cool_down(prev: Duration, factor: f32, min: Duration, max: Duration) {
@@ -169,14 +169,79 @@ fn differing_repetition_count() {
     }
 }
 
+fn fdl_performance() {
 
-fn test_fdl_perfomance() {
-    
+    let amount_keys = 1600000;
+    let bm = SimpleBm::<Page>::new(amount_keys/100);
+    let tree = Tree::new(&bm);
+
+    let mut keyset: Vec<(Vec<u8>, Vec<u8>)> = DenseKeyset::<50000>::generate_keyset(amount_keys);
+    fastrand::shuffle(&mut keyset);
+
+    measure_time(|| {
+
+        for i in 0..keyset.len() {
+            let (key, val) = &keyset[i];
+            tree.insert(key.as_slice(), val.as_slice());
+        }
+
+        for i in 0..keyset.len() {
+            let (key, val) = &keyset[i];
+            tree.remove(key.as_slice());
+        }
+
+    }, "FDL Warmup");
+    #[cfg(not(feature = "disallow_promotions"))]
+    check_node_tag_percentage(253, 0.8, "insertion", true, true, &tree);
+
+    assert_eq!(0, amount_values(&tree));
+
+    measure_time(|| {
+
+        for i in 0..keyset.len() {
+            let (key, val) = &keyset[i];
+            tree.insert(key.as_slice(), val.as_slice());
+        }
+
+    }, "FDL Insertion");
+
+
+    assert_eq!(keyset.len(), amount_values(&tree));
+
+    measure_time(|| {
+
+        for i in 0..keyset.len() {
+            let (key, val) = &keyset[i];
+            tree.lookup_to_vec(key.as_slice());
+        }
+
+    }, "FDL Lookup");
+
+    assert_eq!(keyset.len(), amount_values(&tree));
+
+    measure_time(|| {
+
+        for i in 0..20 {
+            let (key, val) = &keyset[i];
+            tree.scan(b"", |_, _| {false});
+        }
+
+    }, "FDL Scan");
+
+    measure_time(|| {
+
+        for i in 0..keyset.len() {
+            let (key, val) = &keyset[i];
+            tree.remove(key.as_slice());
+        }
+
+    }, "FDL Remove");
+
+    assert_eq!(0, amount_values(&tree));
 }
 
 
 fn main() {
     warmup();
-    worst_case_scenario();
-    differing_repetition_count();
+    fdl_performance();
 }

@@ -75,3 +75,19 @@ pub fn total_leaf_count<'bm, BM>(
 
     nodes
 }
+pub fn amount_values<'bm, BM>(
+    tree: &Tree<'bm, BM>,
+) -> usize where
+    BM: BufferManager<'bm, Page = Page>,
+{
+    let mut values = 0;
+
+    tree.scan(b"\0", |_, _|{
+
+
+        values += 1;
+        false
+    });
+
+    values
+}

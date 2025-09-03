@@ -512,22 +512,31 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeDynamic<'bm, BM> for FullyDen
             }
         };
 
+        let numeric_part_begin = self.key_len - 4;
+
+
+        let key_src = self.key_from_numeric_part(self.reference + 0);
+        key_src.write_to_uninit(&mut buffer[..key_src.len() as usize]);
+
+
+        let mut np = self.reference + lf as u32;
+
+
 
         for i in lf..self.capacity as usize {
             if self.get_bit_direct(i) {
-                let key_src = self.key_from_numeric_part(self.reference + i as u32);
-                let key_src_len = key_src.len();
-                let val = self.val(i);
 
-                key_src.write_to_uninit(&mut buffer[..key_src_len]);
+                np.to_be_bytes().write_to_uninit(&mut buffer[numeric_part_begin as usize..numeric_part_begin as usize + 4]);
+                let val = self.val(i);
                 let full_key : &mut [u8] = unsafe {
-                    std::slice::from_raw_parts_mut(buffer.as_mut_ptr() as *mut u8, key_src_len)
+                    std::slice::from_raw_parts_mut(buffer.as_mut_ptr() as *mut u8, self.key_len as usize)
                 };
 
                 if callback(&full_key, val) {
                     return true;
                 }
             }
+            np += 1;
         }
         false
     }
@@ -714,9 +723,9 @@ impl Debug for FullyDenseLeaf {
         let records_fmt =
             (0..self.capacity as usize).filter(|&i| self.get_bit_direct(i)).format_with(",\n", |i, f| {
                 let val: &dyn Debug = &self.val(i);
-                let key = self.key_from_numeric_part(self.reference + i as u32).to_vec().to_str();
+                let key = self.key_from_numeric_part(self.reference + i as u32).to_vec();
                 count+=1;
-                f(&mut format_args!("{:?} - index:{i:4} -> key:{:?} , val: {:?}", count-1, key, val))
+                f(&mut format_args!("{:?} - index:{i:4} -> key:{:?} , val: {:?}", count-1, BStr::new(key.as_slice()), val))
             });
         s.field("records", &format_args!("\n{}", records_fmt));
         s.finish()
