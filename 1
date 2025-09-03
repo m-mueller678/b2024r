@@ -1,0 +1,493 @@
+warning: unused import: `indxvec::Printing`
+  --> umolc_btree/src/fully_dense_leaf.rs:10:5
+   |
+10 | use indxvec::Printing;
+   |     ^^^^^^^^^^^^^^^^^
+   |
+   = note: `#[warn(unused_imports)]` on by default
+
+warning: unused import: `bstr::BStr`
+  --> umolc_btree/src/tree.rs:11:5
+   |
+11 | use bstr::BStr;
+   |     ^^^^^^^^^^
+
+warning: unnecessary trailing semicolon
+  --> umolc_btree/src/tree.rs:67:1
+   |
+67 | ;
+   | ^ help: remove this semicolon
+   |
+   = note: `#[warn(redundant_semicolons)]` on by default
+
+warning: variable does not need to be mutable
+   --> umolc_btree/src/tree.rs:126:17
+    |
+126 |             let mut node: BM::GuardX = node.upgrade();
+    |                 ----^^^^
+    |                 |
+    |                 help: remove this `mut`
+    |
+    = note: `#[warn(unused_mut)]` on by default
+
+warning: methods `into_page` and `get_reference` are never used
+  --> umolc_btree/src/fully_dense_leaf.rs:35:12
+   |
+34 | impl FullyDenseLeaf {
+   | ------------------- methods in this implementation
+35 |     pub fn into_page(self) -> Page {
+   |            ^^^^^^^^^
+...
+50 |     pub fn get_reference(&self) -> u32 {
+   |            ^^^^^^^^^^^^^
+   |
+   = note: `#[warn(dead_code)]` on by default
+
+warning: enum `FillDegree` is never used
+ --> umolc_btree/src/fully_dense_leaf/insert_resolver.rs:3:6
+  |
+3 | enum FillDegree {
+  |      ^^^^^^^^^^
+
+warning: enum `KeyRange` is never used
+  --> umolc_btree/src/fully_dense_leaf/insert_resolver.rs:10:6
+   |
+10 | enum KeyRange {
+   |      ^^^^^^^^
+
+warning: function `resolve_eager` is never used
+  --> umolc_btree/src/fully_dense_leaf/insert_resolver.rs:24:4
+   |
+24 | fn resolve_eager(len_match: bool, fill: FillDegree, range: KeyRange) -> Resolution {
+   |    ^^^^^^^^^^^^^
+
+warning: variant `BadValLen` is never constructed
+  --> umolc_btree/src/heap_node.rs:64:5
+   |
+62 | pub enum HeapInsertError {
+   |          --------------- variant in this enum
+63 |     BadKeyLen,
+64 |     BadValLen,
+   |     ^^^^^^^^^
+
+warning: method `increase_scan_counter_x` is never used
+   --> umolc_btree/src/tree.rs:383:8
+    |
+25  | impl<'bm, BM: BufferManager<'bm, Page = Page>> Tree<'bm, BM> {
+    | ------------------------------------------------------------ method in this implementation
+...
+383 |     fn increase_scan_counter_x(&self, node: &mut BM::GuardX){
+    |        ^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: `umolc_btree` (lib) generated 10 warnings (run `cargo fix --lib -p umolc_btree` to apply 3 suggestions)
+warning: unused import: `std::mem::MaybeUninit`
+ --> dev_utils/src/keyset_generator.rs:1:5
+  |
+1 | use std::mem::MaybeUninit;
+  |     ^^^^^^^^^^^^^^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` on by default
+
+warning: unused import: `std::u32::MAX`
+ --> dev_utils/src/keyset_generator.rs:2:5
+  |
+2 | use std::u32::MAX;
+  |     ^^^^^^^^^^^^^
+
+warning: unused imports: `BStr` and `BString`
+ --> dev_utils/src/keyset_generator.rs:3:12
+  |
+3 | use bstr::{BStr, BString};
+  |            ^^^^  ^^^^^^^
+
+warning: unused import: `crate::generate_keys`
+ --> dev_utils/src/keyset_generator.rs:4:5
+  |
+4 | use crate::generate_keys;
+  |     ^^^^^^^^^^^^^^^^^^^^
+
+warning: unused variable: `i`
+   --> dev_utils/src/keyset_generator.rs:125:21
+    |
+125 |                 for i in 0..DENSE_LENGTH {
+    |                     ^ help: if this is intentional, prefix it with an underscore: `_i`
+    |
+    = note: `#[warn(unused_variables)]` on by default
+
+warning: unused variable: `i`
+   --> dev_utils/src/keyset_generator.rs:138:17
+    |
+138 |             for i in 0..2 {
+    |                 ^ help: if this is intentional, prefix it with an underscore: `_i`
+
+warning: function `check_collision_percentage` is never used
+   --> dev_utils/src/keyset_generator.rs:183:4
+    |
+183 | fn check_collision_percentage <KG: KeyGenerator> (amount: usize) -> f32 {
+    |    ^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = note: `#[warn(dead_code)]` on by default
+
+warning: variable `DENSE_LENGTH` should have a snake case name
+   --> dev_utils/src/keyset_generator.rs:121:86
+    |
+121 | ... Vec<u8>, words: &Vec<String>, DENSE_LENGTH: usize, counter: &mut u32, ret: &mut Vec<(Vec<u8>, Vec<u8>)>) {
+    |                                   ^^^^^^^^^^^^ help: convert the identifier to snake case: `dense_length`
+    |
+    = note: `#[warn(non_snake_case)]` on by default
+
+warning: `dev_utils` (lib) generated 8 warnings (run `cargo fix --lib -p dev_utils` to apply 4 suggestions)
+warning: `dev_utils` (lib test) generated 7 warnings (7 duplicates)
+warning: unused import: `std::fmt::format`
+ --> umolc_btree/benches/promotion_benches.rs:1:5
+  |
+1 | use std::fmt::format;
+  |     ^^^^^^^^^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` on by default
+
+warning: unused imports: `BadHeadsKeyset` and `GoodHeadsKeyset`
+ --> umolc_btree/benches/promotion_benches.rs:4:35
+  |
+4 | use dev_utils::keyset_generator::{BadHeadsKeyset, BadHeadsPercentage, DenseKeyset, GoodHeadsKeyset, KeyGenerator};
+  |                                   ^^^^^^^^^^^^^^                                   ^^^^^^^^^^^^^^^
+
+warning: unused import: `average_leaf_count`
+ --> umolc_btree/benches/promotion_benches.rs:6:44
+  |
+6 | use dev_utils::tree_utils::{amount_values, average_leaf_count, check_node_tag_percentage, total_leaf_count};
+  |                                            ^^^^^^^^^^^^^^^^^^
+
+warning: unused variable: `x`
+  --> umolc_btree/benches/promotion_benches.rs:61:40
+   |
+61 |             tree.scan(key.as_slice(), |x,val| {
+   |                                        ^ help: if this is intentional, prefix it with an underscore: `_x`
+   |
+   = note: `#[warn(unused_variables)]` on by default
+
+warning: unused variable: `val`
+  --> umolc_btree/benches/promotion_benches.rs:61:42
+   |
+61 |             tree.scan(key.as_slice(), |x,val| {
+   |                                          ^^^ help: if this is intentional, prefix it with an underscore: `_val`
+
+warning: unused variable: `value`
+  --> umolc_btree/benches/promotion_benches.rs:95:27
+   |
+95 |                 let (key, value) = &keyset[i];
+   |                           ^^^^^ help: if this is intentional, prefix it with an underscore: `_value`
+
+warning: unused variable: `res`
+  --> umolc_btree/benches/promotion_benches.rs:97:21
+   |
+97 |                 let res = tree.lookup_to_vec(key.as_slice());
+   |                     ^^^ help: if this is intentional, prefix it with an underscore: `_res`
+
+warning: unused variable: `scan_counter`
+   --> umolc_btree/benches/promotion_benches.rs:110:21
+    |
+110 |             let mut scan_counter = 0;
+    |                     ^^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_scan_counter`
+
+warning: unused variable: `x`
+   --> umolc_btree/benches/promotion_benches.rs:112:50
+    |
+112 |                 tree.scan(first_key.as_slice(), |x,val| {
+    |                                                  ^ help: if this is intentional, prefix it with an underscore: `_x`
+
+warning: unused variable: `val`
+   --> umolc_btree/benches/promotion_benches.rs:112:52
+    |
+112 |                 tree.scan(first_key.as_slice(), |x,val| {
+    |                                                    ^^^ help: if this is intentional, prefix it with an underscore: `_val`
+
+warning: variable does not need to be mutable
+   --> umolc_btree/benches/promotion_benches.rs:110:17
+    |
+110 |             let mut scan_counter = 0;
+    |                 ----^^^^^^^^^^^^
+    |                 |
+    |                 help: remove this `mut`
+    |
+    = note: `#[warn(unused_mut)]` on by default
+
+warning: unused variable: `name`
+   --> umolc_btree/benches/promotion_benches.rs:138:18
+    |
+138 | fn scan_scenario(name: &str, repetitions: usize) {
+    |                  ^^^^ unused variable
+139 |     most_promotions::<BadHeadsPercentage< 0>>(10000, 5000, repetitions, "Spamming {name} promotions with a  0% Collisions in the Set");
+    |                                                                         ------------------------------------------------------------- you might have meant to use string interpolation in this string literal
+140 |     most_promotions::<BadHeadsPercentage< 5>>(10000, 5000, repetitions, "Spamming {name} promotions with a  5% Collisions in the Set");
+    |                                                                         ------------------------------------------------------------- you might have meant to use string interpolation in this string literal
+141 |     most_promotions::<BadHeadsPercentage<10>>(10000, 5000, repetitions, "Spamming {name} promotions with a 10% Collisions in the Set");
+    |                                                                         ------------------------------------------------------------- you might have meant to use string interpolation in this string literal
+142 |     most_promotions::<BadHeadsPercentage<15>>(10000, 5000, repetitions, "Spamming {name} promotions with a 15% Collisions in the Set");
+    |                                                                         ------------------------------------------------------------- you might have meant to use string interpolation in this string literal
+143 |     most_promotions::<BadHeadsPercentage<20>>(10000, 5000, repetitions, "Spamming {name} promotions with a 20% Collisions in the Set");
+    |                                                                         ------------------------------------------------------------- you might have meant to use string interpolation in this string literal
+144 |     most_promotions::<BadHeadsPercentage<25>>(10000, 5000, repetitions, "Spamming {name} promotions with a 25% Collisions in the Set");
+    |                                                                         ------------------------------------------------------------- you might have meant to use string interpolation in this string literal
+145 |     most_promotions::<BadHeadsPercentage<30>>(10000, 5000, repetitions, "Spamming {name} promotions with a 30% Collisions in the Set");
+    |                                                                         ------------------------------------------------------------- you might have meant to use string interpolation in this string literal
+146 |     most_promotions::<BadHeadsPercentage<35>>(10000, 5000, repetitions, "Spamming {name} promotions with a 35% Collisions in the Set");
+    |                                                                         ------------------------------------------------------------- you might have meant to use string interpolation in this string literal
+147 |     most_promotions::<BadHeadsPercentage<40>>(10000, 5000, repetitions, "Spamming {name} promotions with a 40% Collisions in the Set");
+    |                                                                         ------------------------------------------------------------- you might have meant to use string interpolation in this string literal
+148 |     most_promotions::<BadHeadsPercentage<45>>(10000, 5000, repetitions, "Spamming {name} promotions with a 45% Collisions in the Set");
+    |                                                                         ------------------------------------------------------------- you might have meant to use string interpolation in this string literal
+149 |     most_promotions::<BadHeadsPercentage<50>>(10000, 5000, repetitions, "Spamming {name} promotions with a 50% Collisions in the Set");
+    |                                                                         ------------------------------------------------------------- you might have meant to use string interpolation in this string literal
+150 |     most_promotions::<BadHeadsPercentage<55>>(10000, 5000, repetitions, "Spamming {name} promotions with a 55% Collisions in the Set");
+    |                                                                         ------------------------------------------------------------- you might have meant to use string interpolation in this string literal
+151 |     most_promotions::<BadHeadsPercentage<60>>(10000, 5000, repetitions, "Spamming {name} promotions with a 60% Collisions in the Set");
+    |                                                                         ------------------------------------------------------------- you might have meant to use string interpolation in this string literal
+152 |     most_promotions::<BadHeadsPercentage<65>>(10000, 5000, repetitions, "Spamming {name} promotions with a 65% Collisions in the Set");
+    |                                                                         ------------------------------------------------------------- you might have meant to use string interpolation in this string literal
+153 |     most_promotions::<BadHeadsPercentage<70>>(10000, 5000, repetitions, "Spamming {name} promotions with a 70% Collisions in the Set");
+    |                                                                         ------------------------------------------------------------- you might have meant to use string interpolation in this string literal
+154 |     most_promotions::<BadHeadsPercentage<75>>(10000, 5000, repetitions, "Spamming {name} promotions with a 75% Collisions in the Set");
+    |                                                                         ------------------------------------------------------------- you might have meant to use string interpolation in this string literal
+155 |     most_promotions::<BadHeadsPercentage<80>>(10000, 5000, repetitions, "Spamming {name} promotions with a 80% Collisions in the Set");
+    |                                                                         ------------------------------------------------------------- you might have meant to use string interpolation in this string literal
+156 |     most_promotions::<BadHeadsPercentage<85>>(10000, 5000, repetitions, "Spamming {name} promotions with a 85% Collisions in the Set");
+    |                                                                         ------------------------------------------------------------- you might have meant to use string interpolation in this string literal
+157 |     most_promotions::<BadHeadsPercentage<90>>(10000, 5000, repetitions, "Spamming {name} promotions with a 90% Collisions in the Set");
+    |                                                                         ------------------------------------------------------------- you might have meant to use string interpolation in this string literal
+    |
+help: string interpolation only works in `format!` invocations
+    |
+139 |     most_promotions::<BadHeadsPercentage< 0>>(10000, 5000, repetitions, format!("Spamming {name} promotions with a  0% Collisions in the Set"));
+    |                                                                         ++++++++                                                             +
+help: string interpolation only works in `format!` invocations
+    |
+140 |     most_promotions::<BadHeadsPercentage< 5>>(10000, 5000, repetitions, format!("Spamming {name} promotions with a  5% Collisions in the Set"));
+    |                                                                         ++++++++                                                             +
+help: string interpolation only works in `format!` invocations
+    |
+141 |     most_promotions::<BadHeadsPercentage<10>>(10000, 5000, repetitions, format!("Spamming {name} promotions with a 10% Collisions in the Set"));
+    |                                                                         ++++++++                                                             +
+help: string interpolation only works in `format!` invocations
+    |
+142 |     most_promotions::<BadHeadsPercentage<15>>(10000, 5000, repetitions, format!("Spamming {name} promotions with a 15% Collisions in the Set"));
+    |                                                                         ++++++++                                                             +
+help: string interpolation only works in `format!` invocations
+    |
+143 |     most_promotions::<BadHeadsPercentage<20>>(10000, 5000, repetitions, format!("Spamming {name} promotions with a 20% Collisions in the Set"));
+    |                                                                         ++++++++                                                             +
+help: string interpolation only works in `format!` invocations
+    |
+144 |     most_promotions::<BadHeadsPercentage<25>>(10000, 5000, repetitions, format!("Spamming {name} promotions with a 25% Collisions in the Set"));
+    |                                                                         ++++++++                                                             +
+help: string interpolation only works in `format!` invocations
+    |
+145 |     most_promotions::<BadHeadsPercentage<30>>(10000, 5000, repetitions, format!("Spamming {name} promotions with a 30% Collisions in the Set"));
+    |                                                                         ++++++++                                                             +
+help: string interpolation only works in `format!` invocations
+    |
+146 |     most_promotions::<BadHeadsPercentage<35>>(10000, 5000, repetitions, format!("Spamming {name} promotions with a 35% Collisions in the Set"));
+    |                                                                         ++++++++                                                             +
+help: string interpolation only works in `format!` invocations
+    |
+147 |     most_promotions::<BadHeadsPercentage<40>>(10000, 5000, repetitions, format!("Spamming {name} promotions with a 40% Collisions in the Set"));
+    |                                                                         ++++++++                                                             +
+help: string interpolation only works in `format!` invocations
+    |
+148 |     most_promotions::<BadHeadsPercentage<45>>(10000, 5000, repetitions, format!("Spamming {name} promotions with a 45% Collisions in the Set"));
+    |                                                                         ++++++++                                                             +
+help: string interpolation only works in `format!` invocations
+    |
+149 |     most_promotions::<BadHeadsPercentage<50>>(10000, 5000, repetitions, format!("Spamming {name} promotions with a 50% Collisions in the Set"));
+    |                                                                         ++++++++                                                             +
+help: string interpolation only works in `format!` invocations
+    |
+150 |     most_promotions::<BadHeadsPercentage<55>>(10000, 5000, repetitions, format!("Spamming {name} promotions with a 55% Collisions in the Set"));
+    |                                                                         ++++++++                                                             +
+help: string interpolation only works in `format!` invocations
+    |
+151 |     most_promotions::<BadHeadsPercentage<60>>(10000, 5000, repetitions, format!("Spamming {name} promotions with a 60% Collisions in the Set"));
+    |                                                                         ++++++++                                                             +
+help: string interpolation only works in `format!` invocations
+    |
+152 |     most_promotions::<BadHeadsPercentage<65>>(10000, 5000, repetitions, format!("Spamming {name} promotions with a 65% Collisions in the Set"));
+    |                                                                         ++++++++                                                             +
+help: string interpolation only works in `format!` invocations
+    |
+153 |     most_promotions::<BadHeadsPercentage<70>>(10000, 5000, repetitions, format!("Spamming {name} promotions with a 70% Collisions in the Set"));
+    |                                                                         ++++++++                                                             +
+help: string interpolation only works in `format!` invocations
+    |
+154 |     most_promotions::<BadHeadsPercentage<75>>(10000, 5000, repetitions, format!("Spamming {name} promotions with a 75% Collisions in the Set"));
+    |                                                                         ++++++++                                                             +
+help: string interpolation only works in `format!` invocations
+    |
+155 |     most_promotions::<BadHeadsPercentage<80>>(10000, 5000, repetitions, format!("Spamming {name} promotions with a 80% Collisions in the Set"));
+    |                                                                         ++++++++                                                             +
+help: string interpolation only works in `format!` invocations
+    |
+156 |     most_promotions::<BadHeadsPercentage<85>>(10000, 5000, repetitions, format!("Spamming {name} promotions with a 85% Collisions in the Set"));
+    |                                                                         ++++++++                                                             +
+help: string interpolation only works in `format!` invocations
+    |
+157 |     most_promotions::<BadHeadsPercentage<90>>(10000, 5000, repetitions, format!("Spamming {name} promotions with a 90% Collisions in the Set"));
+    |                                                                         ++++++++                                                             +
+help: if this is intentional, prefix it with an underscore
+    |
+138 | fn scan_scenario(_name: &str, repetitions: usize) {
+    |                  +
+
+warning: unused variable: `val`
+   --> umolc_btree/benches/promotion_benches.rs:189:23
+    |
+189 |             let (key, val) = &keyset[i];
+    |                       ^^^ help: if this is intentional, prefix it with an underscore: `_val`
+
+warning: unused variable: `val`
+   --> umolc_btree/benches/promotion_benches.rs:214:23
+    |
+214 |             let (key, val) = &keyset[i];
+    |                       ^^^ help: if this is intentional, prefix it with an underscore: `_val`
+
+warning: unused variable: `key`
+   --> umolc_btree/benches/promotion_benches.rs:225:18
+    |
+225 |             let (key, val) = &keyset[i];
+    |                  ^^^ help: if this is intentional, prefix it with an underscore: `_key`
+
+warning: unused variable: `val`
+   --> umolc_btree/benches/promotion_benches.rs:225:23
+    |
+225 |             let (key, val) = &keyset[i];
+    |                       ^^^ help: if this is intentional, prefix it with an underscore: `_val`
+
+warning: unused variable: `val`
+   --> umolc_btree/benches/promotion_benches.rs:234:23
+    |
+234 |             let (key, val) = &keyset[i];
+    |                       ^^^ help: if this is intentional, prefix it with an underscore: `_val`
+
+warning: unused variable: `val`
+   --> umolc_btree/benches/promotion_benches.rs:261:23
+    |
+261 |             let (key, val) = &keyset[i];
+    |                       ^^^ help: if this is intentional, prefix it with an underscore: `_val`
+
+warning: unused variable: `val`
+   --> umolc_btree/benches/promotion_benches.rs:284:23
+    |
+284 |             let (key, val) = &keyset[i];
+    |                       ^^^ help: if this is intentional, prefix it with an underscore: `_val`
+
+warning: unused variable: `val`
+   --> umolc_btree/benches/promotion_benches.rs:295:23
+    |
+295 |             let (key, val) = &keyset[i];
+    |                       ^^^ help: if this is intentional, prefix it with an underscore: `_val`
+
+warning: function `most_promotions` is never used
+  --> umolc_btree/benches/promotion_benches.rs:43:4
+   |
+43 | fn most_promotions<KG: KeyGenerator>(amount_keys: usize, iterations: usize, repetitions: usize, name: &str) {
+   |    ^^^^^^^^^^^^^^^
+   |
+   = note: `#[warn(dead_code)]` on by default
+
+warning: function `warmup` is never used
+   --> umolc_btree/benches/promotion_benches.rs:126:4
+    |
+126 | fn warmup () {
+    |    ^^^^^^
+
+warning: function `scan_scenario` is never used
+   --> umolc_btree/benches/promotion_benches.rs:138:4
+    |
+138 | fn scan_scenario(name: &str, repetitions: usize) {
+    |    ^^^^^^^^^^^^^
+
+warning: function `worst_case_scenario` is never used
+   --> umolc_btree/benches/promotion_benches.rs:159:4
+    |
+159 | fn worst_case_scenario() {
+    |    ^^^^^^^^^^^^^^^^^^^
+
+warning: function `differing_repetition_count` is never used
+   --> umolc_btree/benches/promotion_benches.rs:165:4
+    |
+165 | fn differing_repetition_count() {
+    |    ^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `fdl_performance` is never used
+   --> umolc_btree/benches/promotion_benches.rs:172:4
+    |
+172 | fn fdl_performance() {
+    |    ^^^^^^^^^^^^^^^
+
+warning: unused import: `crate::fully_dense_leaf::FullyDenseLeaf`
+   --> umolc_btree/src/basic_node.rs:739:9
+    |
+739 |     use crate::fully_dense_leaf::FullyDenseLeaf;
+    |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = note: `#[warn(unused_imports)]` on by default
+
+warning: unused import: `indxvec::Printing`
+  --> umolc_btree/src/fully_dense_leaf.rs:10:5
+   |
+10 | use indxvec::Printing;
+   |     ^^^^^^^^^^^^^^^^^
+
+warning: use of deprecated struct `dev_utils::zipf::ZipfDistribution`: prefer rand_distr::Zipf
+ --> umolc_btree/benches/multithread.rs:5:22
+  |
+5 | use dev_utils::zipf::ZipfDistribution;
+  |                      ^^^^^^^^^^^^^^^^
+  |
+  = note: `#[warn(deprecated)]` on by default
+
+warning: use of deprecated struct `dev_utils::zipf::ZipfDistribution`: prefer rand_distr::Zipf
+   --> umolc_btree/benches/multithread.rs:163:16
+    |
+163 |     let zipf = ZipfDistribution::new(keys.len(), args.zipf).unwrap();
+    |                ^^^^^^^^^^^^^^^^
+
+warning: fields `run_tag` and `scan_duration` are never read
+  --> umolc_btree/benches/multithread.rs:25:5
+   |
+24 | struct Args {
+   |        ---- fields in this struct
+25 |     run_tag: String,
+   |     ^^^^^^^
+...
+31 |     scan_duration: f64,
+   |     ^^^^^^^^^^^^^
+   |
+   = note: `#[warn(dead_code)]` on by default
+
+warning: `umolc_btree` (bench "promotion_benches") generated 26 warnings (run `cargo fix --bench "promotion_benches"` to apply 5 suggestions)
+warning: `umolc_btree` (lib test) generated 8 warnings (6 duplicates) (run `cargo fix --lib -p umolc_btree --tests` to apply 2 suggestions)
+warning: `umolc_btree` (bench "multithread") generated 3 warnings
+    Finished `bench` profile [optimized + debuginfo] target(s) in 0.05s
+     Running unittests src/lib.rs (target/release/deps/dev_utils-0caf77c17db93dfe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (target/release/deps/umolc-3f902b77ff1f387d)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (target/release/deps/umolc_btree-5c4ccff1cc5acb47)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 13 filtered out; finished in 0.00s
+
+     Running benches/multithread.rs (target/release/deps/multithread-e2ad2dbf188ab00e)
+{"benches":{"insert":{"branch-misses":8.82035,"cache-misses":5.8307,"cycles":1162.202,"instructions":3009.6198,"multiplexed":false,"scale":20000.0,"task-clock":288.90415,"time":0.005820084},"lookup":{"branch-misses":3.9986698072752076,"cache-misses":2.493246819755272,"cycles":744.5342914392031,"instructions":1882.65112228343,"multiplexed":false,"scale":2905594.0,"task-clock":172.05724543759382,"time":0.500322469},"pre_insert":{"branch-misses":9.64785,"cache-misses":3.76495,"cycles":1230.2054875,"instructions":3150.536825,"multiplexed":false,"scale":80000.0,"task-clock":308.4020375,"time":0.024922382}},"build":{"cargo_cfg":{"FEATURE":["default","page_4k"],"FMT_DEBUG":["full"],"OVERFLOW_CHECKS":[],"PANIC":["unwind"],"RELOCATION_MODEL":["pic"],"TARGET_ABI":[],"TARGET_ARCH":["x86_64"],"TARGET_ENDIAN":["little"],"TARGET_ENV":["gnu"],"TARGET_FAMILY":["unix"],"TARGET_FEATURE":["fxsr","sse","sse2","x87"],"TARGET_HAS_ATOMIC":["16","32","64","8","ptr"],"TARGET_HAS_ATOMIC_EQUAL_ALIGNMENT":["16","32","64","8","ptr"],"TARGET_HAS_ATOMIC_LOAD_STORE":["16","32","64","8","ptr"],"TARGET_HAS_RELIABLE_F128":[],"TARGET_HAS_RELIABLE_F16":[],"TARGET_HAS_RELIABLE_F16_MATH":[],"TARGET_OS":["linux"],"TARGET_POINTER_WIDTH":["64"],"TARGET_THREAD_LOCAL":[],"TARGET_VENDOR":["unknown"],"UB_CHECKS":[],"UNIX":[]},"cargo_features":["DEFAULT","PAGE_4K"],"commit_hash":"0d503084759502877e3424fd8a76602636766136","diff_files":["umolc_btree/benches/promotion_benches.rs"],"is_dirty":true,"opt_level":"3","rustc_version":"rustc 1.89.0-nightly (d97326eab 2025-05-15)"}}
+     Running benches/promotion_benches.rs (target/release/deps/promotion_benches-f92198a11dba4cbb)
+The benchmark "HashLeaf 10% collisions Warmup" caused 48453412.00 cache-misses and took 1097 ms
+The benchmark "HashLeaf 10% collisions Insert" caused 20652308.00 cache-misses and took 617 ms

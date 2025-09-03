@@ -258,6 +258,9 @@ impl<const PERCENTAGE: u8> KeyGenerator for BadHeadsPercentage<PERCENTAGE> {
                     if i > PERCENTAGE as usize/5 {
                         // slice last byte off, to "destroy" the colliding head
                         key.truncate(key.len() - 1);
+
+                        // extend to same length. Has like a 1/256 chance to generate the same key again
+                        key.extend_from_slice((i as u8).to_be_bytes().as_slice());
                     }
 
                     key.extend_from_slice((i as u8).to_be_bytes().as_slice());
