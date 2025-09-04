@@ -36,13 +36,11 @@ const NODE_TAIL_SIZE: usize = PAGE_SIZE - size_of::<CommonNodeHead>();
 #[repr(C)]
 pub struct CommonNodeHead {
     pub tag: u8,
-    pub counter: AtomicU8,
+    pub scan_counter: u8,
     pub prefix_len: u16,
     pub count: u16,
     pub lower_fence_len: u16,
     pub upper_fence_len: u16,
-    pub scan_counter: u8,
-    pub _pad: u8,
 }
 
 const NODE_UNSAFE_CELL_HEAD: usize = 2;

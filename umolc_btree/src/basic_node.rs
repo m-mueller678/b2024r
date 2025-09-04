@@ -24,6 +24,7 @@ const MIN_HINT_COUNT: usize = MIN_HINT_SPACING * (HINT_COUNT + 1);
 define_node! {
     pub struct BasicNode<V> {
         pub common: CommonNodeHead,
+        _padding: u16,
         heap: HeapNodeInfo,
         hints: [u32; HINT_COUNT],
         _data: [u32; BASIC_NODE_DATA_SIZE],

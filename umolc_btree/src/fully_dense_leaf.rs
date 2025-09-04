@@ -18,8 +18,8 @@ use umolc::{o_project, BufferManager, OPtr, OlcErrorHandler, PageId};
 define_node! {
     pub struct FullyDenseLeaf {
         pub common: CommonNodeHead,
-        reference: u32,
         key_len:u16,
+        reference: u32,
         capacity:u16, // if reference is close to u32::MAX or upper fence, capacity will not be lowered
         val_len:u16,
         bitmap_len: u16,
@@ -618,55 +618,33 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeDynamic<'bm, BM> for FullyDen
         match to {
             node_tag::BASIC_LEAF => {
 
-                // yo this is the code that I initially planned on working with
-                // it works via copying over the raw data
-                // but was way too annoying to implement, so we just use manual insertion now
-                // might fix if I am feeling it
-                /*
-                let mut tmp: BasicLeaf = BasicLeaf::zeroed();
-                NodeStatic::<BM>::init(&mut tmp, self.lower_fence(), self.upper_fence_combined(), None);
-                assert!(self.key_len as usize <= MAX_KEY_SIZE);
-                let mut key_buf = ArrayVec::<u8, { MAX_KEY_SIZE }>::new();
-                let nnp_len = self.key_len.saturating_sub(4) as usize;
-                key_buf.try_extend_from_slice(&self.lower_fence()[..nnp_len]).unwrap();
-                let key_slice_start = 4usize.saturating_sub(self.key_len as usize);
-                key_buf.try_extend_from_slice(&[0, 0, 0, 0]).unwrap();
-                for (sparse_index, dense_index) in
-                    Self::iter_key_indices(self.capacity as usize, |x| self.read_unaligned::<u64>(x)).enumerate()
-                {
 
-                    //TODO: so it compiles for now
-                    let index: usize = 0;
-
-
-                    let numeric_part = self.reference + index as u32;
-                    key_buf[nnp_len..].copy_from_slice(&numeric_part.to_be_bytes());
-                    tmp.insert_pre_allocated_slot(sparse_index, &key_buf[key_slice_start..], self.val(dense_index));
-                }
-                tmp.update_hints(0, self.common.count as usize, 0);
-                *self.as_page_mut() = tmp.copy_page();
-
-*/
                 let mut buffer: [MaybeUninit<u8>; 512] = unsafe { MaybeUninit::uninit().assume_init() };
+
+                let numeric_part_begin = self.key_len - 4;
+
+
+                let key_src = self.key_from_numeric_part(self.reference + 0);
+                key_src.write_to_uninit(&mut buffer[..key_src.len() as usize]);
+
+
+                let mut np = self.reference;
 
                 let scan_counter = self.common.scan_counter;
                 let mut tmp: BasicLeaf = BasicLeaf::zeroed();
                 NodeStatic::<BM>::init(&mut tmp, self.lower_fence(), self.upper_fence_combined(), None);
                 for i in 0..self.capacity as usize {
                     if self.get_bit_direct(i) {
+
+                        np.to_be_bytes().write_to_uninit(&mut buffer[numeric_part_begin as usize..numeric_part_begin as usize + 4]);
                         let val = self.val(i);
-                        let key = self.key_from_numeric_part(self.reference + i as u32);
-                        let key_len = key.len();
-
-
-                        key.write_to_uninit(&mut buffer[..key_len]);
                         let full_key : &mut [u8] = unsafe {
-                            std::slice::from_raw_parts_mut(buffer.as_mut_ptr() as *mut u8, key_len)
+                            std::slice::from_raw_parts_mut(buffer.as_mut_ptr() as *mut u8, self.key_len as usize)
                         };
 
                         NodeStatic::<BM>::insert(&mut tmp, full_key, val).unwrap();
                     }
-
+                    np+=1;
                 }
 
                 NodeStatic::<BM>::set_scan_counter(&mut tmp, scan_counter);
