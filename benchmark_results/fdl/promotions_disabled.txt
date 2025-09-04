@@ -1,0 +1,50 @@
+The benchmark "FDL Warmup"    caused  314311239.00 cache-misses and took  6318 ms
+The benchmark "FDL Insertion" caused  151727154.00 cache-misses and took  2938 ms
+The benchmark "FDL Lookup"    caused  124824601.00 cache-misses and took  3302 ms
+The benchmark "FDL Scan"      caused   22110415.00 cache-misses and took  1675 ms
+The benchmark "FDL Remove"    caused  144111651.00 cache-misses and took  3175 ms
+The benchmark "FDL Insertion" caused  151568732.00 cache-misses and took  2898 ms
+The benchmark "FDL Lookup"    caused  124325183.00 cache-misses and took  3291 ms
+The benchmark "FDL Scan"      caused   22725825.00 cache-misses and took  1651 ms
+The benchmark "FDL Remove"    caused  143903447.00 cache-misses and took  3173 ms
+The benchmark "FDL Insertion" caused  151215679.00 cache-misses and took  2918 ms
+The benchmark "FDL Lookup"    caused  124562382.00 cache-misses and took  3284 ms
+The benchmark "FDL Scan"      caused   22004969.00 cache-misses and took  1654 ms
+The benchmark "FDL Remove"    caused  143941690.00 cache-misses and took  3163 ms
+The benchmark "FDL Insertion" caused  151686822.00 cache-misses and took  2903 ms
+The benchmark "FDL Lookup"    caused  124578423.00 cache-misses and took  3267 ms
+The benchmark "FDL Scan"      caused   22626694.00 cache-misses and took  1650 ms
+The benchmark "FDL Remove"    caused  144030040.00 cache-misses and took  3160 ms
+The benchmark "FDL Insertion" caused  151204043.00 cache-misses and took  2902 ms
+The benchmark "FDL Lookup"    caused  124591089.00 cache-misses and took  3307 ms
+The benchmark "FDL Scan"      caused   22022524.00 cache-misses and took  1656 ms
+The benchmark "FDL Remove"    caused  144130916.00 cache-misses and took  3195 ms
+The benchmark "FDL Insertion" caused  151942165.00 cache-misses and took  2930 ms
+The benchmark "FDL Lookup"    caused  124535741.00 cache-misses and took  3285 ms
+The benchmark "FDL Scan"      caused   22303646.00 cache-misses and took  1649 ms
+The benchmark "FDL Remove"    caused  144116985.00 cache-misses and took  3164 ms
+The benchmark "FDL Insertion" caused  151594401.00 cache-misses and took  2929 ms
+The benchmark "FDL Lookup"    caused  124513137.00 cache-misses and took  3285 ms
+The benchmark "FDL Scan"      caused   22013452.00 cache-misses and took  1677 ms
+The benchmark "FDL Remove"    caused  144084256.00 cache-misses and took  3199 ms
+The benchmark "FDL Insertion" caused  151757218.00 cache-misses and took  2968 ms
+The benchmark "FDL Lookup"    caused  124508727.00 cache-misses and took  3323 ms
+The benchmark "FDL Scan"      caused   22606090.00 cache-misses and took  1667 ms
+The benchmark "FDL Remove"    caused  144148473.00 cache-misses and took  3220 ms
+The benchmark "FDL Insertion" caused  151904583.00 cache-misses and took  2949 ms
+The benchmark "FDL Lookup"    caused  124577952.00 cache-misses and took  3325 ms
+The benchmark "FDL Scan"      caused   22122279.00 cache-misses and took  1683 ms
+The benchmark "FDL Remove"    caused  144110445.00 cache-misses and took  3207 ms
+The benchmark "FDL Insertion" caused  152520126.00 cache-misses and took  2958 ms
+The benchmark "FDL Lookup"    caused  124720947.00 cache-misses and took  3315 ms
+The benchmark "FDL Scan"      caused   22999626.00 cache-misses and took  1674 ms
+The benchmark "FDL Remove"    caused  144300455.00 cache-misses and took  3202 ms
+Leaf Count: 23849
+Results for FDL All Operations
+CacheMisses:
+(0, 1517120923) (1, 1245738182) (2, 223535520) (3, 1440878358) 
+Cycles Time:
+(0, 128724141144) (1, 145261927746) (2, 72752130500) (3, 139729494116) 
+Execution Time:
+(0, 29.298) (1, 32.990) (2, 16.640) (3, 31.865) 
+

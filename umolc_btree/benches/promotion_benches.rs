@@ -1,6 +1,9 @@
 #![allow(dead_code)]
 #![allow(unused_variables)]
 #![allow(warnings)]
+
+use std::cmp::min;
+use std::ops::{AddAssign, Range};
 use std::thread;
 use std::time::{Duration, Instant};
 use bstr::BStr;
@@ -38,7 +41,12 @@ where for<'a> F: Fn() {
         .get("cycles")
         .and_then(|v| v.as_f64())
         .unwrap_or(0.0);
-    println!("The benchmark \"{name}\" caused {:.2} cache-misses and took {:?} ms", cache_misses, elapsed.as_millis());
+    println!(
+        "The benchmark {:<15} caused {:>13.2} cache-misses and took {:>5} ms",
+        String::new() + "\"" + name + "\"",
+        cache_misses,
+        elapsed.as_millis()
+    );
 
     cool_down(elapsed, 1.0, Duration::from_secs(1), Duration::from_secs(10));
 
@@ -190,7 +198,7 @@ fn differing_scenarios() {
 
 fn fdl_performance() {
 
-    let amount_keys = FDL_AMOUNT;
+    let amount_keys = FDL_AMOUNT / FDL_STEPS;
     let bm = SimpleBm::<Page>::new(amount_keys/100);
     let tree = Tree::new(&bm);
 
@@ -198,7 +206,17 @@ fn fdl_performance() {
 
     fastrand::shuffle(&mut keyset);
 
-    let mut res: Vec<(usize, (f64, f64, Duration))> = Vec::new();
+    type perf = (f64, f64, Duration);
+    fn add_to_perfs(a: &mut perf, b: perf) {
+        a.0 += b.0;
+        a.1 += b.1;
+        a.2 += b.2;
+    }
+
+    let mut inserts = (0f64, 0f64, Duration::ZERO);
+    let mut lookups = (0f64, 0f64, Duration::ZERO);
+    let mut scans = (0f64, 0f64, Duration::ZERO);
+    let mut removes = (0f64, 0f64, Duration::ZERO);
 
     let mut leaf_count = 0;
     measure_time(|| {
@@ -221,51 +239,46 @@ fn fdl_performance() {
 
     assert_eq!(0, amount_values(&tree));
 
-    res.push((0,measure_time(|| {
+    for _ in 0..FDL_STEPS {
+        add_to_perfs(&mut inserts, measure_time(|| {
+            for i in 0..keyset.len() {
+                let (key, val) = &keyset[i];
+                tree.insert(key.as_slice(), val.as_slice());
+            }
+        }, "FDL Insertion"));
 
-        for i in 0..keyset.len() {
-            let (key, val) = &keyset[i];
-            tree.insert(key.as_slice(), val.as_slice());
-        }
+        leaf_count = total_leaf_count(&tree);
+        assert_eq!(keyset.len(), amount_values(&tree));
 
-    }, "FDL Insertion")));
+        add_to_perfs(&mut lookups, measure_time(|| {
+            for i in 0..keyset.len() {
+                let (key, val) = &keyset[i];
+                tree.lookup_to_vec(key.as_slice());
+            }
+        }, "FDL Lookup"));
 
-    leaf_count = total_leaf_count(&tree);
-    assert_eq!(keyset.len(), amount_values(&tree));
+        assert_eq!(keyset.len(), amount_values(&tree));
 
-    res.push((1,measure_time(|| {
+        add_to_perfs(&mut scans, measure_time(|| {
+            for _ in 0..20 {
+                tree.scan(b"", |_, _| { false });
+            }
+        }, "FDL Scan"));
 
-        for i in 0..keyset.len() {
-            let (key, val) = &keyset[i];
-            tree.lookup_to_vec(key.as_slice());
-        }
+        add_to_perfs(&mut removes, measure_time(|| {
+            for i in 0..keyset.len() {
+                let (key, val) = &keyset[i];
+                tree.remove(key.as_slice());
+            }
+        }, "FDL Remove"));
 
-    }, "FDL Lookup")));
+        assert_eq!(0, amount_values(&tree));
 
-    assert_eq!(keyset.len(), amount_values(&tree));
-
-    res.push((2, measure_time(|| {
-
-        for i in 0..20 {
-            let (key, val) = &keyset[i];
-            tree.scan(b"", |_, _| {false});
-        }
-
-    }, "FDL Scan")));
-
-    res.push((3, measure_time(|| {
-
-        for i in 0..keyset.len() {
-            let (key, val) = &keyset[i];
-            tree.remove(key.as_slice());
-        }
-
-    }, "FDL Remove")));
-
-    assert_eq!(0, amount_values(&tree));
+    }
 
     println!("Leaf Count: {leaf_count}");
 
+    let res = [(0, inserts), (1, lookups), (2, scans), (3, removes)];
     print_results(&res, "FDL All Operations");
 }
 
@@ -416,6 +429,7 @@ fn print_results(res: &[(usize, (f64, f64, Duration))], name: &str) {
     for (i, (_, cyc, _)) in res {
         print!("({i}, {cyc}) ");
     }
+    println!();
 
     println!("Execution Time:");
     for (i, (_, _, dur)) in res {
@@ -427,12 +441,13 @@ fn print_results(res: &[(usize, (f64, f64, Duration))], name: &str) {
 
 const ADAPTIVE_PROMOTION_AMOUNT: usize = 100000;
 const FDL_AMOUNT: usize = 51200000;
+const FDL_STEPS: usize = 10;
 const HASH_AMOUNT: usize = 5000000;
 
 fn main() {
-    warmup();
-    worst_case_scenario();
-    differing_scenarios();
-    //fdl_performance();
+    //warmup();
+    //worst_case_scenario();
+    //differing_scenarios();
+    fdl_performance();
     //hash_performance();
 }
