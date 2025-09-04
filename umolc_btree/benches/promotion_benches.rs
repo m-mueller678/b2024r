@@ -1,6 +1,8 @@
 #![allow(dead_code)]
 #![allow(unused_variables)]
 #![allow(warnings)]
+
+use std::mem::MaybeUninit;
 use std::thread;
 use std::time::{Duration, Instant};
 use bstr::BStr;
@@ -53,6 +55,8 @@ fn cool_down(prev: Duration, factor: f32, min: Duration, max: Duration) {
 
 
 fn most_promotions<KG: KeyGenerator>(iterations: usize, repetitions: usize, name: &str) -> (f64, f64, Duration) {
+
+
     fastrand::seed(42);
     let amount_keys = ADAPTIVE_PROMOTION_AMOUNT;
     let iterations  = iterations / repetitions;
@@ -100,6 +104,7 @@ fn most_promotions<KG: KeyGenerator>(iterations: usize, repetitions: usize, name
 
 
     measure_time(|| {
+        let mut buffer: [MaybeUninit<u8>; 512] = unsafe { MaybeUninit::uninit().assume_init() };
         let mut index = 0;
 
         for _ in 0..iterations {
@@ -107,7 +112,7 @@ fn most_promotions<KG: KeyGenerator>(iterations: usize, repetitions: usize, name
                 let i = (index) % max_fill;
                 let (key, value) = &keyset[i];
 
-                let res = tree.lookup_to_vec(key.as_slice());
+                let res = tree.lookup_to_buffer(key.as_slice(), &mut buffer);
 
                 index += 1;
             }
@@ -234,10 +239,11 @@ fn fdl_performance() {
     assert_eq!(keyset.len(), amount_values(&tree));
 
     res.push((1,measure_time(|| {
+        let mut buffer: [MaybeUninit<u8>; 512] = unsafe { MaybeUninit::uninit().assume_init() };
 
         for i in 0..keyset.len() {
             let (key, val) = &keyset[i];
-            tree.lookup_to_vec(key.as_slice());
+            tree.lookup_to_buffer(key.as_slice(), &mut buffer);
         }
 
     }, "FDL Lookup")));
@@ -322,10 +328,11 @@ fn hash_performance_dispatcher<const PERCENTAGE: u8>() -> [(usize, (f64, f64, Du
         assert_eq!(keyset.len(), amount_values(&tree));
 
         let (x,y, z) = measure_time(|| {
+            let mut buffer: [MaybeUninit<u8>; 512] = unsafe { MaybeUninit::uninit().assume_init() };
 
             for i in 0..keyset.len() {
                 let (key, val) = &keyset[i];
-                tree.lookup_to_vec(key.as_slice());
+                tree.lookup_to_buffer(key.as_slice(), &mut buffer);
             }
 
         }, format!("HashLeaf {:?}% collisions Lookup", PERCENTAGE).as_str());
