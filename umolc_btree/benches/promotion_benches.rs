@@ -12,7 +12,7 @@ use umolc_btree::{Page, Tree};
 
 
 
-fn measure_time<F>(bench: F, name: &str) -> (f64, Duration)
+fn measure_time<F>(bench: F, name: &str) -> (f64, f64, Duration)
 where for<'a> F: Fn() {
     let mut perf = PerfCounters::with_counters(["cycles", "instructions", "cache-misses"]);
 
@@ -34,11 +34,15 @@ where for<'a> F: Fn() {
         .get("cache-misses")
         .and_then(|v| v.as_f64())
         .unwrap_or(0.0);
+    let cycles = results
+        .get("cycles")
+        .and_then(|v| v.as_f64())
+        .unwrap_or(0.0);
     println!("The benchmark \"{name}\" caused {:.2} cache-misses and took {:?} ms", cache_misses, elapsed.as_millis());
 
     cool_down(elapsed, 1.0, Duration::from_secs(1), Duration::from_secs(10));
 
-    (cache_misses, elapsed)
+    (cache_misses, cycles, elapsed)
 }
 
 fn cool_down(prev: Duration, factor: f32, min: Duration, max: Duration) {
@@ -48,7 +52,7 @@ fn cool_down(prev: Duration, factor: f32, min: Duration, max: Duration) {
 }
 
 
-fn most_promotions<KG: KeyGenerator>(iterations: usize, repetitions: usize, name: &str) -> (f64, Duration) {
+fn most_promotions<KG: KeyGenerator>(iterations: usize, repetitions: usize, name: &str) -> (f64, f64, Duration) {
     fastrand::seed(42);
     let amount_keys = ADAPTIVE_PROMOTION_AMOUNT;
     let iterations  = iterations / repetitions;
@@ -143,7 +147,7 @@ fn warmup () {
 
 
 fn scan_scenario(name: &str, repetitions: usize) {
-    let mut res: Vec<(usize, (f64, Duration))> = Vec::new();
+    let mut res: Vec<(usize, (f64, f64, Duration))> = Vec::new();
     res.push(( 0, most_promotions::<BadHeadsPercentage< 0>>(5000, repetitions, format!("Spamming {:?} promotions with a  0% Collisions in the Set", name).as_str())));
     res.push(( 5, most_promotions::<BadHeadsPercentage< 5>>(5000, repetitions, format!("Spamming {:?} promotions with a  5% Collisions in the Set", name).as_str())));
     res.push((10, most_promotions::<BadHeadsPercentage<10>>(5000, repetitions, format!("Spamming {:?} promotions with a 10% Collisions in the Set", name).as_str())));
@@ -173,7 +177,7 @@ fn worst_case_scenario() {
 }
 
 fn differing_scenarios() {
-    let mut res: Vec<(usize, (f64, Duration))> = Vec::new();
+    let mut res: Vec<(usize, (f64, f64, Duration))> = Vec::new();
     for i in 0..20 {
         let repetitions = (i+1) * 10;
         let measured = most_promotions::<BadHeadsPercentage<15>>(5000,   repetitions, format!("Spamming 15% Collisions with {:>3} repetitions of action", repetitions).as_str());
@@ -194,7 +198,7 @@ fn fdl_performance() {
 
     fastrand::shuffle(&mut keyset);
 
-    let mut res: Vec<(usize, (f64, Duration))> = Vec::new();
+    let mut res: Vec<(usize, (f64, f64, Duration))> = Vec::new();
 
     let mut leaf_count = 0;
     measure_time(|| {
@@ -266,74 +270,98 @@ fn fdl_performance() {
 }
 
 
-fn hash_performance_dispatcher<const PERCENTAGE: u8>() -> [(usize, (f64, Duration)); 4]{
+fn hash_performance_dispatcher<const PERCENTAGE: u8>() -> [(usize, (f64, f64, Duration)); 4]{
 
-    let amount_keys = HASH_AMOUNT;
-    let bm = SimpleBm::<Page>::new(amount_keys/100);
-    let tree = Tree::new(&bm);
+    let mut res: [(usize, (f64, f64, Duration)); 4] = [(0, (0., 0., Duration::from_secs(0))); 4];
 
-    let mut keyset: Vec<(Vec<u8>, Vec<u8>)> = BadHeadsPercentage::<PERCENTAGE>::generate_keyset(amount_keys);
-    fastrand::shuffle(&mut keyset);
+    for _ in 0..10 {
 
-    let mut res: [(usize, (f64, Duration)); 4] = [(0, (0. , Duration::from_secs(0))); 4];
+        let amount_keys = HASH_AMOUNT;
+        let bm = SimpleBm::<Page>::new(amount_keys/100);
+        let tree = Tree::new(&bm);
 
-    res[0] = (PERCENTAGE as usize, measure_time(|| {
-
-        for i in 0..keyset.len() {
-            let (key, val) = &keyset[i];
-            tree.insert(key.as_slice(), val.as_slice());
-        }
-
-        for i in 0..keyset.len() {
-            let (key, val) = &keyset[i];
-            tree.remove(key.as_slice());
-        }
-
-    }, format!("HashLeaf {:?}% collisions Warmup", PERCENTAGE).as_str()));
-
-    assert_eq!(0, amount_values(&tree));
-
-    res[1] = (PERCENTAGE as usize, measure_time(|| {
-
-        for i in 0..keyset.len() {
-            let (key, val) = &keyset[i];
-            tree.insert(key.as_slice(), val.as_slice());
-        }
-
-    }, format!("HashLeaf {:?}% collisions Insert", PERCENTAGE).as_str()));
+        let mut keyset: Vec<(Vec<u8>, Vec<u8>)> = BadHeadsPercentage::<PERCENTAGE>::generate_keyset(amount_keys);
+        fastrand::shuffle(&mut keyset);
 
 
-    assert_eq!(keyset.len(), amount_values(&tree));
+        let (x,y,z) = measure_time(|| {
 
-    res[2] = (PERCENTAGE as usize, measure_time(|| {
+            for i in 0..keyset.len() {
+                let (key, val) = &keyset[i];
+                tree.insert(key.as_slice(), val.as_slice());
+            }
 
-        for i in 0..keyset.len() {
-            let (key, val) = &keyset[i];
-            tree.lookup_to_vec(key.as_slice());
-        }
+            for i in 0..keyset.len() {
+                let (key, val) = &keyset[i];
+                tree.remove(key.as_slice());
+            }
 
-    }, format!("HashLeaf {:?}% collisions Lookup", PERCENTAGE).as_str()));
+        }, format!("HashLeaf {:?}% collisions Warmup", PERCENTAGE).as_str());
 
-    assert_eq!(keyset.len(), amount_values(&tree));
+        res[0].0 = PERCENTAGE as usize;
+        res[0].1.0 += x;
+        res[0].1.1 += y;
+        res[0].1.2 += z;
 
-    res[3] = (PERCENTAGE as usize, measure_time(|| {
+        assert_eq!(0, amount_values(&tree));
 
-        for i in 0..keyset.len() {
-            let (key, val) = &keyset[i];
-            tree.remove(key.as_slice());
-        }
+        let (x,y, z) = measure_time(|| {
 
-    }, format!("HashLeaf {:?}% collisions Remove", PERCENTAGE).as_str()));
+            for i in 0..keyset.len() {
+                let (key, val) = &keyset[i];
+                tree.insert(key.as_slice(), val.as_slice());
+            }
 
-    assert_eq!(0, amount_values(&tree));
+        }, format!("HashLeaf {:?}% collisions Insert", PERCENTAGE).as_str());
+
+        res[1].0 = PERCENTAGE as usize;
+        res[1].1.0 += x;
+        res[1].1.1 += y;
+        res[1].1.2 += z;
+
+        assert_eq!(keyset.len(), amount_values(&tree));
+
+        let (x,y, z) = measure_time(|| {
+
+            for i in 0..keyset.len() {
+                let (key, val) = &keyset[i];
+                tree.lookup_to_vec(key.as_slice());
+            }
+
+        }, format!("HashLeaf {:?}% collisions Lookup", PERCENTAGE).as_str());
+
+        res[2].0 = PERCENTAGE as usize;
+        res[2].1.0 += x;
+        res[2].1.1 += y;
+        res[2].1.2 += z;
+
+        assert_eq!(keyset.len(), amount_values(&tree));
+
+        let (x,y , z) = measure_time(|| {
+
+            for i in 0..keyset.len() {
+                let (key, val) = &keyset[i];
+                tree.remove(key.as_slice());
+            }
+
+        }, format!("HashLeaf {:?}% collisions Remove", PERCENTAGE).as_str());
+
+        res[3].0 = PERCENTAGE as usize;
+        res[3].1.0 += x;
+        res[3].1.1 += y;
+        res[3].1.2 += z;
+
+        assert_eq!(0, amount_values(&tree));
+    }
+
 
     res
 }
 
 fn hash_performance() {
-    let mut insert_res: Vec<(usize, (f64, Duration))> = Vec::new();
-    let mut lookup_res: Vec<(usize, (f64, Duration))> = Vec::new();
-    let mut remove_res: Vec<(usize, (f64, Duration))> = Vec::new();
+    let mut insert_res: Vec<(usize, (f64, f64, Duration))> = Vec::new();
+    let mut lookup_res: Vec<(usize, (f64, f64, Duration))> = Vec::new();
+    let mut remove_res: Vec<(usize, (f64, f64, Duration))> = Vec::new();
     let res = hash_performance_dispatcher::<10>();
     insert_res.push(res[1]);
     lookup_res.push(res[2]);
@@ -377,16 +405,20 @@ fn hash_performance() {
 
 }
 
-fn print_results(res: &[(usize, (f64, Duration))], name: &str) {
+fn print_results(res: &[(usize, (f64, f64, Duration))], name: &str) {
     println!("Results for {name}");
     println!("CacheMisses:");
-    for (i, (miss, _dur)) in res {
+    for (i, (miss, _, _)) in res {
         print!("({i}, {miss}) ");
     }
     println!();
+    println!("Cycles Time:");
+    for (i, (_, cyc, _)) in res {
+        print!("({i}, {cyc}) ");
+    }
 
     println!("Execution Time:");
-    for (i, (_miss, dur)) in res {
+    for (i, (_, _, dur)) in res {
         let secs = dur.as_secs_f64();
         print!("({i}, {secs:.3}) ");
     }
@@ -395,12 +427,12 @@ fn print_results(res: &[(usize, (f64, Duration))], name: &str) {
 
 const ADAPTIVE_PROMOTION_AMOUNT: usize = 100000;
 const FDL_AMOUNT: usize = 51200000;
-const HASH_AMOUNT: usize =10000000;
+const HASH_AMOUNT: usize = 5000000;
 
 fn main() {
     warmup();
-    //worst_case_scenario();
-    differing_scenarios();
+    worst_case_scenario();
+    //differing_scenarios();
     //fdl_performance();
     //hash_performance();
 }
