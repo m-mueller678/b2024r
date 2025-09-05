@@ -287,7 +287,7 @@ fn hash_performance_dispatcher<const PERCENTAGE: u8>() -> [(usize, (f64, f64, Du
 
     let mut res: [(usize, (f64, f64, Duration)); 4] = [(0, (0., 0., Duration::from_secs(0))); 4];
 
-    for _ in 0..10 {
+    for _ in 0..4 {
 
         let amount_keys = HASH_AMOUNT;
         let bm = SimpleBm::<Page>::new(amount_keys/100);
@@ -442,12 +442,12 @@ fn print_results(res: &[(usize, (f64, f64, Duration))], name: &str) {
 const ADAPTIVE_PROMOTION_AMOUNT: usize = 100000;
 const FDL_AMOUNT: usize = 51200000;
 const FDL_STEPS: usize = 10;
-const HASH_AMOUNT: usize = 5000000;
+const HASH_AMOUNT: usize = 3000000;
 
 fn main() {
-    //warmup();
-    //worst_case_scenario();
+    warmup();
+    worst_case_scenario();
     //differing_scenarios();
-    fdl_performance();
-    //hash_performance();
+    //fdl_performance();
+    hash_performance();
 }

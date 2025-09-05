@@ -1,0 +1,355 @@
+
+running 1 test
+test keyset_generator::print_bad_heads_collisions ... ignored
+
+test result: ok. 0 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 13 tests
+test basic_node::tests::basic_inner_iter_debug ... ignored
+test basic_node::tests::split_merge_basic_leaf ... ignored
+test basic_node::tests::split_merge_hash_leaf ... ignored
+test basic_node::tests::split_merge_inner ... ignored
+test basic_node::tests::test_basic_leaf ... ignored
+test basic_node::tests::test_fdl ... ignored
+test basic_node::tests::test_hash_leaf ... ignored
+test fully_dense_leaf::insert_resolver::fdl_resolver ... ignored
+test fully_dense_leaf::test::basic_leaf_demotion ... ignored
+test fully_dense_leaf::test::basic_leaf_to_hash_leaf ... ignored
+test fully_dense_leaf::test::has_good_heads_test ... ignored
+test fully_dense_leaf::test::hash_leaf_demotion ... ignored
+test fully_dense_leaf::test::hash_leaf_to_basic_leaf ... ignored
+
+test result: ok. 0 passed; 0 failed; 13 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+{"benches":{"insert":{"branch-misses":10.98315,"cache-misses":12.81265,"cycles":1295.2769,"instructions":2761.10165,"multiplexed":false,"scale":20000.0,"task-clock":259.65015,"time":0.005196932},"lookup":{"branch-misses":4.851427816230694,"cache-misses":5.308675668040073,"cycles":805.8987666195208,"instructions":1910.4369307701327,"multiplexed":false,"scale":3352007.0,"task-clock":149.20012995199593,"time":0.500324878},"pre_insert":{"branch-misses":11.127475,"cache-misses":7.4556,"cycles":1266.87545,"instructions":2768.4315875,"multiplexed":false,"scale":80000.0,"task-clock":253.6737625,"time":0.02032777}},"build":{"cargo_cfg":{"FEATURE":["default","disallow_promotions","page_4k"],"FMT_DEBUG":["full"],"OVERFLOW_CHECKS":[],"PANIC":["unwind"],"RELOCATION_MODEL":["pic"],"TARGET_ABI":[],"TARGET_ARCH":["x86_64"],"TARGET_ENDIAN":["little"],"TARGET_ENV":["gnu"],"TARGET_FAMILY":["unix"],"TARGET_FEATURE":["fxsr","sse","sse2","x87"],"TARGET_HAS_ATOMIC":["16","32","64","8","ptr"],"TARGET_HAS_ATOMIC_EQUAL_ALIGNMENT":["16","32","64","8","ptr"],"TARGET_HAS_ATOMIC_LOAD_STORE":["16","32","64","8","ptr"],"TARGET_HAS_RELIABLE_F128":[],"TARGET_HAS_RELIABLE_F16":[],"TARGET_HAS_RELIABLE_F16_MATH":[],"TARGET_OS":["linux"],"TARGET_POINTER_WIDTH":["64"],"TARGET_THREAD_LOCAL":[],"TARGET_VENDOR":["unknown"],"UB_CHECKS":[],"UNIX":[]},"cargo_features":["DEFAULT","DISALLOW_PROMOTIONS","PAGE_4K"],"commit_hash":"effcdc23c4ad08125fbd326b261156381a63d753","diff_files":["umolc_btree/benches/promotion_benches.rs"],"is_dirty":true,"opt_level":"3","rustc_version":"rustc 1.89.0-nightly (d97326eab 2025-05-15)"}}
+The benchmark "Warmup"        caused  184115829.00 cache-misses and took  9442 ms
+The benchmark "Warmup"        caused  182862611.00 cache-misses and took 10166 ms
+The benchmark "Warmup"        caused  171384068.00 cache-misses and took  9692 ms
+The benchmark "Warmup"        caused  183760307.00 cache-misses and took  9774 ms
+The benchmark "Warmup"        caused  182541281.00 cache-misses and took  9544 ms
+The benchmark "Warmup"        caused  173189336.00 cache-misses and took  9631 ms
+The benchmark "Spamming "worst case" promotions with a  0% Collisions in the Set" caused  173861070.00 cache-misses and took  9745 ms
+The benchmark "Spamming "worst case" promotions with a  5% Collisions in the Set" caused  171510573.00 cache-misses and took  9700 ms
+The benchmark "Spamming "worst case" promotions with a 10% Collisions in the Set" caused  174499587.00 cache-misses and took  9533 ms
+The benchmark "Spamming "worst case" promotions with a 15% Collisions in the Set" caused  177641377.00 cache-misses and took  9632 ms
+The benchmark "Spamming "worst case" promotions with a 20% Collisions in the Set" caused  181732842.00 cache-misses and took  9700 ms
+The benchmark "Spamming "worst case" promotions with a 25% Collisions in the Set" caused  195424436.00 cache-misses and took  9849 ms
+The benchmark "Spamming "worst case" promotions with a 30% Collisions in the Set" caused  188055770.00 cache-misses and took  9901 ms
+The benchmark "Spamming "worst case" promotions with a 35% Collisions in the Set" caused  204227492.00 cache-misses and took  9859 ms
+The benchmark "Spamming "worst case" promotions with a 40% Collisions in the Set" caused  199724543.00 cache-misses and took 10001 ms
+The benchmark "Spamming "worst case" promotions with a 45% Collisions in the Set" caused  215273978.00 cache-misses and took 10117 ms
+The benchmark "Spamming "worst case" promotions with a 50% Collisions in the Set" caused  212596308.00 cache-misses and took 10420 ms
+The benchmark "Spamming "worst case" promotions with a 55% Collisions in the Set" caused  229799136.00 cache-misses and took 10366 ms
+The benchmark "Spamming "worst case" promotions with a 60% Collisions in the Set" caused  222342432.00 cache-misses and took 10048 ms
+The benchmark "Spamming "worst case" promotions with a 65% Collisions in the Set" caused  242495862.00 cache-misses and took 10803 ms
+The benchmark "Spamming "worst case" promotions with a 70% Collisions in the Set" caused  232616703.00 cache-misses and took 10388 ms
+The benchmark "Spamming "worst case" promotions with a 75% Collisions in the Set" caused  250753850.00 cache-misses and took 10551 ms
+The benchmark "Spamming "worst case" promotions with a 80% Collisions in the Set" caused  243431621.00 cache-misses and took 10602 ms
+The benchmark "Spamming "worst case" promotions with a 85% Collisions in the Set" caused  249339102.00 cache-misses and took 10197 ms
+The benchmark "Spamming "worst case" promotions with a 90% Collisions in the Set" caused  252185164.00 cache-misses and took  9917 ms
+Results for worst case
+CacheMisses:
+(0, 173861070) (5, 171510573) (10, 174499587) (15, 177641377) (20, 181732842) (25, 195424436) (30, 188055770) (35, 204227492) (40, 199724543) (45, 215273978) (50, 212596308) (55, 229799136.00000003) (60, 222342432) (65, 242495862) (70, 232616703.00000003) (75, 250753850) (80, 243431621) (85, 249339102) (90, 252185164) 
+Cycles Time:
+(0, 52125829037) (5, 51847491913) (10, 51086384199) (15, 51234065843) (20, 51928894781) (25, 52645567371) (30, 52957199630) (35, 52600808730) (40, 53576295913) (45, 54129665659) (50, 55781182997) (55, 55932278751) (60, 53651816218) (65, 57801219601.00001) (70, 55727923015) (75, 56515210821) (80, 56857582198) (85, 54532331257) (90, 53116335254) 
+Execution Time:
+(0, 9.745) (5, 9.701) (10, 9.534) (15, 9.633) (20, 9.701) (25, 9.850) (30, 9.901) (35, 9.860) (40, 10.001) (45, 10.118) (50, 10.420) (55, 10.367) (60, 10.048) (65, 10.803) (70, 10.389) (75, 10.552) (80, 10.603) (85, 10.198) (90, 9.917) 
+The benchmark "Spamming "bad case" promotions with a  0% Collisions in the Set" caused  168695396.00 cache-misses and took  9236 ms
+The benchmark "Spamming "bad case" promotions with a  5% Collisions in the Set" caused  168280735.00 cache-misses and took  9271 ms
+The benchmark "Spamming "bad case" promotions with a 10% Collisions in the Set" caused  183962965.00 cache-misses and took  9314 ms
+The benchmark "Spamming "bad case" promotions with a 15% Collisions in the Set" caused  175009720.00 cache-misses and took  9327 ms
+The benchmark "Spamming "bad case" promotions with a 20% Collisions in the Set" caused  189794110.00 cache-misses and took  9362 ms
+The benchmark "Spamming "bad case" promotions with a 25% Collisions in the Set" caused  193164987.00 cache-misses and took  9381 ms
+The benchmark "Spamming "bad case" promotions with a 30% Collisions in the Set" caused  197117467.00 cache-misses and took  9459 ms
+The benchmark "Spamming "bad case" promotions with a 35% Collisions in the Set" caused  199563737.00 cache-misses and took  9478 ms
+The benchmark "Spamming "bad case" promotions with a 40% Collisions in the Set" caused  205708894.00 cache-misses and took  9478 ms
+The benchmark "Spamming "bad case" promotions with a 45% Collisions in the Set" caused  206623656.00 cache-misses and took  9620 ms
+The benchmark "Spamming "bad case" promotions with a 50% Collisions in the Set" caused  206243090.00 cache-misses and took  9617 ms
+The benchmark "Spamming "bad case" promotions with a 55% Collisions in the Set" caused  225528323.00 cache-misses and took  9710 ms
+The benchmark "Spamming "bad case" promotions with a 60% Collisions in the Set" caused  230481184.00 cache-misses and took  9712 ms
+The benchmark "Spamming "bad case" promotions with a 65% Collisions in the Set" caused  235841764.00 cache-misses and took  9762 ms
+The benchmark "Spamming "bad case" promotions with a 70% Collisions in the Set" caused  243725153.00 cache-misses and took  9846 ms
+The benchmark "Spamming "bad case" promotions with a 75% Collisions in the Set" caused  248657086.00 cache-misses and took  9852 ms
+The benchmark "Spamming "bad case" promotions with a 80% Collisions in the Set" caused  253146842.00 cache-misses and took  9909 ms
+The benchmark "Spamming "bad case" promotions with a 85% Collisions in the Set" caused  262603565.00 cache-misses and took  9934 ms
+The benchmark "Spamming "bad case" promotions with a 90% Collisions in the Set" caused  267241423.00 cache-misses and took  9938 ms
+Results for bad case
+CacheMisses:
+(0, 168695396) (5, 168280735) (10, 183962965) (15, 175009720) (20, 189794110) (25, 193164987) (30, 197117467) (35, 199563737) (40, 205708894) (45, 206623656) (50, 206243090) (55, 225528323) (60, 230481184) (65, 235841764) (70, 243725153) (75, 248657086) (80, 253146841.99999997) (85, 262603564.99999997) (90, 267241423) 
+Cycles Time:
+(0, 49248322861) (5, 49446549082) (10, 49725363905) (15, 49863081375) (20, 50148735558) (25, 50148653351) (30, 50506646898) (35, 50677513631) (40, 50881532899) (45, 51364889657) (50, 51518444754) (55, 51918838089) (60, 51860926365) (65, 52243510101) (70, 52690512716) (75, 52662166051) (80, 52967493659) (85, 53111114764) (90, 53143511194) 
+Execution Time:
+(0, 9.237) (5, 9.271) (10, 9.314) (15, 9.328) (20, 9.362) (25, 9.381) (30, 9.459) (35, 9.479) (40, 9.478) (45, 9.620) (50, 9.617) (55, 9.711) (60, 9.712) (65, 9.763) (70, 9.846) (75, 9.853) (80, 9.909) (85, 9.935) (90, 9.938) 
+The benchmark "Spamming "better case" promotions with a  0% Collisions in the Set" caused  180797342.00 cache-misses and took  9244 ms
+The benchmark "Spamming "better case" promotions with a  5% Collisions in the Set" caused  173369816.00 cache-misses and took  9305 ms
+The benchmark "Spamming "better case" promotions with a 10% Collisions in the Set" caused  180160163.00 cache-misses and took  9316 ms
+The benchmark "Spamming "better case" promotions with a 15% Collisions in the Set" caused  179563491.00 cache-misses and took  9355 ms
+The benchmark "Spamming "better case" promotions with a 20% Collisions in the Set" caused  186547508.00 cache-misses and took  9380 ms
+The benchmark "Spamming "better case" promotions with a 25% Collisions in the Set" caused  204351081.00 cache-misses and took  9460 ms
+The benchmark "Spamming "better case" promotions with a 30% Collisions in the Set" caused  209300525.00 cache-misses and took  9470 ms
+The benchmark "Spamming "better case" promotions with a 35% Collisions in the Set" caused  213138185.00 cache-misses and took  9500 ms
+The benchmark "Spamming "better case" promotions with a 40% Collisions in the Set" caused  217252029.00 cache-misses and took  9568 ms
+The benchmark "Spamming "better case" promotions with a 45% Collisions in the Set" caused  213747051.00 cache-misses and took  9624 ms
+The benchmark "Spamming "better case" promotions with a 50% Collisions in the Set" caused  218547049.00 cache-misses and took  9646 ms
+The benchmark "Spamming "better case" promotions with a 55% Collisions in the Set" caused  225350987.00 cache-misses and took  9708 ms
+The benchmark "Spamming "better case" promotions with a 60% Collisions in the Set" caused  231057300.00 cache-misses and took  9741 ms
+The benchmark "Spamming "better case" promotions with a 65% Collisions in the Set" caused  237009114.00 cache-misses and took  9784 ms
+The benchmark "Spamming "better case" promotions with a 70% Collisions in the Set" caused  241552890.00 cache-misses and took  9803 ms
+The benchmark "Spamming "better case" promotions with a 75% Collisions in the Set" caused  248229067.00 cache-misses and took  9870 ms
+The benchmark "Spamming "better case" promotions with a 80% Collisions in the Set" caused  252575405.00 cache-misses and took  9885 ms
+The benchmark "Spamming "better case" promotions with a 85% Collisions in the Set" caused  263113072.00 cache-misses and took  9895 ms
+The benchmark "Spamming "better case" promotions with a 90% Collisions in the Set" caused  269026546.00 cache-misses and took  9977 ms
+Results for better case
+CacheMisses:
+(0, 180797342) (5, 173369816) (10, 180160163) (15, 179563491) (20, 186547508) (25, 204351081) (30, 209300525) (35, 213138185) (40, 217252029) (45, 213747051) (50, 218547049) (55, 225350987) (60, 231057300) (65, 237009114) (70, 241552890) (75, 248229067) (80, 252575404.99999997) (85, 263113072) (90, 269026546) 
+Cycles Time:
+(0, 49382497557) (5, 49680747599) (10, 49769485510) (15, 49926665479) (20, 50106735858) (25, 50484498658) (30, 50628871611) (35, 50777752580) (40, 51111963596) (45, 51435667606) (50, 51563056410) (55, 51815016546) (60, 52058995516) (65, 52279295198) (70, 52395205914) (75, 52743764222) (80, 52881844171) (85, 52994196813) (90, 53317910632) 
+Execution Time:
+(0, 9.245) (5, 9.305) (10, 9.317) (15, 9.355) (20, 9.380) (25, 9.460) (30, 9.470) (35, 9.501) (40, 9.568) (45, 9.625) (50, 9.647) (55, 9.708) (60, 9.741) (65, 9.785) (70, 9.804) (75, 9.871) (80, 9.885) (85, 9.896) (90, 9.978) 
+The benchmark "Spamming 15% Collisions with  10 repetitions of action" caused  180728342.00 cache-misses and took  9306 ms
+The benchmark "Spamming 15% Collisions with  20 repetitions of action" caused  180165638.00 cache-misses and took  9332 ms
+The benchmark "Spamming 15% Collisions with  30 repetitions of action" caused  177541117.00 cache-misses and took  9301 ms
+The benchmark "Spamming 15% Collisions with  40 repetitions of action" caused  178584095.00 cache-misses and took  9345 ms
+The benchmark "Spamming 15% Collisions with  50 repetitions of action" caused  177874244.00 cache-misses and took  9390 ms
+The benchmark "Spamming 15% Collisions with  60 repetitions of action" caused  182706452.00 cache-misses and took  9296 ms
+The benchmark "Spamming 15% Collisions with  70 repetitions of action" caused  178661747.00 cache-misses and took  9254 ms
+The benchmark "Spamming 15% Collisions with  80 repetitions of action" caused  178833357.00 cache-misses and took  9286 ms
+The benchmark "Spamming 15% Collisions with  90 repetitions of action" caused  177582259.00 cache-misses and took  9256 ms
+The benchmark "Spamming 15% Collisions with 100 repetitions of action" caused  179589730.00 cache-misses and took  9332 ms
+The benchmark "Spamming 15% Collisions with 110 repetitions of action" caused  181528150.00 cache-misses and took  9247 ms
+The benchmark "Spamming 15% Collisions with 120 repetitions of action" caused  179793313.00 cache-misses and took  9196 ms
+The benchmark "Spamming 15% Collisions with 130 repetitions of action" caused  180088913.00 cache-misses and took  9227 ms
+The benchmark "Spamming 15% Collisions with 140 repetitions of action" caused  178930391.00 cache-misses and took  9155 ms
+The benchmark "Spamming 15% Collisions with 150 repetitions of action" caused  180357171.00 cache-misses and took  9214 ms
+The benchmark "Spamming 15% Collisions with 160 repetitions of action" caused  181087139.00 cache-misses and took  9281 ms
+The benchmark "Spamming 15% Collisions with 170 repetitions of action" caused  180246074.00 cache-misses and took  9226 ms
+The benchmark "Spamming 15% Collisions with 180 repetitions of action" caused  182950892.00 cache-misses and took  9167 ms
+The benchmark "Spamming 15% Collisions with 190 repetitions of action" caused  197002035.00 cache-misses and took  9198 ms
+The benchmark "Spamming 15% Collisions with 200 repetitions of action" caused  187920776.00 cache-misses and took  9302 ms
+Results for differing repetitions
+CacheMisses:
+(10, 180728342) (20, 180165638) (30, 177541117) (40, 178584095) (50, 177874244) (60, 182706452) (70, 178661747) (80, 178833357) (90, 177582259) (100, 179589730) (110, 181528150) (120, 179793313) (130, 180088913) (140, 178930391) (150, 180357171) (160, 181087139) (170, 180246074) (180, 182950892) (190, 197002035) (200, 187920776) 
+Cycles Time:
+(10, 49734819696) (20, 49901091366) (30, 49624147126) (40, 49900249840) (50, 50190729379) (60, 49622697713) (70, 49481170020) (80, 49632926400) (90, 49512695406) (100, 49785998003) (110, 49415765763) (120, 49075712801) (130, 49233273230) (140, 48911887798) (150, 49291011804) (160, 49518216622) (170, 49188432700) (180, 48431167573) (190, 49144580768) (200, 49696358089) 
+Execution Time:
+(10, 9.307) (20, 9.333) (30, 9.301) (40, 9.345) (50, 9.391) (60, 9.297) (70, 9.255) (80, 9.287) (90, 9.257) (100, 9.333) (110, 9.248) (120, 9.196) (130, 9.227) (140, 9.156) (150, 9.214) (160, 9.282) (170, 9.226) (180, 9.168) (190, 9.198) (200, 9.303)
+The benchmark "FDL Warmup"    caused  247857152.00 cache-misses and took  4702 ms
+The benchmark "FDL Insertion" caused  117132978.00 cache-misses and took  2247 ms
+The benchmark "FDL Lookup"    caused   91153439.00 cache-misses and took  2487 ms
+The benchmark "FDL Scan"      caused   17382927.00 cache-misses and took  1386 ms
+The benchmark "FDL Remove"    caused  115218884.00 cache-misses and took  2404 ms
+The benchmark "FDL Insertion" caused  117490238.00 cache-misses and took  2254 ms
+The benchmark "FDL Lookup"    caused   91048798.00 cache-misses and took  2537 ms
+The benchmark "FDL Scan"      caused   16673978.00 cache-misses and took  1388 ms
+The benchmark "FDL Remove"    caused  115361253.00 cache-misses and took  2394 ms
+The benchmark "FDL Insertion" caused  117220962.00 cache-misses and took  2231 ms
+The benchmark "FDL Lookup"    caused   91302977.00 cache-misses and took  2489 ms
+The benchmark "FDL Scan"      caused   17463307.00 cache-misses and took  1390 ms
+The benchmark "FDL Remove"    caused  115276281.00 cache-misses and took  2399 ms
+The benchmark "FDL Insertion" caused  117167330.00 cache-misses and took  2276 ms
+The benchmark "FDL Lookup"    caused   91079393.00 cache-misses and took  2530 ms
+The benchmark "FDL Scan"      caused   16672705.00 cache-misses and took  1388 ms
+The benchmark "FDL Remove"    caused  115277715.00 cache-misses and took  2406 ms
+The benchmark "FDL Insertion" caused  117247299.00 cache-misses and took  2237 ms
+The benchmark "FDL Lookup"    caused   91184273.00 cache-misses and took  2493 ms
+The benchmark "FDL Scan"      caused   17317760.00 cache-misses and took  1387 ms
+The benchmark "FDL Remove"    caused  115370518.00 cache-misses and took  2426 ms
+The benchmark "FDL Insertion" caused  117293020.00 cache-misses and took  2250 ms
+The benchmark "FDL Lookup"    caused   91029357.00 cache-misses and took  2499 ms
+The benchmark "FDL Scan"      caused   16736967.00 cache-misses and took  1399 ms
+The benchmark "FDL Remove"    caused  115410412.00 cache-misses and took  2399 ms
+The benchmark "FDL Insertion" caused  117087040.00 cache-misses and took  2238 ms
+The benchmark "FDL Lookup"    caused   90714784.00 cache-misses and took  2510 ms
+The benchmark "FDL Scan"      caused   17439896.00 cache-misses and took  1389 ms
+The benchmark "FDL Remove"    caused  115363586.00 cache-misses and took  2440 ms
+The benchmark "FDL Insertion" caused  117488721.00 cache-misses and took  2234 ms
+The benchmark "FDL Lookup"    caused   91288087.00 cache-misses and took  2551 ms
+The benchmark "FDL Scan"      caused   16747841.00 cache-misses and took  1390 ms
+The benchmark "FDL Remove"    caused  115142896.00 cache-misses and took  2406 ms
+The benchmark "FDL Insertion" caused  117227540.00 cache-misses and took  2247 ms
+The benchmark "FDL Lookup"    caused   91001565.00 cache-misses and took  2488 ms
+The benchmark "FDL Scan"      caused   17384963.00 cache-misses and took  1390 ms
+The benchmark "FDL Remove"    caused  115100807.00 cache-misses and took  2397 ms
+The benchmark "FDL Insertion" caused  117348551.00 cache-misses and took  2278 ms
+The benchmark "FDL Lookup"    caused   91164022.00 cache-misses and took  2487 ms
+The benchmark "FDL Scan"      caused   16720126.00 cache-misses and took  1392 ms
+The benchmark "FDL Remove"    caused  115273899.00 cache-misses and took  2404 ms
+Leaf Count: 23649
+Results for FDL All Operations
+CacheMisses:
+(0, 1172703679) (1, 910966695) (2, 170540470) (3, 1152796251) 
+Cycles Time:
+(0, 114661768507) (1, 129739857208) (2, 68823722260) (3, 124644232422) 
+Execution Time:
+(0, 22.498) (1, 25.075) (2, 13.904) (3, 24.078) 
+The benchmark "HashLeaf 10% collisions Warmup" caused  111501109.00 cache-misses and took  2093 ms
+The benchmark "HashLeaf 10% collisions Insert" caused   49345191.00 cache-misses and took   930 ms
+The benchmark "HashLeaf 10% collisions Lookup" caused   39044901.00 cache-misses and took  1066 ms
+The benchmark "HashLeaf 10% collisions Remove" caused   49532268.00 cache-misses and took  1024 ms
+The benchmark "HashLeaf 10% collisions Warmup" caused  109661200.00 cache-misses and took  2076 ms
+The benchmark "HashLeaf 10% collisions Insert" caused   47906337.00 cache-misses and took   958 ms
+The benchmark "HashLeaf 10% collisions Lookup" caused   36966658.00 cache-misses and took  1074 ms
+The benchmark "HashLeaf 10% collisions Remove" caused   47733320.00 cache-misses and took  1014 ms
+The benchmark "HashLeaf 10% collisions Warmup" caused  110107141.00 cache-misses and took  2086 ms
+The benchmark "HashLeaf 10% collisions Insert" caused   48203099.00 cache-misses and took   963 ms
+The benchmark "HashLeaf 10% collisions Lookup" caused   37988305.00 cache-misses and took  1035 ms
+The benchmark "HashLeaf 10% collisions Remove" caused   48578571.00 cache-misses and took  1017 ms
+The benchmark "HashLeaf 10% collisions Warmup" caused  109507260.00 cache-misses and took  2058 ms
+The benchmark "HashLeaf 10% collisions Insert" caused   48029835.00 cache-misses and took   951 ms
+The benchmark "HashLeaf 10% collisions Lookup" caused   37032377.00 cache-misses and took  1070 ms
+The benchmark "HashLeaf 10% collisions Remove" caused   47903041.00 cache-misses and took  1020 ms
+The benchmark "HashLeaf 20% collisions Warmup" caused  112672493.00 cache-misses and took  2146 ms
+The benchmark "HashLeaf 20% collisions Insert" caused   50015508.00 cache-misses and took   999 ms
+The benchmark "HashLeaf 20% collisions Lookup" caused   40381760.00 cache-misses and took  1086 ms
+The benchmark "HashLeaf 20% collisions Remove" caused   50132454.00 cache-misses and took  1053 ms
+The benchmark "HashLeaf 20% collisions Warmup" caused  119075809.00 cache-misses and took  2188 ms
+The benchmark "HashLeaf 20% collisions Insert" caused   52889537.00 cache-misses and took  1006 ms
+The benchmark "HashLeaf 20% collisions Lookup" caused   40187313.00 cache-misses and took  1110 ms
+The benchmark "HashLeaf 20% collisions Remove" caused   54397365.00 cache-misses and took  1051 ms
+The benchmark "HashLeaf 20% collisions Warmup" caused  114784362.00 cache-misses and took  2160 ms
+The benchmark "HashLeaf 20% collisions Insert" caused   50734382.00 cache-misses and took  1006 ms
+The benchmark "HashLeaf 20% collisions Lookup" caused   41461949.00 cache-misses and took  1107 ms
+The benchmark "HashLeaf 20% collisions Remove" caused   51004283.00 cache-misses and took  1062 ms
+The benchmark "HashLeaf 20% collisions Warmup" caused  118346374.00 cache-misses and took  2177 ms
+The benchmark "HashLeaf 20% collisions Insert" caused   52753247.00 cache-misses and took  1015 ms
+The benchmark "HashLeaf 20% collisions Lookup" caused   40133738.00 cache-misses and took  1120 ms
+The benchmark "HashLeaf 20% collisions Remove" caused   54242689.00 cache-misses and took  1115 ms
+The benchmark "HashLeaf 30% collisions Warmup" caused  117649886.00 cache-misses and took  2228 ms
+The benchmark "HashLeaf 30% collisions Insert" caused   52804744.00 cache-misses and took  1049 ms
+The benchmark "HashLeaf 30% collisions Lookup" caused   43896052.00 cache-misses and took  1135 ms
+The benchmark "HashLeaf 30% collisions Remove" caused   52309958.00 cache-misses and took  1083 ms
+The benchmark "HashLeaf 30% collisions Warmup" caused  121347837.00 cache-misses and took  2257 ms
+The benchmark "HashLeaf 30% collisions Insert" caused   55525123.00 cache-misses and took  1072 ms
+The benchmark "HashLeaf 30% collisions Lookup" caused   42579240.00 cache-misses and took  1148 ms
+The benchmark "HashLeaf 30% collisions Remove" caused   55577469.00 cache-misses and took  1104 ms
+The benchmark "HashLeaf 30% collisions Warmup" caused  117983473.00 cache-misses and took  2213 ms
+The benchmark "HashLeaf 30% collisions Insert" caused   53352591.00 cache-misses and took  1056 ms
+The benchmark "HashLeaf 30% collisions Lookup" caused   43956984.00 cache-misses and took  1145 ms
+The benchmark "HashLeaf 30% collisions Remove" caused   52719404.00 cache-misses and took  1110 ms
+The benchmark "HashLeaf 30% collisions Warmup" caused  121415024.00 cache-misses and took  2223 ms
+The benchmark "HashLeaf 30% collisions Insert" caused   55107747.00 cache-misses and took  1063 ms
+The benchmark "HashLeaf 30% collisions Lookup" caused   43350468.00 cache-misses and took  1184 ms
+The benchmark "HashLeaf 30% collisions Remove" caused   55727966.00 cache-misses and took  1116 ms
+The benchmark "HashLeaf 40% collisions Warmup" caused  120358960.00 cache-misses and took  2251 ms
+The benchmark "HashLeaf 40% collisions Insert" caused   55807642.00 cache-misses and took  1095 ms
+The benchmark "HashLeaf 40% collisions Lookup" caused   47201625.00 cache-misses and took  1168 ms
+The benchmark "HashLeaf 40% collisions Remove" caused   54672658.00 cache-misses and took  1115 ms
+The benchmark "HashLeaf 40% collisions Warmup" caused  123786668.00 cache-misses and took  2253 ms
+The benchmark "HashLeaf 40% collisions Insert" caused   57601401.00 cache-misses and took  1110 ms
+The benchmark "HashLeaf 40% collisions Lookup" caused   45650071.00 cache-misses and took  1179 ms
+The benchmark "HashLeaf 40% collisions Remove" caused   57462887.00 cache-misses and took  1129 ms
+The benchmark "HashLeaf 40% collisions Warmup" caused  120423042.00 cache-misses and took  2262 ms
+The benchmark "HashLeaf 40% collisions Insert" caused   56069031.00 cache-misses and took  1091 ms
+The benchmark "HashLeaf 40% collisions Lookup" caused   47112155.00 cache-misses and took  1173 ms
+The benchmark "HashLeaf 40% collisions Remove" caused   54768176.00 cache-misses and took  1109 ms
+The benchmark "HashLeaf 40% collisions Warmup" caused  123366987.00 cache-misses and took  2256 ms
+The benchmark "HashLeaf 40% collisions Insert" caused   57620440.00 cache-misses and took  1105 ms
+The benchmark "HashLeaf 40% collisions Lookup" caused   45800556.00 cache-misses and took  1177 ms
+The benchmark "HashLeaf 40% collisions Remove" caused   57574553.00 cache-misses and took  1169 ms
+The benchmark "HashLeaf 50% collisions Warmup" caused  123225852.00 cache-misses and took  2293 ms
+The benchmark "HashLeaf 50% collisions Insert" caused   58465442.00 cache-misses and took  1138 ms
+The benchmark "HashLeaf 50% collisions Lookup" caused   50432590.00 cache-misses and took  1240 ms
+The benchmark "HashLeaf 50% collisions Remove" caused   56443533.00 cache-misses and took  1135 ms
+The benchmark "HashLeaf 50% collisions Warmup" caused  126699935.00 cache-misses and took  2300 ms
+The benchmark "HashLeaf 50% collisions Insert" caused   60378457.00 cache-misses and took  1154 ms
+The benchmark "HashLeaf 50% collisions Lookup" caused   48438269.00 cache-misses and took  1223 ms
+The benchmark "HashLeaf 50% collisions Remove" caused   59911858.00 cache-misses and took  1189 ms
+The benchmark "HashLeaf 50% collisions Warmup" caused  123846596.00 cache-misses and took  2299 ms
+The benchmark "HashLeaf 50% collisions Insert" caused   58840852.00 cache-misses and took  1147 ms
+The benchmark "HashLeaf 50% collisions Lookup" caused   50102816.00 cache-misses and took  1205 ms
+The benchmark "HashLeaf 50% collisions Remove" caused   56668061.00 cache-misses and took  1146 ms
+The benchmark "HashLeaf 50% collisions Warmup" caused  127225085.00 cache-misses and took  2318 ms
+The benchmark "HashLeaf 50% collisions Insert" caused   60570458.00 cache-misses and took  1172 ms
+The benchmark "HashLeaf 50% collisions Lookup" caused   48703491.00 cache-misses and took  1222 ms
+The benchmark "HashLeaf 50% collisions Remove" caused   60218288.00 cache-misses and took  1170 ms
+The benchmark "HashLeaf 60% collisions Warmup" caused  126920022.00 cache-misses and took  2359 ms
+The benchmark "HashLeaf 60% collisions Insert" caused   61340194.00 cache-misses and took  1175 ms
+The benchmark "HashLeaf 60% collisions Lookup" caused   54535252.00 cache-misses and took  1271 ms
+The benchmark "HashLeaf 60% collisions Remove" caused   58816637.00 cache-misses and took  1160 ms
+The benchmark "HashLeaf 60% collisions Warmup" caused  127458068.00 cache-misses and took  2344 ms
+The benchmark "HashLeaf 60% collisions Insert" caused   62306794.00 cache-misses and took  1191 ms
+The benchmark "HashLeaf 60% collisions Lookup" caused   53716045.00 cache-misses and took  1240 ms
+The benchmark "HashLeaf 60% collisions Remove" caused   59083828.00 cache-misses and took  1167 ms
+The benchmark "HashLeaf 60% collisions Warmup" caused  127444130.00 cache-misses and took  2342 ms
+The benchmark "HashLeaf 60% collisions Insert" caused   61548240.00 cache-misses and took  1176 ms
+The benchmark "HashLeaf 60% collisions Lookup" caused   54791769.00 cache-misses and took  1236 ms
+The benchmark "HashLeaf 60% collisions Remove" caused   59004979.00 cache-misses and took  1163 ms
+The benchmark "HashLeaf 60% collisions Warmup" caused  127364369.00 cache-misses and took  2345 ms
+The benchmark "HashLeaf 60% collisions Insert" caused   61911765.00 cache-misses and took  1181 ms
+The benchmark "HashLeaf 60% collisions Lookup" caused   53893363.00 cache-misses and took  1237 ms
+The benchmark "HashLeaf 60% collisions Remove" caused   59051991.00 cache-misses and took  1159 ms
+The benchmark "HashLeaf 70% collisions Warmup" caused  132308653.00 cache-misses and took  2417 ms
+The benchmark "HashLeaf 70% collisions Insert" caused   64713153.00 cache-misses and took  1219 ms
+The benchmark "HashLeaf 70% collisions Lookup" caused   59151113.00 cache-misses and took  1270 ms
+The benchmark "HashLeaf 70% collisions Remove" caused   61433322.00 cache-misses and took  1194 ms
+The benchmark "HashLeaf 70% collisions Warmup" caused  131620357.00 cache-misses and took  2405 ms
+The benchmark "HashLeaf 70% collisions Insert" caused   64844694.00 cache-misses and took  1187 ms
+The benchmark "HashLeaf 70% collisions Lookup" caused   57620629.00 cache-misses and took  1271 ms
+The benchmark "HashLeaf 70% collisions Remove" caused   61279609.00 cache-misses and took  1180 ms
+The benchmark "HashLeaf 70% collisions Warmup" caused  132333932.00 cache-misses and took  2437 ms
+The benchmark "HashLeaf 70% collisions Insert" caused   64500314.00 cache-misses and took  1213 ms
+The benchmark "HashLeaf 70% collisions Lookup" caused   58805111.00 cache-misses and took  1276 ms
+The benchmark "HashLeaf 70% collisions Remove" caused   61434647.00 cache-misses and took  1187 ms
+The benchmark "HashLeaf 70% collisions Warmup" caused  132024928.00 cache-misses and took  2423 ms
+The benchmark "HashLeaf 70% collisions Insert" caused   64857417.00 cache-misses and took  1220 ms
+The benchmark "HashLeaf 70% collisions Lookup" caused   57224691.00 cache-misses and took  1277 ms
+The benchmark "HashLeaf 70% collisions Remove" caused   61340838.00 cache-misses and took  1181 ms
+The benchmark "HashLeaf 80% collisions Warmup" caused  135916886.00 cache-misses and took  2452 ms
+The benchmark "HashLeaf 80% collisions Insert" caused   67633130.00 cache-misses and took  1252 ms
+The benchmark "HashLeaf 80% collisions Lookup" caused   63677732.00 cache-misses and took  1304 ms
+The benchmark "HashLeaf 80% collisions Remove" caused   63701734.00 cache-misses and took  1218 ms
+The benchmark "HashLeaf 80% collisions Warmup" caused  136255177.00 cache-misses and took  2451 ms
+The benchmark "HashLeaf 80% collisions Insert" caused   68161475.00 cache-misses and took  1267 ms
+The benchmark "HashLeaf 80% collisions Lookup" caused   62184157.00 cache-misses and took  1305 ms
+The benchmark "HashLeaf 80% collisions Remove" caused   63877976.00 cache-misses and took  1215 ms
+The benchmark "HashLeaf 80% collisions Warmup" caused  135580200.00 cache-misses and took  2462 ms
+The benchmark "HashLeaf 80% collisions Insert" caused   67580763.00 cache-misses and took  1257 ms
+The benchmark "HashLeaf 80% collisions Lookup" caused   63889101.00 cache-misses and took  1351 ms
+The benchmark "HashLeaf 80% collisions Remove" caused   63645332.00 cache-misses and took  1209 ms
+The benchmark "HashLeaf 80% collisions Warmup" caused  135581782.00 cache-misses and took  2455 ms
+The benchmark "HashLeaf 80% collisions Insert" caused   67921047.00 cache-misses and took  1260 ms
+The benchmark "HashLeaf 80% collisions Lookup" caused   61990190.00 cache-misses and took  1327 ms
+The benchmark "HashLeaf 80% collisions Remove" caused   64000203.00 cache-misses and took  1218 ms
+The benchmark "HashLeaf 90% collisions Warmup" caused  140356636.00 cache-misses and took  2500 ms
+The benchmark "HashLeaf 90% collisions Insert" caused   71044461.00 cache-misses and took  1314 ms
+The benchmark "HashLeaf 90% collisions Lookup" caused   68811162.00 cache-misses and took  1367 ms
+The benchmark "HashLeaf 90% collisions Remove" caused   67085182.00 cache-misses and took  1276 ms
+The benchmark "HashLeaf 90% collisions Warmup" caused  140503894.00 cache-misses and took  2492 ms
+The benchmark "HashLeaf 90% collisions Insert" caused   71453705.00 cache-misses and took  1340 ms
+The benchmark "HashLeaf 90% collisions Lookup" caused   67403876.00 cache-misses and took  1359 ms
+The benchmark "HashLeaf 90% collisions Remove" caused   67030155.00 cache-misses and took  1252 ms
+The benchmark "HashLeaf 90% collisions Warmup" caused  140255138.00 cache-misses and took  2558 ms
+The benchmark "HashLeaf 90% collisions Insert" caused   71241990.00 cache-misses and took  1245 ms
+The benchmark "HashLeaf 90% collisions Lookup" caused   68279334.00 cache-misses and took  1331 ms
+The benchmark "HashLeaf 90% collisions Remove" caused   66357609.00 cache-misses and took  1231 ms
+The benchmark "HashLeaf 90% collisions Warmup" caused  140678152.00 cache-misses and took  2571 ms
+The benchmark "HashLeaf 90% collisions Insert" caused   71107537.00 cache-misses and took  1306 ms
+The benchmark "HashLeaf 90% collisions Lookup" caused   66764864.00 cache-misses and took  1347 ms
+The benchmark "HashLeaf 90% collisions Remove" caused   66807419.00 cache-misses and took  1235 ms
+Results for HashLeaf Insert Performance
+CacheMisses:
+(10, 193484462) (20, 206392674) (30, 216790205) (40, 227098514) (50, 238255209) (60, 247106993) (70, 258915578) (80, 271296415) (90, 284847693) 
+Cycles Time:
+(10, 18187684092) (20, 19039156312) (30, 20154910231) (40, 21019164988) (50, 22164504161) (60, 22751372199) (70, 23585983228) (80, 24387646060) (90, 25776990920) 
+Execution Time:
+(10, 3.804) (20, 4.028) (30, 4.241) (40, 4.404) (50, 4.613) (60, 4.724) (70, 4.841) (80, 5.039) (90, 5.208) 
+Results for HashLeaf Lookup Performance
+CacheMisses:
+(10, 151032241) (20, 162164760) (30, 173782744) (40, 185764407) (50, 197677166) (60, 216936429) (70, 232801544) (80, 251741180) (90, 271259236) 
+Cycles Time:
+(10, 21565327771) (20, 22189909247) (30, 23154259048) (40, 23573108848) (50, 24548774090) (60, 25128157167) (70, 25642766396) (80, 26715620627) (90, 27373121945) 
+Execution Time:
+(10, 4.247) (20, 4.425) (30, 4.614) (40, 4.700) (50, 4.892) (60, 4.986) (70, 5.095) (80, 5.289) (90, 5.405) 
+Results for HashLeaf Remove Performance
+CacheMisses:
+(10, 193747200) (20, 209776791) (30, 216334797) (40, 224478274) (50, 233241740) (60, 235957435) (70, 245488416) (80, 255225245) (90, 267280365) 
+Cycles Time:
+(10, 20400252329) (20, 21724241170) (30, 22107635314) (40, 22611160796) (50, 23227382857) (60, 23366932973) (70, 23765155147) (80, 24380010979) (90, 25022182614) 
+Execution Time:
+(10, 4.077) (20, 4.283) (30, 4.416) (40, 4.524) (50, 4.642) (60, 4.651) (70, 4.744) (80, 4.862) (90, 4.996) 

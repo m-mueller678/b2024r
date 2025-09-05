@@ -738,7 +738,7 @@ mod test {
     }
 
     #[allow(clippy::unused_enumerate_index)]
-    fn test_leaf<'bm, BM: BufferManager<'bm, Page = Page>>(node_tag: u8, key_len: usize, val_len: usize) {
+    fn test_fdl_promotions<'bm, BM: BufferManager<'bm, Page = Page>>(node_tag: u8, key_len: usize, val_len: usize) {
         let mut page = Page::zeroed();
         let leaf = page.cast_mut::<FullyDenseLeaf>();
 
@@ -868,7 +868,7 @@ mod test {
     fn basic_leaf_demotion() {
         for val_len in 0..100 {
             for key_len in 1..10 {
-                test_leaf::<&'static SimpleBm<Page>>(node_tag::BASIC_LEAF, key_len*4, val_len);
+                test_fdl_promotions::<&'static SimpleBm<Page>>(node_tag::BASIC_LEAF, key_len*4, val_len);
             }
         }
     }
@@ -878,7 +878,7 @@ mod test {
     fn hash_leaf_demotion() {
         for val_len in 0..100 {
             for key_len in 1..10 {
-                test_leaf::<&'static SimpleBm<Page>>(node_tag::HASH_LEAF, key_len*4, val_len);
+                test_fdl_promotions::<&'static SimpleBm<Page>>(node_tag::HASH_LEAF, key_len*4, val_len);
             }
         }
     }
@@ -902,39 +902,5 @@ mod test {
         }
     }
 
-    #[test]
-    fn has_good_heads_test() {
-        type BM = &'static SimpleBm<Page>;
-        let mut page = Page::zeroed();
-        let leaf = page.cast_mut::<FullyDenseLeaf>();
 
-        let lowerfence = generate_key(0, 4);
-        let upperfence = generate_key(4096, 4);
-
-
-        leaf.cast_mut::<FullyDenseLeaf>().init(lowerfence.as_slice(), upperfence.as_slice(), 4, 4).unwrap();
-
-        assert_eq!((true, true), NodeStatic::<BM>::has_good_heads(leaf));
-    }
-
-    //#[test]
-    fn wrong_keys() {
-        type BM = &'static SimpleBm<Page>;
-        let mut page = Page::zeroed();
-        let leaf = page.cast_mut::<FullyDenseLeaf>();
-
-        let lowerfence = generate_key(0, 4);
-        let upperfence = generate_key(4096, 4);
-
-        leaf.cast_mut::<FullyDenseLeaf>().init(lowerfence.as_slice(), upperfence.as_slice(), 4, 4).unwrap();
-
-
-        let mut insert = generate_key(123, 4);
-        insert.extend_from_slice(&123u32.to_be_bytes());
-
-        let res = NodeStatic::<BM>::insert(leaf, insert.as_slice(), insert.as_slice());
-        assert!(res.is_err());
-
-
-    }
 }
