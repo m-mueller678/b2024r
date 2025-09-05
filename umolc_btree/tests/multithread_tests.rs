@@ -41,7 +41,6 @@ fn adaptive_promotion_multithreaded<KG: KeyGenerator>(amount: usize, threads: u1
 
     let keysets = prepare_keyset::<KG>(amount, threads);
 
-    println!("Finished setting up keysets!");
 
     thread::scope(|s| {
         for i in 0..threads {
@@ -53,9 +52,7 @@ fn adaptive_promotion_multithreaded<KG: KeyGenerator>(amount: usize, threads: u1
                 let mut scrambled = check.clone();
                 fastrand::shuffle(&mut scrambled);
 
-                println!("Thread {thread_id} is waiting!");
                 barrier_ref.wait();
-                println!("Thread {thread_id} has started!");
 
 
                 for iteration in 0..iterations {
@@ -99,7 +96,6 @@ fn adaptive_promotion_multithreaded<KG: KeyGenerator>(amount: usize, threads: u1
                         });
                     }
                 }
-                println!("Thread {thread_id} is done!");
 
             });
         }
@@ -131,7 +127,6 @@ fn point_operations_multithreaded<KG: KeyGenerator>(amount: usize, threads: u16,
 
     let keysets = prepare_keyset::<KG>(amount, threads);
 
-    println!("Finished setting up keysets!");
 
     thread::scope(|s| {
         for i in 0..threads {
@@ -148,7 +143,6 @@ fn point_operations_multithreaded<KG: KeyGenerator>(amount: usize, threads: u16,
 
 
                 for iteration in 0..iterations {
-                    println!("Iteration {iteration} in thread {thread_id}");
                     for i in 0..scrambled.len() {
                         let (key, value) = scrambled.get(i).unwrap();
 
@@ -188,7 +182,6 @@ fn point_operations_multithreaded<KG: KeyGenerator>(amount: usize, threads: u16,
                         }
                     }
                 }
-                println!("Thread {thread_id} is done!");
             });
         }
     });
@@ -258,7 +251,6 @@ fn scan_while_insert<KG: KeyGenerator>(amount: usize, threads: u16) {
                 let mut scrambled = check.clone();
                 fastrand::shuffle(&mut scrambled);
 
-                println!("Thread {thread_id} is ready!");
                 barrier_ref.wait();
 
 
@@ -269,7 +261,6 @@ fn scan_while_insert<KG: KeyGenerator>(amount: usize, threads: u16) {
                     yield_now();
                 }
 
-                println!("Thread {thread_id} is done!");
             });
         }
         let tree_ref = &tree;
@@ -277,7 +268,6 @@ fn scan_while_insert<KG: KeyGenerator>(amount: usize, threads: u16) {
 
         let target = amount * threads as usize;
         s.spawn(move || {
-            println!("Scan Thread is ready!");
             barrier_ref.wait();
 
             loop {
@@ -292,7 +282,6 @@ fn scan_while_insert<KG: KeyGenerator>(amount: usize, threads: u16) {
                 }
             }
 
-            println!("Scan Thread is done!");
         });
     });
 }
@@ -337,7 +326,6 @@ fn scan_while_lookup<KG: KeyGenerator>(amount: usize, threads: u16) {
                 let mut scrambled = check.clone();
                 fastrand::shuffle(&mut scrambled);
 
-                println!("Thread {thread_id} is ready!");
                 barrier_ref.wait();
 
                 for _ in 0..10 {
@@ -352,7 +340,6 @@ fn scan_while_lookup<KG: KeyGenerator>(amount: usize, threads: u16) {
                 }
 
 
-                println!("Thread {thread_id} is done!");
             });
         }
         let tree_ref = &tree;
@@ -360,7 +347,6 @@ fn scan_while_lookup<KG: KeyGenerator>(amount: usize, threads: u16) {
 
         let target = amount * threads as usize;
         s.spawn(move || {
-            println!("Scan Thread is ready!");
             barrier_ref.wait();
 
             for _ in 0..10 {
@@ -374,11 +360,9 @@ fn scan_while_lookup<KG: KeyGenerator>(amount: usize, threads: u16) {
                 });
 
                 assert_eq!(counter, target);
-                println!("Scan found all values");
                 yield_now();
             }
 
-            println!("Scan Thread is done!");
         });
     });
 }
@@ -429,7 +413,6 @@ fn scan_while_remove<KG: KeyGenerator>(amount: usize, threads: u16) {
                     let mut scrambled = check.clone();
                     fastrand::shuffle(&mut scrambled);
 
-                    println!("Thread {thread_id} is ready!");
                     barrier_ref.wait();
 
                     for i in 0..scrambled.len() {
@@ -441,7 +424,6 @@ fn scan_while_remove<KG: KeyGenerator>(amount: usize, threads: u16) {
 
 
 
-                    println!("Thread {thread_id} is done!");
                 });
             }
         }
@@ -452,7 +434,6 @@ fn scan_while_remove<KG: KeyGenerator>(amount: usize, threads: u16) {
         let max = amount * threads as usize;
 
         let scan_ok = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            println!("Scan Thread is ready!");
             barrier_ref.wait();
 
             loop {
@@ -466,7 +447,6 @@ fn scan_while_remove<KG: KeyGenerator>(amount: usize, threads: u16) {
                 }
             }
 
-            println!("Scan Thread is done!");
         }));
         assert!(scan_ok.is_ok(), "scan panicked");
 

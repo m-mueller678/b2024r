@@ -12,6 +12,7 @@ use itertools::Itertools;
 use std::cell::Cell;
 use std::fmt::{Debug, Display, Formatter};
 use std::mem::{offset_of, MaybeUninit};
+use std::sync::atomic::{AtomicU8, Ordering};
 use std::usize;
 use umolc::{o_project, BufferManager, OPtr, OlcErrorHandler, PageId};
 
@@ -350,8 +351,9 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeStatic<'bm, BM> for FullyDens
         (keys, values)
     }
 
-    fn set_scan_counter(&mut self, counter: u8) {
-        self.common.scan_counter = counter;
+    fn set_scan_counter(&mut self, counter: &AtomicU8) {
+        let val = counter.load(Ordering::Relaxed);
+        self.common.scan_counter.store(val, Ordering::Relaxed);
     }
 
     fn has_good_heads(&self) -> (bool, bool) {
@@ -439,10 +441,10 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeDynamic<'bm, BM> for FullyDen
         debug_assert!(self.capacity as usize + right.capacity as usize == old_capacity, "Capacities don't add up: {:?} + {:?} != {old_capacity}", self.capacity, right.capacity);
         debug_assert!(self.common.upper_fence_len <= 4);
         debug_assert!(right.reference == self.reference + self.capacity as u32, "References do not match: {:?} + {:?} != {:?}", self.reference, self.capacity, right.reference);
-        
 
-        right.common.scan_counter = 255;
-        self.common.scan_counter = 255;
+
+        right.common.scan_counter.store(255, Ordering::Relaxed);
+        self.common.scan_counter.store(255, Ordering::Relaxed);
         Ok(())
     }
 
@@ -545,8 +547,8 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeDynamic<'bm, BM> for FullyDen
         self.common.tag
     }
 
-    fn get_scan_counter(&self) -> u8 {
-        self.common.scan_counter
+    fn get_scan_counter(&self) -> &AtomicU8 {
+        &self.common.scan_counter
     }
     fn get_count(&self) -> u16 {
         self.common.count
@@ -630,7 +632,7 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeDynamic<'bm, BM> for FullyDen
 
                 let mut np = self.reference;
 
-                let scan_counter = self.common.scan_counter;
+                let scan_counter = &self.common.scan_counter;
                 let mut tmp: BasicLeaf = BasicLeaf::zeroed();
                 NodeStatic::<BM>::init(&mut tmp, self.lower_fence(), self.upper_fence_combined(), None);
                 for i in 0..self.capacity as usize {
@@ -647,14 +649,14 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeDynamic<'bm, BM> for FullyDen
                     np+=1;
                 }
 
-                NodeStatic::<BM>::set_scan_counter(&mut tmp, scan_counter);
+                NodeStatic::<BM>::set_scan_counter(&mut tmp, &scan_counter);
                 *self.as_page_mut() = tmp.copy_page();
             },
             node_tag::HASH_LEAF => {
 
                 let mut buffer: [MaybeUninit<u8>; 512] = unsafe { MaybeUninit::uninit().assume_init() };
                 let mut tmp: HashLeaf = HashLeaf::zeroed();
-                let scan_counter = self.common.scan_counter;
+                let scan_counter = &self.common.scan_counter;
                 NodeStatic::<BM>::init(&mut tmp, self.lower_fence(), self.upper_fence_combined(), None);
                 for i in 0..self.capacity as usize {
                     if self.get_bit_direct(i) {
@@ -670,16 +672,13 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeDynamic<'bm, BM> for FullyDen
                     }
 
                 }
-                NodeStatic::<BM>::set_scan_counter(&mut tmp, scan_counter);
+                NodeStatic::<BM>::set_scan_counter(&mut tmp, &scan_counter);
                 *self.as_page_mut() = tmp.copy_page();
             },
             _ => unimplemented!(),
         }
     }
 
-    fn qualifies_for_promote(&self) -> Option<u8> {
-        None
-    }
     fn retry_later(&mut self) {
         unreachable!();
     }

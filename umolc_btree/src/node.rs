@@ -10,7 +10,7 @@ use static_assertions::const_assert_eq;
 use std::{assert, fmt};
 use std::fmt::{Debug, Formatter};
 use std::mem::{swap, transmute, MaybeUninit};
-use std::sync::atomic::AtomicU8;
+use std::sync::atomic::{AtomicU8, Ordering};
 use umolc::{
     o_project, BufferManager, BufferManagerExt, BufferManagerGuard, ExclusiveGuard, OPtr, OlcErrorHandler, PageId,
 };
@@ -36,7 +36,7 @@ const NODE_TAIL_SIZE: usize = PAGE_SIZE - size_of::<CommonNodeHead>();
 #[repr(C)]
 pub struct CommonNodeHead {
     pub tag: u8,
-    pub scan_counter: u8,
+    pub scan_counter: AtomicU8,
     pub prefix_len: u16,
     pub count: u16,
     pub lower_fence_len: u16,
@@ -251,7 +251,7 @@ pub trait NodeStatic<'bm, BM: BufferManager<'bm, Page = Page>>: NodeDynamic<'bm,
 
     fn to_debug_kv(&self) -> (Vec<Vec<u8>>, Vec<Vec<u8>>);
 
-    fn set_scan_counter(&mut self, counter: u8);
+    fn set_scan_counter(&mut self, counter: &AtomicU8);
 
     fn has_good_heads(&self) -> (bool, bool);
 }
@@ -268,15 +268,13 @@ pub trait NodeDynamic<'bm, BM: BufferManager<'bm, Page = Page>>: ToFromPage + No
 
     fn get_node_tag(&self) -> u8;
 
-    fn get_scan_counter(&self) -> u8;
+    fn get_scan_counter(&self) -> &AtomicU8;
 
     fn get_count(&self) -> u16;
 
     fn can_promote(&self, to: u8) -> Result<(), PromoteError>;
 
     fn promote(&mut self, to: u8);
-
-    fn qualifies_for_promote(&self) -> Option<u8>;
 
     fn retry_later (&mut self);
 }
@@ -507,25 +505,6 @@ impl Page {
         invoke_all_nodes!(impl_case);
         panic!("unexpected node tag: {tag}");
     }
-
-
-    pub fn increase_scan_counter(&mut self){
-        if self.common.scan_counter == 255 {
-            return;
-        }
-        if self.common.scan_counter < 3 {
-            self.common.scan_counter += 1;
-        }
-    }
-
-    pub fn decrease_scan_counter(&mut self) {
-        if self.common.scan_counter == 255 {
-            return;
-        }
-        else if self.common.scan_counter > 0 {
-            self.common.scan_counter -= 1;
-        }
-    }
 }
 
 pub fn o_ptr_lookup_inner<'bm, BM: BufferManager<'bm, Page = Page>>(
@@ -597,5 +576,43 @@ pub fn find_separator<'a, 'bm, BM: BufferManager<'bm, Page = Page>, N: NodeStati
             .unwrap();
         let sep = get_key(best_split).slice(..common_prefix + 1);
         (best_split, node.as_page().prefix().join(sep))
+    }
+}
+
+
+pub trait OPtrScanCounterExt<O: OlcErrorHandler> {
+    fn increase_scan_counter(self);
+    fn decrease_scan_counter(self);
+}
+
+impl<'a, O: OlcErrorHandler> OPtrScanCounterExt<O> for OPtr<'a, Page, O> {
+    #[inline]
+    fn increase_scan_counter(self) {
+        unsafe {
+            let sc: &AtomicU8 = &(*(self.to_raw())).common.scan_counter;
+            let _ = sc.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |cur| {
+                match cur {
+                    255 => None,
+                    0..=2 => Some(cur + 1),
+                    3 => None,
+                    _ => None,
+                }
+            });
+        }
+    }
+
+    #[inline]
+    fn decrease_scan_counter(self) {
+        unsafe {
+            let sc: &AtomicU8 = &(*(self.to_raw())).common.scan_counter;
+            let _ = sc.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |cur| {
+                match cur {
+                    255 => None,
+                    1..=3 => Some(cur - 1),
+                    0 => None,
+                    _ => None,
+                }
+            });
+        }
     }
 }

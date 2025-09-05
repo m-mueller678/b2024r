@@ -1,13 +1,12 @@
 use crate::basic_node::{BasicInner, BasicLeaf};
 use crate::hash_leaf::HashLeaf;
 use crate::key_source::SourceSlice;
-use crate::node::{node_tag, o_ptr_is_inner, o_ptr_lookup_inner, o_ptr_lookup_leaf, page_cast, page_cast_mut, page_id_to_bytes,
-                  CommonNodeHead, NodeDynamic, NodeDynamicAuto, NodeStatic, Page, PromoteError, ToFromPageExt,
-                  PAGE_SIZE};
+use crate::node::{node_tag, o_ptr_is_inner, o_ptr_lookup_inner, o_ptr_lookup_leaf, page_cast, page_cast_mut, page_id_to_bytes, CommonNodeHead, NodeDynamic, NodeDynamicAuto, NodeStatic, OPtrScanCounterExt, Page, PromoteError, ToFromPageExt, PAGE_SIZE};
 use crate::{define_node, MAX_KEY_SIZE, MAX_VAL_SIZE};
 use std::fmt::{Debug, Formatter};
 use std::marker::PhantomData;
 use std::mem::{size_of, MaybeUninit};
+use std::sync::atomic::{AtomicU8, Ordering};
 use bstr::BStr;
 use umolc::{
     o_project, BufferManageGuardUpgrade, BufferManager, BufferManagerExt, BufferManagerGuard, ExclusiveGuard, OPtr,
@@ -30,7 +29,7 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> Tree<'bm, BM> {
             let meta = page_cast_mut::<_, MetadataPage>(&mut *meta_guard);
             meta.root = root_guard.page_id();
             meta.common.tag = node_tag::METADATA_MARKER;
-            meta.common.scan_counter = 3;
+            meta.common.scan_counter.store(3, Ordering::Relaxed);
         }
         NodeStatic::<BM>::init(root_guard.cast_mut::<BasicLeaf>(), &[][..], &[][..], None);
 
@@ -164,7 +163,7 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> Tree<'bm, BM> {
 
 
 
-            let ret = callback(node.as_dyn_node::<BM>().get_node_tag(), node.as_dyn_node::<BM>().get_scan_counter(), node.as_dyn_node::<BM>().get_count());
+            let ret = callback(node.as_dyn_node::<BM>().get_node_tag(), node.as_dyn_node::<BM>().get_scan_counter().load(Ordering::Relaxed), node.as_dyn_node::<BM>().get_count());
 
             if ret {
                 return;
@@ -189,9 +188,10 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> Tree<'bm, BM> {
     fn try_remove(&self, k: &[u8], removed: &mut bool) {
         let [parent, node] = self.descend(k, None);
 
+        let node = self.decrease_scan_counter(node);
+
         let mut node: BM::GuardX = node.upgrade();
 
-        self.decrease_scan_counter_x(&mut node);
 
         if node.as_dyn_node_mut::<BM>().leaf_remove(k).is_some() {
             *removed = true;
@@ -263,8 +263,8 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> Tree<'bm, BM> {
 
     fn try_insert(&self, k: &[u8], val: &[u8]) -> Option<()> {
         let [parent, node] = self.descend(k, None);
+        let node = self.decrease_scan_counter(node);
         let mut node: BM::GuardX = node.upgrade();
-        self.decrease_scan_counter_x(&mut node);
 
 
         match node.as_dyn_node_mut::<BM>().insert_leaf(k, val) {
@@ -354,63 +354,57 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> Tree<'bm, BM> {
         path
     }
 
-    fn decrease_scan_counter(&self, node: BM::GuardO) -> BM::GuardO{
+    fn decrease_scan_counter(&self, mut node: BM::GuardO) -> BM::GuardO{
         if fastrand::u8(..100) < 5 {
-            let mut node: BM::GuardX = node.upgrade();
-            node.decrease_scan_counter();
+            node.o_ptr().decrease_scan_counter();
 
-            self.adaptive_promotion(&mut node);
-
-            return self.downgrade_guard(node);
+            let node = self.adaptive_promotion(node);
+            return node;
         }
         node
     }
 
 
-    fn increase_scan_counter(&self, node: BM::GuardO) -> BM::GuardO{
+    fn increase_scan_counter(&self, mut node: BM::GuardO) -> BM::GuardO{
         if fastrand::u8(..100) < 15 {
-            let mut node: BM::GuardX = node.upgrade();
-            node.increase_scan_counter();
+            node.o_ptr().increase_scan_counter();
 
-            self.adaptive_promotion(&mut node);
-
-            return self.downgrade_guard(node);
+            let node = self.adaptive_promotion(node);
+            return node;
         }
         node
     }
 
 
-    fn increase_scan_counter_x(&self, node: &mut BM::GuardX){
-        if fastrand::u8(..100) < 15 {
-            node.increase_scan_counter();
-
-            self.adaptive_promotion(node);
-        }
-    }
-
-    fn decrease_scan_counter_x(&self, node: &mut BM::GuardX) {
-        if fastrand::u8(..100) < 5 {
-            node.decrease_scan_counter();
 
 
-            self.adaptive_promotion(node);
-        }
-    }
+    fn adaptive_promotion (&self, mut node: BM::GuardO) -> BM::GuardO{
+        let o: OPtr<'_, Page, BM::OlcEH> = node.o_ptr();
 
-    fn adaptive_promotion (&self, node: &mut BM::GuardX) {
+        let tag: u8 = o_project!(o.common.tag).r();
+
+        let scan: u8 = unsafe {
+            (&(*(o.to_raw() as *const Page)).common.scan_counter).load(Ordering::Relaxed)
+        };
+
+
         #[cfg(not(feature = "disallow_promotions"))]
-        match node.as_dyn_node::<BM>().qualifies_for_promote() {
-            None => {
-            },
-            Some(to) => {
-                if node.as_dyn_node::<BM>().can_promote(to).is_ok() {
-                    node.as_dyn_node_mut::<BM>().promote(to);
-                }
-                else {
-                    node.as_dyn_node_mut::<BM>().retry_later();
-                }
-            },
+        if (tag == 251 && scan == 0) || (tag==252 && scan >= 3) {
+            let mut node: BM::GuardX = node.upgrade();
+
+            let to = if tag == 251 {252} else {251};
+
+            if node.as_dyn_node::<BM>().can_promote(to).is_ok() {
+                node.as_dyn_node_mut::<BM>().promote(to);
+            }
+            else {
+                node.as_dyn_node_mut::<BM>().retry_later();
+            }
+
+            return self.downgrade_guard(node);
         }
+
+        node
     }
 
 
@@ -481,7 +475,7 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeStatic<'bm, BM> for MetadataP
         (Vec::new(), vec![page_id_to_bytes(self.root).to_vec()])
     }
 
-    fn set_scan_counter(&mut self, _counter: u8) {
+    fn set_scan_counter(&mut self, _counter: &AtomicU8) {
         unimplemented!()
     }
 
@@ -513,7 +507,7 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeDynamic<'bm, BM> for Metadata
         unimplemented!()
     }
 
-    fn get_scan_counter(&self) -> u8 {
+    fn get_scan_counter(&self) -> &AtomicU8 {
         unimplemented!()
     }
 
@@ -529,9 +523,6 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeDynamic<'bm, BM> for Metadata
         unimplemented!()
     }
 
-    fn qualifies_for_promote(&self) -> Option<u8> {
-        unimplemented!()
-    }
 
     fn retry_later(&mut self) {
         todo!()

@@ -12,6 +12,7 @@ use std::fmt::{Debug, Display, Formatter};
 use std::vec::Vec;
 use std::mem::{offset_of, MaybeUninit};
 use std::ops::Range;
+use std::sync::atomic::{AtomicU8, Ordering};
 use umolc::{o_project, BufferManager, OPtr, OlcErrorHandler, PageId};
 use crate::basic_node::BasicLeaf;
 use crate::hash_leaf::PromoteError::{Capacity, Keys, ValueLen};
@@ -275,8 +276,9 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeStatic<'bm, BM> for HashLeaf 
         (heads_first, heads_second)
     }
 
-    fn set_scan_counter(&mut self, counter: u8) {
-        self.common.scan_counter = counter;
+    fn set_scan_counter(&mut self, counter: &AtomicU8) {
+        let val = counter.load(Ordering::Relaxed);
+        self.common.scan_counter.store(val, Ordering::Relaxed);
     }
 }
 
@@ -288,10 +290,10 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeDynamic<'bm, BM> for HashLeaf
         }
 
         let (lft,rgth) = NodeStatic::<BM>::has_good_heads(self);
-
-        let scan_counter = self.common.scan_counter;
-
         self.sort();
+
+        let scan_counter = &self.common.scan_counter;
+
         let mut left = Self::zeroed();
         let count = self.common.count as usize;
         let (low_count, sep_key) = find_separator::<BM, _>(self, |i| self.heap_key(i));
@@ -316,17 +318,19 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeDynamic<'bm, BM> for HashLeaf
         left.validate();
         right.validate();
 
+        let current = scan_counter.load(Ordering::Relaxed);
+
         if rgth {
-            right.common.scan_counter = 255;
+            right.common.scan_counter.store(255, Ordering::Relaxed);
         }
         else {
-            right.common.scan_counter = if scan_counter == 255 { 3 } else { scan_counter };
+            right.common.scan_counter.store(if current == 255 { 3 } else { current }, Ordering::Relaxed);
         }
         if lft {
-            left.common.scan_counter = 255;
+            left.common.scan_counter.store(255, Ordering::Relaxed);
         }
         else {
-            left.common.scan_counter = if scan_counter == 255 { 3 } else { scan_counter };
+            left.common.scan_counter.store(if current == 255 { 3 } else { current }, Ordering::Relaxed);
         }
 
         *self = left;
@@ -429,8 +433,8 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeDynamic<'bm, BM> for HashLeaf
         self.common.tag
     }
 
-    fn get_scan_counter(&self) -> u8 {
-        self.common.scan_counter
+    fn get_scan_counter(&self) -> &AtomicU8 {
+        &self.common.scan_counter
     }
 
     fn get_count(&self) -> u16 {
@@ -557,7 +561,7 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeDynamic<'bm, BM> for HashLeaf
                 let count = self.common.count as usize;
                 let prefix_len = self.common.prefix_len as usize;
 
-                let scan_counter = self.common.scan_counter;
+                let scan_counter = &self.common.scan_counter;
 
                 let first_key = self.heap_key(0);
                 let first_val = self.heap_val(0);
@@ -580,12 +584,12 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeDynamic<'bm, BM> for HashLeaf
                     full_key.extend_from_slice(suffix);
                     fdl.force_insert::<BM::OlcEH>(full_key.as_slice(), val);
                 }
-                NodeStatic::<BM>::set_scan_counter(&mut fdl, scan_counter);
+                NodeStatic::<BM>::set_scan_counter(&mut fdl, &scan_counter);
                 *self.as_page_mut() = fdl.copy_page();
             },
             node_tag::BASIC_LEAF => {
                 let count = self.common.count as usize;
-                let scan_counter = self.common.scan_counter;
+                let scan_counter = &self.common.scan_counter;
 
                 let mut basic_leaf = BasicLeaf::zeroed();
                 NodeStatic::<BM>::init(&mut basic_leaf, self.lower_fence(), self.upper_fence_combined(), None);
@@ -604,29 +608,19 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeDynamic<'bm, BM> for HashLeaf
                     }
                 }
 
-                NodeStatic::<BM>::set_scan_counter(&mut basic_leaf, scan_counter);
+                NodeStatic::<BM>::set_scan_counter(&mut basic_leaf, &scan_counter);
                 *self.as_page_mut() = basic_leaf.copy_page();
             }
             _=> unreachable!("promote: unexpected node tag {:?}", to)
         }
     }
 
-    fn qualifies_for_promote(&self) -> Option<u8> {
-        if self.common.scan_counter >= 3 {
-
-            // if the scan_counter is 255 (which is the only sensible option) we promote, as that node has good heads
-            Some(node_tag::BASIC_LEAF)
-        }
-        else {
-            None
-        }
-    }
 
 
     // will only be called if qualifies for promote, but promotion is not possible.
     // We just delay, as it is most likely that the node will be split soon anyways.
     fn retry_later(&mut self) {
-        self.common.scan_counter -= 1;
+        self.common.scan_counter.fetch_sub(1, Ordering::Relaxed);
     }
 }
 

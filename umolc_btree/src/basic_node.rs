@@ -10,6 +10,7 @@ use itertools::Itertools;
 use std::fmt::{Debug, Formatter};
 use std::mem::{offset_of, size_of, MaybeUninit};
 use std::ops::Range;
+use std::sync::atomic::{AtomicU8, Ordering};
 use umolc::{o_project, BufferManager, OPtr, OlcErrorHandler, PageId};
 use crate::fully_dense_leaf::FullyDenseLeaf;
 use crate::hash_leaf::HashLeaf;
@@ -303,7 +304,7 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>, V: NodeKind> NodeStatic<'bm, BM> 
     fn init(&mut self, lf: impl SourceSlice, uf: impl SourceSlice, lower: Option<&[u8; 5]>) {
         if V::IS_LEAF {
             assert!(lower.is_none());
-            self.common.scan_counter = 3;
+            self.common.scan_counter.store(3, Ordering::Relaxed);
         } else {
             self.slice_mut(Self::LOWER_OFFSET, 5).copy_from_slice(lower.unwrap());
         }
@@ -355,8 +356,9 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>, V: NodeKind> NodeStatic<'bm, BM> 
         (keys, values)
     }
 
-    fn set_scan_counter(&mut self, counter: u8) {
-        self.common.scan_counter = counter;
+    fn set_scan_counter(&mut self, counter: &AtomicU8) {
+        let val = counter.load(Ordering::Relaxed);
+        self.common.scan_counter.store(val, Ordering::Relaxed);
     }
 
     fn has_good_heads(&self) -> (bool, bool) {
@@ -434,7 +436,7 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>, V: NodeKind> NodeDynamic<'bm, BM>
 
         let mut left = BasicNode::<V>::zeroed();
 
-        let scan_counter = self.common.scan_counter;
+        let scan_counter = &self.common.scan_counter;
 
         let count = self.common.count as usize;
         let (low_count, sep_key) = find_separator::<BM, _>(self, |i| self.key_combined(i));
@@ -460,9 +462,20 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>, V: NodeKind> NodeDynamic<'bm, BM>
         self.copy_records(right, rr.clone(), 0);
         right.update_hints(0, rr.count(), 0);
 
-        left.common.scan_counter = if lft {255} else if scan_counter == 255 {3} else {scan_counter};
 
-        right.common.scan_counter = if rght {255} else if scan_counter == 255 {3} else {scan_counter};
+
+        let current = scan_counter.load(Ordering::Relaxed);
+
+        left.common.scan_counter.store(
+            if lft { 255 } else if current == 255 { 3 } else { current },
+            Ordering::Relaxed,
+        );
+
+        right.common.scan_counter.store(
+            if rght { 255 } else if current == 255 { 3 } else { current },
+            Ordering::Relaxed,
+        );
+
 
         left.validate();
         right.validate();
@@ -601,7 +614,7 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>, V: NodeKind> NodeDynamic<'bm, BM>
                 let key_len = first_key.len();
                 let val_len = first_val.len();
 
-                let scan_counter = self.common.scan_counter;
+                let scan_counter = &self.common.scan_counter;
 
 
 
@@ -622,13 +635,13 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>, V: NodeKind> NodeDynamic<'bm, BM>
                     fdl.force_insert::<BM::OlcEH>(full_key.as_slice(), val);
                 }
 
-                NodeStatic::<BM>::set_scan_counter(&mut fdl, scan_counter);
+                NodeStatic::<BM>::set_scan_counter(&mut fdl, &scan_counter);
                 *self.as_page_mut() = fdl.copy_page();
             },
             node_tag::HASH_LEAF => {
                 let count = self.common.count as usize;
 
-                let scan_counter = self.common.scan_counter;
+                let scan_counter = &self.common.scan_counter;
 
                 let mut hash_leaf = HashLeaf::zeroed();
                 NodeStatic::<BM>::init(&mut hash_leaf, self.lower_fence(), self.upper_fence_combined(), None);
@@ -695,26 +708,17 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>, V: NodeKind> NodeDynamic<'bm, BM>
         false
     }
 
-    fn qualifies_for_promote(&self) -> Option<u8> {
-        debug_assert!(!<Self as NodeStatic<'bm, BM>>::IS_INNER);
-        if self.common.scan_counter == 0 {
-            Some(node_tag::HASH_LEAF)
-        }
-        else {
-            None
-        }
-    }
 
     fn retry_later(&mut self) {
-        self.common.scan_counter += 1;
+        self.common.scan_counter.fetch_add(1, Ordering::Relaxed);
     }
 
     fn get_node_tag(&self) -> u8 {
         self.common.tag
     }
 
-    fn get_scan_counter(&self) -> u8 {
-        self.common.scan_counter
+    fn get_scan_counter(&self) -> &AtomicU8 {
+        &self.common.scan_counter
     }
     fn get_count(&self) -> u16 {
         self.common.count
