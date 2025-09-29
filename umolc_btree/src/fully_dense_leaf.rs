@@ -3,11 +3,13 @@ use crate::fully_dense_leaf::insert_resolver::{resolve, Resolution};
 use crate::hash_leaf::HashLeaf;
 use crate::key_source::{HeadSourceSlice, SourceSlice, SourceSlicePair, ZeroKey};
 use crate::node::PromoteError::Node;
-use crate::node::{insert_upper_sibling, node_tag, page_cast_mut, CommonNodeHead, KindLeaf, NodeDynamic, NodeStatic, PromoteError, ToFromPageExt, PAGE_ID_LEN, PAGE_SIZE};
+use crate::node::{
+    insert_upper_sibling, node_tag, page_cast_mut, CommonNodeHead, KindLeaf, NodeDynamic, NodeStatic, PromoteError,
+    ToFromPageExt, PAGE_ID_LEN, PAGE_SIZE,
+};
 use crate::{define_node, Page, MAX_KEY_SIZE};
 use bstr::{BStr, BString};
 use bytemuck::Zeroable;
-use indxvec::Printing;
 use itertools::Itertools;
 use std::cell::Cell;
 use std::fmt::{Debug, Display, Formatter};
@@ -104,8 +106,7 @@ impl FullyDenseLeaf {
     }
 
     pub fn force_insert<O: OlcErrorHandler>(&mut self, key: &[u8], val: &[u8]) {
-        let index = Self::key_to_index::<O>(
-            unsafe { OPtr::from_ref(self) }, key).expect("Index computation failed");
+        let index = Self::key_to_index::<O>(unsafe { OPtr::from_ref(self) }, key).expect("Index computation failed");
 
         let was_present = self.set_bit::<true>(index);
         self.common.count += (!was_present) as u16;
@@ -156,15 +157,19 @@ impl FullyDenseLeaf {
         let uf_len = tail.len();
         self.as_page_mut().common.upper_fence_len = uf_len as u16;
 
-        let offset = size_of::<Self>()
-            - self.as_page().common.lower_fence_len as usize
-            - uf_len;
+        let offset = size_of::<Self>() - self.as_page().common.lower_fence_len as usize - uf_len;
 
         self.slice_mut::<u8>(offset, uf_len).copy_from_slice(tail);
     }
 
     /// returns Err(()) if there are no keys that could be inserted with given lower fence and key_len
-    pub fn init(&mut self, lf: impl SourceSlice, uf: impl SourceSlice, key_len: usize, val_len: usize) -> Result<(), ()> {
+    pub fn init(
+        &mut self,
+        lf: impl SourceSlice,
+        uf: impl SourceSlice,
+        key_len: usize,
+        val_len: usize,
+    ) -> Result<(), ()> {
         self.as_page_mut().common_init(node_tag::FULLY_DENSE_LEAF, lf, uf);
         let space = PAGE_SIZE
             - (self.common.lower_fence_len as usize)
@@ -255,23 +260,19 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeStatic<'bm, BM> for FullyDens
     const TAG: u8 = node_tag::FULLY_DENSE_LEAF;
     const IS_INNER: bool = false;
     type TruncatedKey<'a>
-    = SourceSlicePair<u8, &'a [u8], HeadSourceSlice>
-    where Self: 'a,;
+        = SourceSlicePair<u8, &'a [u8], HeadSourceSlice>
+    where
+        Self: 'a;
 
     fn insert(&mut self, key: &[u8], val: &[u8]) -> Result<Option<()>, ()> {
         let index = Cell::new(usize::MAX);
         let resolution = resolve(
             || {
-
                 // The heads are always fine for fully dense leaves
                 (NodeDynamic::<BM>::can_promote)(self, node_tag::BASIC_LEAF).is_ok()
             },
-            || {
-                self.common.count as usize * 4 <= self.capacity as usize
-            },
-            {
-                val.len() == self.val_len as usize && key.len() == self.key_len as usize
-            },
+            || self.common.count as usize * 4 <= self.capacity as usize,
+            val.len() == self.val_len as usize && key.len() == self.key_len as usize,
             || {
                 let res = Self::key_to_index::<BM::OlcEH>(unsafe { OPtr::from_ref(self) }, key);
                 if let Ok(i) = res {
@@ -279,9 +280,7 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeStatic<'bm, BM> for FullyDens
                 }
                 res.is_ok()
             },
-            || {
-                index.get() < self.capacity as usize
-            },
+            || index.get() < self.capacity as usize,
         );
         let index = index.get();
         match resolution {
@@ -292,19 +291,15 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeStatic<'bm, BM> for FullyDens
                 Ok(if was_present { Some(()) } else { None })
             }
             Resolution::Convert => {
-
                 NodeDynamic::<BM>::promote(self, node_tag::BASIC_LEAF);
 
-
                 // this insertion should work after copying over. We need to seperate it out for the promotion logic
-
 
                 let hash_leaf = page_cast_mut::<FullyDenseLeaf, BasicLeaf>(self);
 
                 let ret = NodeStatic::<BM>::insert(hash_leaf, key, val);
                 debug_assert!(ret.is_ok());
                 ret
-
             }
             Resolution::SplitHalf => {
                 self.split_mode = SPLIT_MODE_HALF;
@@ -343,7 +338,6 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeStatic<'bm, BM> for FullyDens
         unimplemented!()
     }
 
-
     fn to_debug_kv(&self) -> (Vec<Vec<u8>>, Vec<Vec<u8>>) {
         let indices = || Self::iter_key_indices(self.capacity as usize, |x| self.read_unaligned::<u64>(x));
         let keys = indices().map(|i| Self::key_from_numeric_part(self, self.reference + i as u32).to_vec()).collect();
@@ -364,7 +358,6 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeStatic<'bm, BM> for FullyDens
 impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeDynamic<'bm, BM> for FullyDenseLeaf {
     fn split(&mut self, bm: BM, parent: &mut dyn NodeDynamic<'bm, BM>, key: &[u8]) -> Result<(), ()> {
         if self.split_mode == SPLIT_MODE_HIGH {
-
             let mut right = insert_upper_sibling(parent, bm, key)?;
             let right = right.cast_mut::<Self>();
 
@@ -374,9 +367,8 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeDynamic<'bm, BM> for FullyDen
             }
             self.set_upper_fence_tail(key);
 
-            return Ok(())
+            return Ok(());
         }
-
 
         if self.split_mode != SPLIT_MODE_HALF {
             unimplemented!();
@@ -391,18 +383,16 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeDynamic<'bm, BM> for FullyDen
                     split_at = i as u32;
                     break;
                 }
-                count+=1;
+                count += 1;
             }
         }
 
         let key_len = self.key_len as usize;
 
-
         let mut sep_key_buf: [MaybeUninit<u8>; 512] = unsafe { MaybeUninit::uninit().assume_init() };
         let sep_key: &[u8] = {
-            let initialized = self
-                .key_from_numeric_part(split_at + self.reference)
-                .write_to_uninit(&mut sep_key_buf[..key_len]);
+            let initialized =
+                self.key_from_numeric_part(split_at + self.reference).write_to_uninit(&mut sep_key_buf[..key_len]);
             initialized
         };
         let mut right = insert_upper_sibling(parent, bm, sep_key)?;
@@ -412,9 +402,7 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeDynamic<'bm, BM> for FullyDen
         right.init(sep_key, self.upper_fence_combined(), self.key_len as usize, self.val_len as usize).unwrap();
         self.as_page_mut().init_upper_fence(sep_key);
 
-
         right.capacity = self.capacity as u16 - split_at as u16;
-
 
         let old_capacity = self.capacity as usize;
         let old_count = self.common.count;
@@ -433,15 +421,29 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeDynamic<'bm, BM> for FullyDen
             }
         }
 
-
         self.capacity = split_at as u16;
-        debug_assert!(old_count == self.common.count + right.common.count, "Counts don't add up: {:?} + {:?} != {:?}", old_count, self.common.count, right.common.count);
+        debug_assert!(
+            old_count == self.common.count + right.common.count,
+            "Counts don't add up: {:?} + {:?} != {:?}",
+            old_count,
+            self.common.count,
+            right.common.count
+        );
 
-
-        debug_assert!(self.capacity as usize + right.capacity as usize == old_capacity, "Capacities don't add up: {:?} + {:?} != {old_capacity}", self.capacity, right.capacity);
+        debug_assert!(
+            self.capacity as usize + right.capacity as usize == old_capacity,
+            "Capacities don't add up: {:?} + {:?} != {old_capacity}",
+            self.capacity,
+            right.capacity
+        );
         debug_assert!(self.common.upper_fence_len <= 4);
-        debug_assert!(right.reference == self.reference + self.capacity as u32, "References do not match: {:?} + {:?} != {:?}", self.reference, self.capacity, right.reference);
-
+        debug_assert!(
+            right.reference == self.reference + self.capacity as u32,
+            "References do not match: {:?} + {:?} != {:?}",
+            self.reference,
+            self.capacity,
+            right.reference
+        );
 
         right.common.scan_counter.store(255, Ordering::Relaxed);
         self.common.scan_counter.store(255, Ordering::Relaxed);
@@ -499,40 +501,33 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeDynamic<'bm, BM> for FullyDen
         &self,
         buffer: &mut [MaybeUninit<u8>; 512],
         start: &[u8],
-        callback: &mut dyn FnMut(&[u8], &[u8]) -> bool
+        callback: &mut dyn FnMut(&[u8], &[u8]) -> bool,
     ) -> bool {
-
-
-        let lf = if start == self.lower_fence() { 0 }
-        else {
+        let lf = if start == self.lower_fence() {
+            0
+        } else {
             let res = Self::key_to_index::<BM::OlcEH>(unsafe { OPtr::from_ref(self) }, start);
             if let Ok(i) = res {
                 i
-            }
-            else {
+            } else {
                 0
             }
         };
 
         let numeric_part_begin = self.key_len - 4;
 
-
         let key_src = self.key_from_numeric_part(self.reference + 0);
         key_src.write_to_uninit(&mut buffer[..key_src.len() as usize]);
 
-
         let mut np = self.reference + lf as u32;
-
-
 
         for i in lf..self.capacity as usize {
             if self.get_bit_direct(i) {
-
-                np.to_be_bytes().write_to_uninit(&mut buffer[numeric_part_begin as usize..numeric_part_begin as usize + 4]);
+                np.to_be_bytes()
+                    .write_to_uninit(&mut buffer[numeric_part_begin as usize..numeric_part_begin as usize + 4]);
                 let val = self.val(i);
-                let full_key : &mut [u8] = unsafe {
-                    std::slice::from_raw_parts_mut(buffer.as_mut_ptr() as *mut u8, self.key_len as usize)
-                };
+                let full_key: &mut [u8] =
+                    unsafe { std::slice::from_raw_parts_mut(buffer.as_mut_ptr() as *mut u8, self.key_len as usize) };
 
                 if callback(&full_key, val) {
                     return true;
@@ -557,10 +552,8 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeDynamic<'bm, BM> for FullyDen
     fn can_promote(&self, to: u8) -> Result<(), PromoteError> {
         match to {
             node_tag::HASH_LEAF => {
-
                 let data_bytes = HashLeaf::get_hash_leaf_data_size();
                 let count = self.common.count as usize;
-
 
                 let key_len = self.key_len as usize;
                 let val_len = self.val_len as usize;
@@ -573,7 +566,6 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeDynamic<'bm, BM> for FullyDen
                 // 2+2 are the lengths that we store in the hash leaf
                 let heap_bytes = count * (2 + 2 + key_len.min(4) + val_len);
 
-
                 let fence_bytes = self.upper_fence_tail().len() + self.lower_fence().len();
 
                 let required_bytes = slot_bytes + hash_bytes + heap_bytes + fence_bytes;
@@ -582,7 +574,7 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeDynamic<'bm, BM> for FullyDen
                     return Err(PromoteError::Capacity);
                 }
                 Ok(())
-            },
+            }
 
             node_tag::BASIC_LEAF => {
                 pub type BasicLeaf = BasicNode<KindLeaf>;
@@ -609,26 +601,21 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeDynamic<'bm, BM> for FullyDen
                 }
 
                 Ok(())
-            },
+            }
 
             _ => Err(Node),
         }
     }
 
-
     fn promote(&mut self, to: u8) {
         match to {
             node_tag::BASIC_LEAF => {
-
-
                 let mut buffer: [MaybeUninit<u8>; 512] = unsafe { MaybeUninit::uninit().assume_init() };
 
                 let numeric_part_begin = self.key_len - 4;
 
-
                 let key_src = self.key_from_numeric_part(self.reference + 0);
                 key_src.write_to_uninit(&mut buffer[..key_src.len() as usize]);
-
 
                 let mut np = self.reference;
 
@@ -637,23 +624,22 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeDynamic<'bm, BM> for FullyDen
                 NodeStatic::<BM>::init(&mut tmp, self.lower_fence(), self.upper_fence_combined(), None);
                 for i in 0..self.capacity as usize {
                     if self.get_bit_direct(i) {
-
-                        np.to_be_bytes().write_to_uninit(&mut buffer[numeric_part_begin as usize..numeric_part_begin as usize + 4]);
+                        np.to_be_bytes()
+                            .write_to_uninit(&mut buffer[numeric_part_begin as usize..numeric_part_begin as usize + 4]);
                         let val = self.val(i);
-                        let full_key : &mut [u8] = unsafe {
+                        let full_key: &mut [u8] = unsafe {
                             std::slice::from_raw_parts_mut(buffer.as_mut_ptr() as *mut u8, self.key_len as usize)
                         };
 
                         NodeStatic::<BM>::insert(&mut tmp, full_key, val).unwrap();
                     }
-                    np+=1;
+                    np += 1;
                 }
 
                 NodeStatic::<BM>::set_scan_counter(&mut tmp, &scan_counter);
                 *self.as_page_mut() = tmp.copy_page();
-            },
+            }
             node_tag::HASH_LEAF => {
-
                 let mut buffer: [MaybeUninit<u8>; 512] = unsafe { MaybeUninit::uninit().assume_init() };
                 let mut tmp: HashLeaf = HashLeaf::zeroed();
                 let scan_counter = &self.common.scan_counter;
@@ -664,17 +650,15 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeDynamic<'bm, BM> for FullyDen
                         let key = self.key_from_numeric_part(self.reference + i as u32);
                         let key_len = key.len();
                         key.write_to_uninit(&mut buffer[..key_len]);
-                        let full_key : &mut [u8] = unsafe {
-                            std::slice::from_raw_parts_mut(buffer.as_mut_ptr() as *mut u8, key_len)
-                        };
+                        let full_key: &mut [u8] =
+                            unsafe { std::slice::from_raw_parts_mut(buffer.as_mut_ptr() as *mut u8, key_len) };
 
                         NodeStatic::<BM>::insert(&mut tmp, full_key, val).unwrap();
                     }
-
                 }
                 NodeStatic::<BM>::set_scan_counter(&mut tmp, &scan_counter);
                 *self.as_page_mut() = tmp.copy_page();
-            },
+            }
             _ => unimplemented!(),
         }
     }
@@ -682,7 +666,6 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeDynamic<'bm, BM> for FullyDen
     fn retry_later(&mut self) {
         unreachable!();
     }
-
 }
 
 impl Debug for FullyDenseLeaf {
@@ -697,13 +680,17 @@ impl Debug for FullyDenseLeaf {
         s.field("lf", &BStr::new(self.lower_fence()));
         s.field("uf", &BString::new(self.upper_fence_combined().to_vec()));
         let mut count = 0;
-        let records_fmt =
-            (0..self.capacity as usize).filter(|&i| self.get_bit_direct(i)).format_with(",\n", |i, f| {
-                let val: &dyn Debug = &self.val(i);
-                let key = self.key_from_numeric_part(self.reference + i as u32).to_vec();
-                count+=1;
-                f(&mut format_args!("{:?} - index:{i:4} -> key:{:?} , val: {:?}", count-1, BStr::new(key.as_slice()), val))
-            });
+        let records_fmt = (0..self.capacity as usize).filter(|&i| self.get_bit_direct(i)).format_with(",\n", |i, f| {
+            let val: &dyn Debug = &self.val(i);
+            let key = self.key_from_numeric_part(self.reference + i as u32).to_vec();
+            count += 1;
+            f(&mut format_args!(
+                "{:?} - index:{i:4} -> key:{:?} , val: {:?}",
+                count - 1,
+                BStr::new(key.as_slice()),
+                val
+            ))
+        });
         s.field("records", &format_args!("\n{}", records_fmt));
         s.finish()
     }
@@ -719,20 +706,18 @@ mod insert_resolver;
 
 #[allow(unused)]
 mod test {
-    use bytemuck::Zeroable;
-    use umolc::{BufferManager, SimpleBm};
     use crate::basic_node::BasicLeaf;
     use crate::fully_dense_leaf::FullyDenseLeaf;
     use crate::node;
     use crate::node::{node_tag, NodeDynamic, NodeStatic, Page, ToFromPageExt};
-
-
+    use bytemuck::Zeroable;
+    use umolc::{BufferManager, SimpleBm};
 
     fn generate_key(i: u32, key_len: usize) -> Vec<u8> {
         if key_len < 4 {
             panic!("Key length must be at least 4");
         }
-        let mut key= (0..).map(|i| i as u8).take(key_len-4).collect::<Vec<u8>>();
+        let mut key = (0..).map(|i| i as u8).take(key_len - 4).collect::<Vec<u8>>();
         key.extend_from_slice(&i.to_be_bytes());
         key
     }
@@ -744,7 +729,6 @@ mod test {
 
         let lowerfence = generate_key(0, key_len);
         let upperfence = generate_key(4096, key_len);
-
 
         let res = leaf.init(lowerfence.as_slice(), upperfence.as_slice(), key_len, val_len);
 
@@ -760,16 +744,16 @@ mod test {
             leaf.force_insert::<BM::OlcEH>(key.as_slice(), val);
         }
 
-        let mut i : u32 = 0;
+        let mut i: u32 = 0;
         loop {
             let key = generate_key(i, key_len);
-            i+=1;
+            i += 1;
 
             let result = leaf.as_page_mut().as_dyn_node_mut::<BM>().leaf_remove(key.as_slice());
             if result.is_none() {
                 panic!("Error: Couldn't remove the values present. This is an error of the node logic itself, this test has no responsibility for it.");
             }
-            if NodeDynamic::<BM>::can_promote(leaf, node_tag).is_ok(){
+            if NodeDynamic::<BM>::can_promote(leaf, node_tag).is_ok() {
                 break;
             }
         }
@@ -780,13 +764,12 @@ mod test {
 
         assert!(promotion_result.is_ok(), "promotion to target panicked");
 
-
         loop {
-            if i>=max as u32 {
+            if i >= max as u32 {
                 break;
             }
             let key = generate_key(i, key_len);
-            i+=1;
+            i += 1;
 
             let result = leaf.as_page_mut().as_dyn_node_mut::<BM>().leaf_remove(key.as_slice());
             if result.is_none() {
@@ -796,11 +779,7 @@ mod test {
     }
 
     #[allow(clippy::unused_enumerate_index)]
-    fn test_heap_promotions<'bm, BM, Initial>(
-        key_len: usize,
-        val_len: usize,
-        target: u8,
-    )
+    fn test_heap_promotions<'bm, BM, Initial>(key_len: usize, val_len: usize, target: u8)
     where
         BM: BufferManager<'bm, Page = Page>,
         Initial: node::ToFromPage + node::NodeStatic<'bm, BM>,
@@ -811,11 +790,9 @@ mod test {
         let lowerfence = generate_key(0, key_len);
         let upperfence = generate_key(4096, key_len);
 
-
         NodeStatic::<BM>::init(leaf, lowerfence.as_slice(), upperfence.as_slice(), None);
 
-
-        let mut count : u32 = 0;
+        let mut count: u32 = 0;
 
         loop {
             let key = generate_key(count as u32, key_len);
@@ -824,22 +801,22 @@ mod test {
             if res.is_err() {
                 break;
             }
-            count+=1;
+            count += 1;
         }
 
-        let mut i : u32 = 0;
+        let mut i: u32 = 0;
         loop {
             if count == 0 {
                 panic!("Error: Leaf never became promotable");
             }
             let key = generate_key(i, key_len);
-            i+=1;
-            count-=1;
+            i += 1;
+            count -= 1;
             let result = leaf.as_page_mut().as_dyn_node_mut::<BM>().leaf_remove(key.as_slice());
             if result.is_none() {
                 panic!("Error: Couldn't remove the values present. This is an error of the node logic itself, this test has no responsibility for it.");
             }
-            if NodeDynamic::<BM>::can_promote(leaf, target).is_ok(){
+            if NodeDynamic::<BM>::can_promote(leaf, target).is_ok() {
                 break;
             }
         }
@@ -851,11 +828,11 @@ mod test {
         assert!(promotion_result.is_ok(), "promotion to target panicked");
 
         loop {
-            if i>=count as u32 {
+            if i >= count as u32 {
                 break;
             }
             let key = generate_key(i, key_len);
-            i+=1;
+            i += 1;
 
             let result = leaf.as_page_mut().as_dyn_node_mut::<BM>().leaf_remove(key.as_slice());
             if result.is_none() {
@@ -868,17 +845,16 @@ mod test {
     fn basic_leaf_demotion() {
         for val_len in 0..100 {
             for key_len in 1..10 {
-                test_fdl_promotions::<&'static SimpleBm<Page>>(node_tag::BASIC_LEAF, key_len*4, val_len);
+                test_fdl_promotions::<&'static SimpleBm<Page>>(node_tag::BASIC_LEAF, key_len * 4, val_len);
             }
         }
     }
-
 
     #[test]
     fn hash_leaf_demotion() {
         for val_len in 0..100 {
             for key_len in 1..10 {
-                test_fdl_promotions::<&'static SimpleBm<Page>>(node_tag::HASH_LEAF, key_len*4, val_len);
+                test_fdl_promotions::<&'static SimpleBm<Page>>(node_tag::HASH_LEAF, key_len * 4, val_len);
             }
         }
     }
@@ -888,7 +864,7 @@ mod test {
         use crate::hash_leaf::HashLeaf;
         for val_len in 0..100 {
             for key_len in 1..10 {
-                test_heap_promotions::<&'static SimpleBm<Page>, HashLeaf>(key_len*4, val_len, node_tag::BASIC_LEAF);
+                test_heap_promotions::<&'static SimpleBm<Page>, HashLeaf>(key_len * 4, val_len, node_tag::BASIC_LEAF);
             }
         }
     }
@@ -897,10 +873,8 @@ mod test {
         use crate::basic_node::BasicLeaf;
         for val_len in 0..100 {
             for key_len in 1..10 {
-                test_heap_promotions::<&'static SimpleBm<Page>, BasicLeaf>(key_len*4, val_len, node_tag::HASH_LEAF);
+                test_heap_promotions::<&'static SimpleBm<Page>, BasicLeaf>(key_len * 4, val_len, node_tag::HASH_LEAF);
             }
         }
     }
-
-
 }

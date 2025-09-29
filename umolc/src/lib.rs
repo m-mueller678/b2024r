@@ -1,7 +1,6 @@
 #![feature(slice_index_methods)]
 #![feature(array_ptr_get)]
 #![feature(never_type)]
-#![feature(new_zeroed_alloc)]
 #![feature(map_try_insert)]
 #![feature(maybe_uninit_slice)]
 
@@ -29,7 +28,7 @@ pub struct PageId {
     pub x: u64,
 }
 
-pub trait   BufferManager<'bm>: 'bm + Copy + Send + Sync + Sized {
+pub trait BufferManager<'bm>: 'bm + Copy + Send + Sync + Sized {
     type Page;
     type GuardO: OptimisticGuard<'bm, Self>
         + BufferManageGuardUpgrade<'bm, Self, Self::GuardS>

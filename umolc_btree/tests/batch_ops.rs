@@ -65,7 +65,7 @@ fn run_many(threads: u32, batches: u32, f: &(impl Fn(&mut SmallRng, &Barrier, u3
     })
 }
 
-fn batch_ops(threads: u32, batches: u32, key_count: usize, op_weights: (impl Fn(u32, u32) -> [u32; 3] + Sync)) {
+fn batch_ops(threads: u32, batches: u32, key_count: usize, op_weights: impl Fn(u32, u32) -> [u32; 3] + Sync) {
     const LOG_OPS: bool = false;
     const LOOKUP_ALL: bool = false;
     let bm: BM = &SimpleBm::new(1 << 18);

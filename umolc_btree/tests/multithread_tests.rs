@@ -1,16 +1,13 @@
 extern crate core;
 
-use std::sync::Barrier;
-use std::{panic, thread};
-use std::backtrace::Backtrace;
-use std::thread::yield_now;
 use bstr::BStr;
-use dev_utils::keyset_generator::{BadHeadsKeyset, DenseKeyset, GoodHeadsKeyset, KeyGenerator, ScrambledDenseKeyset};
-use dev_utils::tree_utils::check_node_tag_percentage;
-use umolc::{BufferManager, SimpleBm};
+use dev_utils::keyset_generator::{BadHeadsKeyset, DenseKeyset, GoodHeadsKeyset, KeyGenerator};
+use std::backtrace::Backtrace;
+use std::sync::Barrier;
+use std::thread::yield_now;
+use std::{panic, thread};
+use umolc::SimpleBm;
 use umolc_btree::{Page, Tree};
-
-
 
 static SET_HOOK: std::sync::Once = std::sync::Once::new();
 
@@ -31,16 +28,19 @@ fn install_panic_hook() {
     });
 }
 
-fn adaptive_promotion_multithreaded<KG: KeyGenerator>(amount: usize, threads: u16, iterations: u16, amount_scans : u16)
-{
-    let bm = SimpleBm::<Page>::new((amount * threads as usize)/10);
+fn adaptive_promotion_multithreaded(
+    kg: &dyn KeyGenerator,
+    amount: usize,
+    threads: u16,
+    iterations: u16,
+    amount_scans: u16,
+) {
+    let bm = SimpleBm::<Page>::new((amount * threads as usize) / 10);
     let tree = Tree::new(&bm);
-
 
     let barrier = &Barrier::new(threads as usize);
 
-    let keysets = prepare_keyset::<KG>(amount, threads);
-
+    let keysets = prepare_keyset(kg, amount, threads);
 
     thread::scope(|s| {
         for i in 0..threads {
@@ -48,12 +48,11 @@ fn adaptive_promotion_multithreaded<KG: KeyGenerator>(amount: usize, threads: u1
             let check = keysets[thread_id as usize].clone();
             let tree_ref = &tree;
             let barrier_ref = &barrier;
-        s.spawn(move || {
+            s.spawn(move || {
                 let mut scrambled = check.clone();
                 fastrand::shuffle(&mut scrambled);
 
                 barrier_ref.wait();
-
 
                 for iteration in 0..iterations {
                     for i in 0..scrambled.len() {
@@ -61,16 +60,16 @@ fn adaptive_promotion_multithreaded<KG: KeyGenerator>(amount: usize, threads: u1
                         match iteration % 3 {
                             0 => {
                                 tree_ref.insert(key.as_slice(), value.as_slice());
-                            },
+                            }
                             1 => {
                                 let res = tree_ref.lookup_to_vec(key.as_slice());
                                 assert!(res.is_some() || i % 5 == 0);
-                            },
+                            }
                             2 => {
                                 let res = tree_ref.remove(key.as_slice());
                                 assert!(res.is_some() || i % 5 == 0);
-                            },
-                            _ => unreachable!()
+                            }
+                            _ => unreachable!(),
                         }
                     }
 
@@ -86,47 +85,39 @@ fn adaptive_promotion_multithreaded<KG: KeyGenerator>(amount: usize, threads: u1
                             assert_eq!(check[index as usize].0.as_slice(), key, "Keys dont match!");
                         }
 
-
                         false
                     });
 
                     for _ in 0..amount_scans {
-                        tree_ref.scan(b"".as_slice(), |x, val| {
-                            false
-                        });
+                        tree_ref.scan(b"".as_slice(), |_, _| false);
                     }
                 }
-
             });
         }
     });
 }
 
-
 #[test]
 fn combined_multithread_tests_bad_heads() {
-    adaptive_promotion_multithreaded::<BadHeadsKeyset>(1000, 16, 15, 1);
+    adaptive_promotion_multithreaded(&BadHeadsKeyset, 1000, 16, 15, 1);
 }
 
 #[test]
 fn combined_multithread_tests_good_heads() {
-    adaptive_promotion_multithreaded::<GoodHeadsKeyset>(1000, 16, 15, 1);
+    adaptive_promotion_multithreaded(&GoodHeadsKeyset, 1000, 16, 15, 1);
 }
 #[test]
 fn combined_multithread_tests_dense_data() {
-    adaptive_promotion_multithreaded::<DenseKeyset::<10000>>(1000, 16, 15, 1);
+    adaptive_promotion_multithreaded(&DenseKeyset { length: 10000 }, 1000, 16, 15, 1);
 }
 
-fn point_operations_multithreaded<KG: KeyGenerator>(amount: usize, threads: u16, iterations: u16)
-{
-    let bm = SimpleBm::<Page>::new((amount * threads as usize)/10);
+fn point_operations_multithreaded(kg: &dyn KeyGenerator, amount: usize, threads: u16, iterations: u16) {
+    let bm = SimpleBm::<Page>::new((amount * threads as usize) / 10);
     let tree = Tree::new(&bm);
-
 
     let barrier = &Barrier::new(threads as usize);
 
-    let keysets = prepare_keyset::<KG>(amount, threads);
-
+    let keysets = prepare_keyset(kg, amount, threads);
 
     thread::scope(|s| {
         for i in 0..threads {
@@ -135,23 +126,20 @@ fn point_operations_multithreaded<KG: KeyGenerator>(amount: usize, threads: u16,
             let tree_ref = &tree;
             let barrier_ref = &barrier;
             s.spawn(move || {
-
                 let mut scrambled = check.clone();
                 fastrand::shuffle(&mut scrambled);
 
                 barrier_ref.wait();
 
-
                 for iteration in 0..iterations {
                     for i in 0..scrambled.len() {
                         let (key, value) = scrambled.get(i).unwrap();
-
 
                         let mut val: Vec<u8> = b"".to_vec();
                         match iteration % 3 {
                             0 => {
                                 tree_ref.insert(key.as_slice(), value.as_slice());
-                            },
+                            }
                             1 => {
                                 let res = tree_ref.lookup_to_vec(key.as_slice());
                                 if res.is_none() {
@@ -168,17 +156,20 @@ fn point_operations_multithreaded<KG: KeyGenerator>(amount: usize, threads: u16,
                                 if thread_id == id {
                                     let index = u32::from_be_bytes(val[0..4].try_into().unwrap());
                                     if check[index as usize].0.as_slice() != key.as_slice() {
-                                        println!("Wrong order of values: index was {index}, but value was {:?}, not {:?}", key.as_slice(), check[index as usize].0.as_slice());
+                                        println!(
+                                            "Wrong order of values: index was {index}, but value was {:?}, not {:?}",
+                                            key.as_slice(),
+                                            check[index as usize].0.as_slice()
+                                        );
                                     }
                                     assert_eq!(check[index as usize].0.as_slice(), key.as_slice(), "Keys dont match!");
                                 }
-
-                            },
+                            }
                             2 => {
                                 let res = tree_ref.remove(key.as_slice());
                                 assert!(res.is_some());
-                            },
-                            _ => unreachable!()
+                            }
+                            _ => unreachable!(),
                         }
                     }
                 }
@@ -187,10 +178,8 @@ fn point_operations_multithreaded<KG: KeyGenerator>(amount: usize, threads: u16,
     });
 }
 
-
-fn prepare_keyset<KG: KeyGenerator>(amount: usize, threads: u16) -> Vec<Vec<(Vec<u8>, Vec<u8>)>> {
-
-    let mut keyset: Vec<(Vec<u8>, Vec<u8>)> = KG::generate_keyset(amount * threads as usize);
+fn prepare_keyset(kg: &dyn KeyGenerator, amount: usize, threads: u16) -> Vec<Vec<(Vec<u8>, Vec<u8>)>> {
+    let mut keyset: Vec<(Vec<u8>, Vec<u8>)> = kg.generate_keyset(amount * threads as usize);
     fastrand::shuffle(&mut keyset);
 
     let mut keysets: Vec<Vec<(Vec<u8>, Vec<u8>)>> = keyset
@@ -201,7 +190,6 @@ fn prepare_keyset<KG: KeyGenerator>(amount: usize, threads: u16) -> Vec<Vec<(Vec
             set
         })
         .collect();
-
 
     for thread in 0..threads {
         let thread_index = thread.to_be_bytes();
@@ -216,30 +204,27 @@ fn prepare_keyset<KG: KeyGenerator>(amount: usize, threads: u16) -> Vec<Vec<(Vec
     keysets
 }
 
-
 #[test]
 fn hash_leaf_point_operations_multithreaded() {
-    point_operations_multithreaded::<BadHeadsKeyset>(1000, 16, 12);
+    point_operations_multithreaded(&BadHeadsKeyset, 1000, 16, 12);
 }
 
 #[test]
 fn dense_leaf_point_operations_multithreaded() {
-    point_operations_multithreaded::<DenseKeyset::<10000>>(1000, 16, 12);
+    point_operations_multithreaded(&DenseKeyset { length: 10000 }, 1000, 16, 12);
 }
 
 #[test]
 fn basic_leaf_point_operations_multithreaded() {
-    point_operations_multithreaded::<GoodHeadsKeyset>(1000, 16, 12);
+    point_operations_multithreaded(&GoodHeadsKeyset, 1000, 16, 12);
 }
 
-fn scan_while_insert<KG: KeyGenerator>(amount: usize, threads: u16) {
-
-    let bm = SimpleBm::<Page>::new((amount * threads as usize)/10);
+fn scan_while_insert(kg: &dyn KeyGenerator, amount: usize, threads: u16) {
+    let bm = SimpleBm::<Page>::new((amount * threads as usize) / 10);
     let tree = Tree::new(&bm);
 
-
     let barrier = &Barrier::new(threads as usize + 1);
-    let keysets = prepare_keyset::<KG>(amount, threads);
+    let keysets = prepare_keyset(kg, amount, threads);
 
     thread::scope(|s| {
         for i in 0..threads {
@@ -253,14 +238,11 @@ fn scan_while_insert<KG: KeyGenerator>(amount: usize, threads: u16) {
 
                 barrier_ref.wait();
 
-
                 for i in 0..scrambled.len() {
-
                     let (key, value) = scrambled.get(i).unwrap();
                     tree_ref.insert(key.as_slice(), value.as_slice());
                     yield_now();
                 }
-
             });
         }
         let tree_ref = &tree;
@@ -272,41 +254,37 @@ fn scan_while_insert<KG: KeyGenerator>(amount: usize, threads: u16) {
 
             loop {
                 let mut counter: usize = 0;
-                tree_ref.scan(b"".as_slice(), |x, x1| {
+                tree_ref.scan(b"".as_slice(), |_, _| {
                     counter += 1;
                     false
                 });
 
-                if counter >= target *95 / 100 {
+                if counter >= target * 95 / 100 {
                     break;
                 }
             }
-
         });
     });
 }
 #[test]
 fn hash_leaf_scan_while_insert() {
-    scan_while_insert::<BadHeadsKeyset>(1000, 16);
+    scan_while_insert(&BadHeadsKeyset, 1000, 16);
 }
 #[test]
 fn dense_leaf_scan_while_insert() {
-    scan_while_insert::<DenseKeyset::<10000>>(1000, 16);
+    scan_while_insert(&DenseKeyset { length: 10000 }, 1000, 16);
 }
 #[test]
 fn basic_leaf_scan_while_insert() {
-    scan_while_insert::<GoodHeadsKeyset>(1000, 16);
+    scan_while_insert(&GoodHeadsKeyset, 1000, 16);
 }
 
-
-fn scan_while_lookup<KG: KeyGenerator>(amount: usize, threads: u16) {
-
-    let bm = SimpleBm::<Page>::new((amount * threads as usize)/10);
+fn scan_while_lookup(kg: &dyn KeyGenerator, amount: usize, threads: u16) {
+    let bm = SimpleBm::<Page>::new((amount * threads as usize) / 10);
     let tree = Tree::new(&bm);
 
-
     let barrier = &Barrier::new(threads as usize + 1);
-    let keysets = prepare_keyset::<KG>(amount, threads);
+    let keysets = prepare_keyset(kg, amount, threads);
 
     thread::scope(|s| {
         for i in 0..threads {
@@ -316,7 +294,6 @@ fn scan_while_lookup<KG: KeyGenerator>(amount: usize, threads: u16) {
             let barrier_ref = &barrier;
 
             for i in 0..check.len() {
-
                 let (key, value) = check.get(i).unwrap();
                 tree_ref.insert(key.as_slice(), value.as_slice());
                 yield_now();
@@ -338,8 +315,6 @@ fn scan_while_lookup<KG: KeyGenerator>(amount: usize, threads: u16) {
                         yield_now();
                     }
                 }
-
-
             });
         }
         let tree_ref = &tree;
@@ -351,7 +326,7 @@ fn scan_while_lookup<KG: KeyGenerator>(amount: usize, threads: u16) {
 
             for _ in 0..10 {
                 let mut counter: usize = 0;
-                tree_ref.scan(b"".as_slice(), |key, val| {
+                tree_ref.scan(b"".as_slice(), |_, val| {
                     counter += 1;
 
                     assert_eq!(6, val.len());
@@ -362,38 +337,34 @@ fn scan_while_lookup<KG: KeyGenerator>(amount: usize, threads: u16) {
                 assert_eq!(counter, target);
                 yield_now();
             }
-
         });
     });
 }
 
 #[test]
 fn hash_leaf_scan_while_lookup() {
-    scan_while_lookup::<BadHeadsKeyset>(1000, 100);
+    scan_while_lookup(&BadHeadsKeyset, 1000, 100);
 }
 #[test]
 fn basic_leaf_scan_while_lookup() {
-    scan_while_lookup::<GoodHeadsKeyset>(1000, 100);
+    scan_while_lookup(&GoodHeadsKeyset, 1000, 100);
 }
 #[test]
 fn denses_leaf_scan_while_lookup() {
-    scan_while_lookup::<DenseKeyset::<10000>>(1000, 100);
+    scan_while_lookup(&DenseKeyset { length: 10000 }, 1000, 100);
 }
 
-
-fn scan_while_remove<KG: KeyGenerator>(amount: usize, threads: u16) {
-
+fn scan_while_remove(kg: &dyn KeyGenerator, amount: usize, threads: u16) {
     install_panic_hook();
 
-    let bm = SimpleBm::<Page>::new((amount * threads as usize)/10);
+    let bm = SimpleBm::<Page>::new((amount * threads as usize) / 10);
     let tree = Tree::new(&bm);
 
-
     let barrier = &Barrier::new(threads as usize + 1);
-    let keysets = prepare_keyset::<KG>(amount, threads*2);
+    let keysets = prepare_keyset(kg, amount, threads * 2);
 
     thread::scope(|s| {
-        for thread in 0..threads*2 {
+        for thread in 0..threads * 2 {
             let thread_id = thread;
             let check = keysets[thread_id as usize].clone();
             let tree_ref = &tree;
@@ -402,28 +373,22 @@ fn scan_while_remove<KG: KeyGenerator>(amount: usize, threads: u16) {
             for i in 0..check.len() {
                 let (key, value) = check.get(i).unwrap();
                 tree_ref.insert(key.as_slice(), value.as_slice());
-
             }
 
             if threads > thread {
-
                 install_panic_hook();
                 s.spawn(move || {
-
                     let mut scrambled = check.clone();
                     fastrand::shuffle(&mut scrambled);
 
                     barrier_ref.wait();
 
                     for i in 0..scrambled.len() {
-                        let (key, value) = &scrambled[i];
+                        let (key, _) = &scrambled[i];
                         let res = tree_ref.remove(key.as_slice());
                         yield_now();
                         assert!(res.is_some());
                     }
-
-
-
                 });
             }
         }
@@ -438,7 +403,7 @@ fn scan_while_remove<KG: KeyGenerator>(amount: usize, threads: u16) {
 
             loop {
                 let mut counter = 0;
-                tree_ref.scan(b"".as_slice(), |key, val| {
+                tree_ref.scan(b"".as_slice(), |_, _| {
                     counter += 1;
                     false
                 });
@@ -446,22 +411,20 @@ fn scan_while_remove<KG: KeyGenerator>(amount: usize, threads: u16) {
                     break;
                 }
             }
-
         }));
         assert!(scan_ok.is_ok(), "scan panicked");
-
     });
 }
 
 #[test]
 fn hash_leaf_scan_while_remove() {
-    scan_while_remove::<BadHeadsKeyset>(1000, 10);
+    scan_while_remove(&BadHeadsKeyset, 1000, 10);
 }
 #[test]
 fn basic_leaf_scan_while_remove() {
-    scan_while_remove::<GoodHeadsKeyset>(1000, 10);
+    scan_while_remove(&GoodHeadsKeyset, 1000, 10);
 }
 #[test]
 fn dense_leaf_scan_while_remove() {
-    scan_while_remove::<DenseKeyset::<10000>>(1000, 10);
+    scan_while_remove(&DenseKeyset { length: 10000 }, 1000, 10);
 }

@@ -1,7 +1,14 @@
 use crate::define_node;
+use crate::fully_dense_leaf::FullyDenseLeaf;
+use crate::hash_leaf::HashLeaf;
 use crate::heap_node::{HeapLength, HeapLengthError, HeapNode, HeapNodeInfo};
 use crate::key_source::{key_head, HeadSourceSlice, SourceSlice, SourceSlicePair};
-use crate::node::{find_separator, insert_upper_sibling, node_tag, page_cast_mut, page_id_from_bytes, page_id_from_olc_bytes, CommonNodeHead, KindInner, KindLeaf, NodeDynamic, NodeKind, NodeStatic, Page, PromoteError, ToFromPageExt, PAGE_ID_LEN, PAGE_SIZE};
+use crate::node::PromoteError::{Capacity, Keys, Node, ValueLen};
+use crate::node::{
+    find_separator, insert_upper_sibling, node_tag, page_cast_mut, page_id_from_bytes, page_id_from_olc_bytes,
+    CommonNodeHead, KindInner, KindLeaf, NodeDynamic, NodeKind, NodeStatic, Page, PromoteError, ToFromPageExt,
+    PAGE_ID_LEN, PAGE_SIZE,
+};
 use crate::util::Supreme;
 use bstr::{BStr, BString};
 use bytemuck::{Pod, Zeroable};
@@ -12,9 +19,6 @@ use std::mem::{offset_of, size_of, MaybeUninit};
 use std::ops::Range;
 use std::sync::atomic::{AtomicU8, Ordering};
 use umolc::{o_project, BufferManager, OPtr, OlcErrorHandler, PageId};
-use crate::fully_dense_leaf::FullyDenseLeaf;
-use crate::hash_leaf::HashLeaf;
-use crate::node::PromoteError::{Capacity, Keys, Node, ValueLen};
 
 const HINT_COUNT: usize = 16;
 const MIN_HINT_SPACING: usize = 3;
@@ -47,8 +51,8 @@ impl<V: NodeKind> BasicNode<V> {
         self.slice::<u8>(offset, PAGE_ID_LEN).try_into().unwrap()
     }
 
-    pub fn get_basic_node_data_size () -> usize {
-        BASIC_NODE_DATA_SIZE*4
+    pub fn get_basic_node_data_size() -> usize {
+        BASIC_NODE_DATA_SIZE * 4
     }
 
     pub fn reserved_head_count(count: usize) -> usize {
@@ -272,7 +276,6 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>, V: NodeKind> NodeStatic<'bm, BM> 
     type TruncatedKey<'a> = SourceSlicePair<u8, HeadSourceSlice, &'a [u8]>;
 
     fn insert(&mut self, key: &[u8], val: &[u8]) -> Result<Option<()>, ()> {
-
         let index = Self::find::<BM::OlcEH>(OPtr::from_mut(self), key);
         let count = self.common.count as usize;
         let new_heap_start = Self::heap_start_min(count + index.is_err() as usize);
@@ -343,7 +346,6 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>, V: NodeKind> NodeStatic<'bm, BM> 
         };
         page_id_from_olc_bytes(this.array_slice(lower_offset))
     }
-
 
     fn to_debug_kv(&self) -> (Vec<Vec<u8>>, Vec<Vec<u8>>) {
         let range = 0..self.common.count as usize;
@@ -431,7 +433,6 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>, V: NodeKind> NodeDynamic<'bm, BM>
     }
 
     fn split(&mut self, bm: BM, parent: &mut dyn NodeDynamic<'bm, BM>, _key: &[u8]) -> Result<(), ()> {
-
         let (lft, rght) = NodeStatic::<BM>::has_good_heads(self);
 
         let mut left = BasicNode::<V>::zeroed();
@@ -462,20 +463,29 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>, V: NodeKind> NodeDynamic<'bm, BM>
         self.copy_records(right, rr.clone(), 0);
         right.update_hints(0, rr.count(), 0);
 
-
-
         let current = scan_counter.load(Ordering::Relaxed);
 
         left.common.scan_counter.store(
-            if lft { 255 } else if current == 255 { 3 } else { current },
+            if lft {
+                255
+            } else if current == 255 {
+                3
+            } else {
+                current
+            },
             Ordering::Relaxed,
         );
 
         right.common.scan_counter.store(
-            if rght { 255 } else if current == 255 { 3 } else { current },
+            if rght {
+                255
+            } else if current == 255 {
+                3
+            } else {
+                current
+            },
             Ordering::Relaxed,
         );
-
 
         left.validate();
         right.validate();
@@ -490,7 +500,6 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>, V: NodeKind> NodeDynamic<'bm, BM>
     fn can_promote(&self, to: u8) -> Result<(), PromoteError> {
         match to {
             node_tag::FULLY_DENSE_LEAF => {
-
                 let count = self.common.count as usize;
                 if count == 0 {
                     return Err(Capacity);
@@ -509,17 +518,15 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>, V: NodeKind> NodeDynamic<'bm, BM>
                 let mut key_error: bool = false;
                 let mut val_error: bool = false;
 
-
                 if key_len > 4 {
                     return Err(Keys);
                 }
-
 
                 for i in 0..count {
                     let key = self.key_combined(i);
                     let val = self.heap_val(i);
 
-                    if key.len()!= key_len {
+                    if key.len() != key_len {
                         key_error = true;
                     }
 
@@ -536,8 +543,6 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>, V: NodeKind> NodeDynamic<'bm, BM>
                 if val_error {
                     return Err(ValueLen);
                 }
-
-
 
                 let mut min_suffix = u32::MAX;
                 let mut max_suffix = 0;
@@ -557,24 +562,24 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>, V: NodeKind> NodeDynamic<'bm, BM>
 
                     let index = u32::from_be_bytes(padded.try_into().unwrap());
 
-
                     min_suffix = min_suffix.min(index);
                     max_suffix = max_suffix.max(index);
                 }
                 let area = max_suffix - min_suffix + 1;
 
-                if area as usize >
-                    FullyDenseLeaf::get_capacity_fdl(self.lower_fence().len(),
-                                                     self.upper_fence_tail().len(),
-                                                     first_val.len()) {
+                if area as usize
+                    > FullyDenseLeaf::get_capacity_fdl(
+                        self.lower_fence().len(),
+                        self.upper_fence_tail().len(),
+                        first_val.len(),
+                    )
+                {
                     return Err(Capacity);
-
                 }
 
                 Ok(())
-            },
+            }
             node_tag::HASH_LEAF => {
-
                 let count = self.common.count;
                 let bump = self.heap_info().bump;
 
@@ -582,7 +587,7 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>, V: NodeKind> NodeDynamic<'bm, BM>
                 // well, more like up to 4 bytes, because some keys might be less than 4 bytes long.
                 // but I dont think this slight difference is worth the effort,
                 // as they will just be promoted to FDLs then, probably.
-                let new_bump = bump-(4*count);
+                let new_bump = bump - (4 * count);
 
                 let slots = HashLeaf::slot_reservation(count as usize) * 2;
                 let hashes = count;
@@ -597,11 +602,10 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>, V: NodeKind> NodeDynamic<'bm, BM>
                 }
 
                 Ok(())
-            },
-            _ => Err(Node)
+            }
+            _ => Err(Node),
         }
     }
-
 
     fn promote(&mut self, to: u8) {
         match to {
@@ -616,13 +620,9 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>, V: NodeKind> NodeDynamic<'bm, BM>
 
                 let scan_counter = &self.common.scan_counter;
 
-
-
                 let mut fdl = FullyDenseLeaf::zeroed();
-                fdl.init(self.lower_fence(), self.upper_fence_combined(), key_len+prefix_len, val_len)
+                fdl.init(self.lower_fence(), self.upper_fence_combined(), key_len + prefix_len, val_len)
                     .expect("FDL init_wrapper failed in promote()");
-
-
 
                 for i in 0..count {
                     let suffix = self.key_combined(i);
@@ -637,7 +637,7 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>, V: NodeKind> NodeDynamic<'bm, BM>
 
                 NodeStatic::<BM>::set_scan_counter(&mut fdl, &scan_counter);
                 *self.as_page_mut() = fdl.copy_page();
-            },
+            }
             node_tag::HASH_LEAF => {
                 let count = self.common.count as usize;
 
@@ -645,7 +645,6 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>, V: NodeKind> NodeDynamic<'bm, BM>
 
                 let mut hash_leaf = HashLeaf::zeroed();
                 NodeStatic::<BM>::init(&mut hash_leaf, self.lower_fence(), self.upper_fence_combined(), None);
-
 
                 for i in 0..count {
                     let suffix = self.key_combined(i);
@@ -664,25 +663,21 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>, V: NodeKind> NodeDynamic<'bm, BM>
 
                 *self.as_page_mut() = hash_leaf.copy_page();
             }
-            _=> unreachable!()
+            _ => unreachable!(),
         }
-
     }
 
     fn scan_with_callback(
         &self,
         buffer: &mut [MaybeUninit<u8>; 512],
         start: &[u8],
-        callback: &mut dyn FnMut(&[u8], &[u8]) -> bool
+        callback: &mut dyn FnMut(&[u8], &[u8]) -> bool,
     ) -> bool {
-
-        let mut lf : usize = 0;
+        let mut lf: usize = 0;
 
         if self.lower_fence() != start {
-
             let index = Self::find::<BM::OlcEH>(unsafe { OPtr::from_ref(self) }, start);
             lf = index.unwrap_or(0);
-
         }
 
         let prefix = self.prefix();
@@ -695,10 +690,8 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>, V: NodeKind> NodeDynamic<'bm, BM>
 
             let total_len = prefix_len + suffix.len();
             suffix.write_to_uninit(&mut buffer[prefix_len..total_len]);
-            let full_key : &mut [u8] = unsafe {
-                std::slice::from_raw_parts_mut(buffer.as_mut_ptr() as *mut u8, total_len)
-            };
-
+            let full_key: &mut [u8] =
+                unsafe { std::slice::from_raw_parts_mut(buffer.as_mut_ptr() as *mut u8, total_len) };
 
             if callback(&full_key, val) {
                 return true;
@@ -707,7 +700,6 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>, V: NodeKind> NodeDynamic<'bm, BM>
 
         false
     }
-
 
     fn retry_later(&mut self) {
         self.common.scan_counter.fetch_add(1, Ordering::Relaxed);
@@ -741,7 +733,6 @@ mod tests {
     use rand::SeedableRng;
     use std::collections::HashSet;
     use umolc::{BufferManager, BufferManagerExt, BufferManagerGuard, OPtr, PageId, SimpleBm};
-    use crate::fully_dense_leaf::FullyDenseLeaf;
 
     type BM<'a> = &'a SimpleBm<Page>;
 
@@ -797,7 +788,7 @@ mod tests {
 
     #[test]
     fn test_fdl() {
-        test_leaf::<& 'static SimpleBm<Page>, BasicLeaf>()
+        test_leaf::<&'static SimpleBm<Page>, BasicLeaf>()
     }
 
     #[test]

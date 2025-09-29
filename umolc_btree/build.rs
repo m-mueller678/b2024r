@@ -38,14 +38,14 @@ fn main() {
 
     // Get the list of enabled Cargo feature flags
     let cargo_features = env::vars()
-        .filter_map(|(k, v)| (k.strip_prefix("CARGO_FEATURE_").map(|k| (k.to_string(), v))))
+        .filter_map(|(k, v)| k.strip_prefix("CARGO_FEATURE_").map(|k| (k.to_string(), v)))
         .map(|x| {
             dbg!(x.1);
             x.0.to_string()
         })
         .collect::<Vec<_>>();
     let cargo_cfg = env::vars()
-        .filter_map(|(k, v)| (k.strip_prefix("CARGO_CFG_").map(|k| (k.to_string(), v))))
+        .filter_map(|(k, v)| k.strip_prefix("CARGO_CFG_").map(|k| (k.to_string(), v)))
         .map(|(k, v)| {
             let vs: Vec<Value> = v.split(',').filter(|vv| !vv.is_empty()).map(Value::from).collect();
             (k, Value::from(vs))

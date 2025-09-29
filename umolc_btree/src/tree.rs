@@ -1,13 +1,16 @@
 use crate::basic_node::{BasicInner, BasicLeaf};
 use crate::hash_leaf::HashLeaf;
 use crate::key_source::SourceSlice;
-use crate::node::{node_tag, o_ptr_is_inner, o_ptr_lookup_inner, o_ptr_lookup_leaf, page_cast, page_cast_mut, page_id_to_bytes, CommonNodeHead, NodeDynamic, NodeDynamicAuto, NodeStatic, OPtrScanCounterExt, Page, PromoteError, ToFromPageExt, PAGE_SIZE};
+use crate::node::{
+    node_tag, o_ptr_is_inner, o_ptr_lookup_inner, o_ptr_lookup_leaf, page_cast, page_cast_mut, page_id_to_bytes,
+    CommonNodeHead, NodeDynamic, NodeDynamicAuto, NodeStatic, OPtrScanCounterExt, Page, PromoteError, ToFromPageExt,
+    PAGE_SIZE,
+};
 use crate::{define_node, MAX_KEY_SIZE, MAX_VAL_SIZE};
 use std::fmt::{Debug, Formatter};
 use std::marker::PhantomData;
 use std::mem::{size_of, MaybeUninit};
 use std::sync::atomic::{AtomicU8, Ordering};
-use bstr::BStr;
 use umolc::{
     o_project, BufferManageGuardUpgrade, BufferManager, BufferManagerExt, BufferManagerGuard, ExclusiveGuard, OPtr,
     OlcErrorHandler, OptimisticGuard, PageId,
@@ -18,8 +21,6 @@ pub struct Tree<'bm, BM: BufferManager<'bm, Page = Page>> {
     bm: BM,
     _p: PhantomData<&'bm BM>,
 }
-
-
 
 impl<'bm, BM: BufferManager<'bm, Page = Page>> Tree<'bm, BM> {
     pub fn new(bm: BM) -> Self {
@@ -61,34 +62,26 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> Tree<'bm, BM> {
     }
     pub fn scan<F>(&self, lower_bound: &[u8], mut callback: F)
     where
-            for<'a> F: FnMut(&[u8], &'a [u8]) -> bool {
+        for<'a> F: FnMut(&[u8], &'a [u8]) -> bool,
+    {
         let mut buffer: [MaybeUninit<u8>; 512] = unsafe { MaybeUninit::uninit().assume_init() };
-;
         let mut key = lower_bound;
         loop {
-
             let (len, breakof) = BM::repeat(|| self.try_scan(key, &mut buffer, &mut callback));
             if breakof || len == 0 {
                 return;
             }
-            key = unsafe {
-                std::slice::from_raw_parts_mut(
-                    buffer.as_mut_ptr() as *mut u8,
-                    len
-                )
-            };
+            key = unsafe { std::slice::from_raw_parts_mut(buffer.as_mut_ptr() as *mut u8, len) };
         }
-
     }
 
     fn try_scan<F>(&self, key: &[u8], buffer: &mut [MaybeUninit<u8>; 512], mut callback: F) -> (usize, bool)
     where
-            for<'a> F: FnMut(&[u8], &'a [u8]) -> bool {
-
+        for<'a> F: FnMut(&[u8], &'a [u8]) -> bool,
+    {
         let [parent, node] = self.descend(key, None);
 
         parent.release_unchecked();
-
 
         let mut node = self.increase_scan_counter(node);
         let o = node.o_ptr();
@@ -109,20 +102,15 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> Tree<'bm, BM> {
 
             let upper_len = upper.len();
 
-            upper.to_vec()
-                .write_to_uninit(&mut buffer[..upper_len]);
-
+            upper.to_vec().write_to_uninit(&mut buffer[..upper_len]);
 
             if upper_len == 0 {
                 return (0, true);
             }
 
             (upper_len, false)
-        }
-
-        else {
-
-            let mut node: BM::GuardX = node.upgrade();
+        } else {
+            let node: BM::GuardX = node.upgrade();
 
             let ret = node.as_dyn_node::<BM>().scan_with_callback(buffer, key, &mut callback);
 
@@ -134,9 +122,7 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> Tree<'bm, BM> {
 
             let upper_len = upper.len();
 
-            upper.to_vec()
-                .write_to_uninit(&mut buffer[..upper_len]);
-
+            upper.to_vec().write_to_uninit(&mut buffer[..upper_len]);
 
             if upper_len == 0 {
                 return (0, true);
@@ -144,16 +130,15 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> Tree<'bm, BM> {
 
             (upper_len, false)
         }
-
-
     }
 
     pub fn scan_node_types<F>(&self, lower_bound: &[u8], mut callback: F)
-    where F: FnMut(u8, u8, u16) -> bool {
+    where
+        F: FnMut(u8, u8, u16) -> bool,
+    {
         let mut buffer: [MaybeUninit<u8>; 512] = unsafe { MaybeUninit::uninit().assume_init() };
 
         let mut key = lower_bound;
-
 
         loop {
             let [parent, node] = self.descend(key, None);
@@ -161,28 +146,24 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> Tree<'bm, BM> {
             let node: BM::GuardS = node.upgrade();
             parent.release_unchecked();
 
-
-
-            let ret = callback(node.as_dyn_node::<BM>().get_node_tag(), node.as_dyn_node::<BM>().get_scan_counter().load(Ordering::Relaxed), node.as_dyn_node::<BM>().get_count());
+            let ret = callback(
+                node.as_dyn_node::<BM>().get_node_tag(),
+                node.as_dyn_node::<BM>().get_scan_counter().load(Ordering::Relaxed),
+                node.as_dyn_node::<BM>().get_count(),
+            );
 
             if ret {
                 return;
             }
 
-
             let upper = node.upper_fence_combined();
 
             let upper_len = upper.len();
-            key = {
-                upper.to_vec()
-                    .write_to_uninit(&mut buffer[..upper_len])
-            };
+            key = upper.to_vec().write_to_uninit(&mut buffer[..upper_len]);
             if key.is_empty() {
                 return;
             }
-
         }
-
     }
 
     fn try_remove(&self, k: &[u8], removed: &mut bool) {
@@ -191,7 +172,6 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> Tree<'bm, BM> {
         let node = self.decrease_scan_counter(node);
 
         let mut node: BM::GuardX = node.upgrade();
-
 
         if node.as_dyn_node_mut::<BM>().leaf_remove(k).is_some() {
             *removed = true;
@@ -266,7 +246,6 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> Tree<'bm, BM> {
         let node = self.decrease_scan_counter(node);
         let mut node: BM::GuardX = node.upgrade();
 
-
         match node.as_dyn_node_mut::<BM>().insert_leaf(k, val) {
             Ok(x) => {
                 parent.release_unchecked();
@@ -283,12 +262,9 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> Tree<'bm, BM> {
                 #[cfg(feature = "disallow_promotions")]
                 let can_promote = false;
 
-
                 if can_promote {
                     node.as_dyn_node_mut::<BM>().promote(node_tag::FULLY_DENSE_LEAF);
-                }
-
-                else if self.split_locked_node(&mut node, &mut parent, k).is_err() {
+                } else if self.split_locked_node(&mut node, &mut parent, k).is_err() {
                     let parent_id = parent.page_id();
                     drop(parent);
                     drop(node);
@@ -308,22 +284,19 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> Tree<'bm, BM> {
 
     pub fn lookup_to_buffer<'a>(&self, k: &[u8], b: &'a mut [MaybeUninit<u8>; MAX_VAL_SIZE]) -> Option<&'a mut [u8]> {
         let valid_len = self.lookup_inspect(k, |v| v.map(|v| v.load_bytes_uninit(&mut b[..v.len()]).len()));
-        valid_len.map(|l| unsafe {
-            std::slice::from_raw_parts_mut(b[..l].as_mut_ptr() as *mut u8, l)
-        })
+        valid_len.map(|l| unsafe { std::slice::from_raw_parts_mut(b[..l].as_mut_ptr() as *mut u8, l) })
     }
 
     pub fn lookup_inspect<R>(&self, k: &[u8], mut f: impl FnMut(Option<OPtr<[u8], BM::OlcEH>>) -> R) -> R {
         BM::repeat(move || if let Some((_guard, val)) = self.try_lookup(k) { f(Some(val)) } else { f(None) })
     }
 
-    pub fn try_lookup(&self, k: &[u8]) -> Option<(BM::GuardO, OPtr<[u8], BM::OlcEH>)> {
+    pub fn try_lookup<'a>(&'a self, k: &[u8]) -> Option<(BM::GuardO, OPtr<'a, [u8], BM::OlcEH>)> {
         let [parent, node] = self.descend(k, None);
         drop(parent);
         let node = self.decrease_scan_counter(node);
 
         let val = o_ptr_lookup_leaf::<BM>(node.o_ptr_bm(), k)?;
-
 
         Some((node, val))
     }
@@ -354,7 +327,7 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> Tree<'bm, BM> {
         path
     }
 
-    fn decrease_scan_counter(&self, mut node: BM::GuardO) -> BM::GuardO{
+    fn decrease_scan_counter(&self, mut node: BM::GuardO) -> BM::GuardO {
         if fastrand::u8(..100) < 5 {
             node.o_ptr().decrease_scan_counter();
 
@@ -364,8 +337,7 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> Tree<'bm, BM> {
         node
     }
 
-
-    fn increase_scan_counter(&self, mut node: BM::GuardO) -> BM::GuardO{
+    fn increase_scan_counter(&self, mut node: BM::GuardO) -> BM::GuardO {
         if fastrand::u8(..100) < 15 {
             node.o_ptr().increase_scan_counter();
 
@@ -375,29 +347,22 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> Tree<'bm, BM> {
         node
     }
 
-
-
-
-    fn adaptive_promotion (&self, mut node: BM::GuardO) -> BM::GuardO{
+    fn adaptive_promotion(&self, mut node: BM::GuardO) -> BM::GuardO {
         let o: OPtr<'_, Page, BM::OlcEH> = node.o_ptr();
 
         let tag: u8 = o_project!(o.common.tag).r();
 
-        let scan: u8 = unsafe {
-            (&(*(o.to_raw() as *const Page)).common.scan_counter).load(Ordering::Relaxed)
-        };
-
+        let scan: u8 = unsafe { (&(*(o.to_raw() as *const Page)).common.scan_counter).load(Ordering::Relaxed) };
 
         #[cfg(not(feature = "disallow_promotions"))]
-        if (tag == 251 && scan == 0) || (tag==252 && scan >= 3) {
+        if (tag == 251 && scan == 0) || (tag == 252 && scan >= 3) {
             let mut node: BM::GuardX = node.upgrade();
 
-            let to = if tag == 251 {252} else {251};
+            let to = if tag == 251 { 252 } else { 251 };
 
             if node.as_dyn_node::<BM>().can_promote(to).is_ok() {
                 node.as_dyn_node_mut::<BM>().promote(to);
-            }
-            else {
+            } else {
                 node.as_dyn_node_mut::<BM>().retry_later();
             }
 
@@ -407,14 +372,11 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> Tree<'bm, BM> {
         node
     }
 
-
     fn downgrade_guard(&self, x: BM::GuardX) -> BM::GuardO {
         let pid = x.page_id();
-        let v   = x.release();                // unlock X, get new version
-        BM::GuardO::acquire_wait_version(self.bm, pid, v)
-            .unwrap_or_else(|| BM::GuardO::acquire_wait(self.bm, pid))
+        let v = x.release(); // unlock X, get new version
+        BM::GuardO::acquire_wait_version(self.bm, pid, v).unwrap_or_else(|| BM::GuardO::acquire_wait(self.bm, pid))
     }
-
 }
 
 impl<'bm, BM: BufferManager<'bm, Page = Page>> Drop for Tree<'bm, BM> {
@@ -470,7 +432,6 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeStatic<'bm, BM> for MetadataP
         PageId { x: o_project!(this.root.x).r() }
     }
 
-
     fn to_debug_kv(&self) -> (Vec<Vec<u8>>, Vec<Vec<u8>>) {
         (Vec::new(), vec![page_id_to_bytes(self.root).to_vec()])
     }
@@ -499,7 +460,12 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeDynamic<'bm, BM> for Metadata
         unimplemented!()
     }
 
-    fn scan_with_callback(&self, _buffer: &mut [MaybeUninit<u8>; 512], _start : &[u8], _callback: &mut dyn FnMut(&[u8], &[u8]) -> bool) -> bool {
+    fn scan_with_callback(
+        &self,
+        _buffer: &mut [MaybeUninit<u8>; 512],
+        _start: &[u8],
+        _callback: &mut dyn FnMut(&[u8], &[u8]) -> bool,
+    ) -> bool {
         unimplemented!()
     }
 
@@ -522,7 +488,6 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> NodeDynamic<'bm, BM> for Metadata
     fn promote(&mut self, _to: u8) {
         unimplemented!()
     }
-
 
     fn retry_later(&mut self) {
         todo!()

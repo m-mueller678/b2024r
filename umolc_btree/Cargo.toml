@@ -40,8 +40,3 @@ disallow_promotions=["page_4k"]
 [[bench]]
 name="multithread"
 harness = false
-
-
-[[bench]]
-name="promotion_benches"
-harness = false

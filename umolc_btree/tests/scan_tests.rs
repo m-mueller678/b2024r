@@ -1,33 +1,25 @@
-extern crate core;
-
-use std::cmp::Ordering;
-use bytemuck::from_bytes;
 use dev_utils::keyset_generator::{BadHeadsKeyset, DenseKeyset, GoodHeadsKeyset, KeyGenerator};
 use dev_utils::tree_utils::check_node_tag_percentage;
-use umolc_btree::{Page, Tree};
+use std::cmp::Ordering;
 use umolc::SimpleBm;
+use umolc_btree::{Page, Tree};
 
 #[test]
 fn basic_scan_test() {
-
     const PAGE_COUNT: usize = 512;
     let bm = SimpleBm::<Page>::new(PAGE_COUNT);
     let tree = Tree::new(&bm);
     let amount_inserts = 10000;
 
-
-
     fn generate_key(i: u32, key_len: usize) -> Vec<u8> {
         if key_len < 8 {
             panic!("Key length must be at least8");
         }
-        let mut key= (0..).map(|i| i as u8).take(key_len-8).collect::<Vec<u8>>();
+        let mut key = (0..).map(|i| i as u8).take(key_len - 8).collect::<Vec<u8>>();
         key.extend_from_slice(&i.to_be_bytes());
         key.extend_from_slice(&i.to_be_bytes());
         key
     }
-
-
 
     for i in 0..amount_inserts {
         let key = generate_key(i, 8);
@@ -35,27 +27,24 @@ fn basic_scan_test() {
         tree.insert(key.as_slice(), value.as_slice());
     }
 
-    for k in 0..1000{
+    for k in 0..1000 {
         let mut i: u32 = k;
-        let current_key = generate_key(k,8).clone();
-        tree.scan(current_key.as_slice(),
-                  |x, x1| {
-                      assert_eq!(i.to_be_bytes().as_slice(), x1, "Values dont match on scan");
-                      i += 1;
-                      false
-                  }
-        );
+        let current_key = generate_key(k, 8).clone();
+        tree.scan(current_key.as_slice(), |_, x1| {
+            assert_eq!(i.to_be_bytes().as_slice(), x1, "Values dont match on scan");
+            i += 1;
+            false
+        });
         assert_eq!(amount_inserts, i, "The scan did not find all required values.");
     }
 }
 
-fn scan_on_node_type<KG: KeyGenerator>(amount: usize, node_tag: u8, margin: f32) {
-
+fn scan_on_node_type(kg: &dyn KeyGenerator, amount: usize, node_tag: u8, margin: f32) {
     let page_count: usize = amount / 100;
     let bm = SimpleBm::<Page>::new(page_count);
     let tree = Tree::new(&bm);
 
-    let mut keyset = KG::generate_keyset(amount);
+    let mut keyset = kg.generate_keyset(amount);
     keyset.sort_by(|a, b| a.0.cmp(&b.0));
 
     for (i, (_, val)) in keyset.iter_mut().enumerate() {
@@ -79,13 +68,12 @@ fn scan_on_node_type<KG: KeyGenerator>(amount: usize, node_tag: u8, margin: f32)
     for lower in 0..check.len() {
         let mut i = lower as u32;
         let mut first = true;
-        tree.scan(check[lower].0.as_slice(),|key, val| {
-
+        tree.scan(check[lower].0.as_slice(), |key, val| {
             if val.len() != 4 {
                 panic!("A scanned value was not long enough");
             }
 
-            let mut buffer: [u8; 4] = [0,0,0,0];
+            let mut buffer: [u8; 4] = [0, 0, 0, 0];
             buffer.copy_from_slice(val);
 
             let index: u32 = u32::from_be_bytes(buffer);
@@ -101,22 +89,20 @@ fn scan_on_node_type<KG: KeyGenerator>(amount: usize, node_tag: u8, margin: f32)
             assert!(cmp == Ordering::Less || first, "Values are in wrong order!");
 
             first = false;
-            i+=1;
+            i += 1;
             false
         })
     }
 
-
     for upper in 0..check.len() {
         let mut last: Vec<u8> = Vec::new();
         let mut i = 0;
-        tree.scan(check[0].0.as_slice(),|key, val| {
-
+        tree.scan(check[0].0.as_slice(), |key, val| {
             if val.len() != 4 {
                 panic!("A scanned value was not long enough");
             }
 
-            let mut buffer: [u8; 4] = [0,0,0,0];
+            let mut buffer: [u8; 4] = [0, 0, 0, 0];
             buffer.copy_from_slice(val);
 
             let index: u32 = u32::from_be_bytes(buffer);
@@ -133,7 +119,7 @@ fn scan_on_node_type<KG: KeyGenerator>(amount: usize, node_tag: u8, margin: f32)
 
             last = key.to_vec();
 
-            i+=1;
+            i += 1;
 
             key == check[upper].0
         });
@@ -143,31 +129,29 @@ fn scan_on_node_type<KG: KeyGenerator>(amount: usize, node_tag: u8, margin: f32)
 }
 
 #[test]
-fn test_scan_hash_leaf (){
+fn test_scan_hash_leaf() {
     fastrand::seed(5510);
-    scan_on_node_type::<BadHeadsKeyset>(5000, 252, 0.7);
+    scan_on_node_type(&BadHeadsKeyset, 5000, 252, 0.7);
 }
 
 #[test]
-fn test_scan_basic_leaf (){
+fn test_scan_basic_leaf() {
     fastrand::seed(5510);
-    scan_on_node_type::<GoodHeadsKeyset>(5000, 251, 0.7);
+    scan_on_node_type(&GoodHeadsKeyset, 5000, 251, 0.7);
 }
 
 #[test]
-fn test_scan_dense_leaf (){
+fn test_scan_dense_leaf() {
     fastrand::seed(5510);
-    scan_on_node_type::<DenseKeyset::<10000>>(10000, 253, 0.50);
+    scan_on_node_type(&DenseKeyset { length: 10000 }, 10000, 253, 0.50);
 }
 
-
-fn scan_on_node_type_sparse<KG: KeyGenerator>(amount: usize, node_tag: u8, margin: f32) {
-
+fn scan_on_node_type_sparse(kg: &dyn KeyGenerator, amount: usize, node_tag: u8, margin: f32) {
     let page_count: usize = amount / 100;
     let bm = SimpleBm::<Page>::new(page_count);
     let tree = Tree::new(&bm);
 
-    let mut keyset = KG::generate_keyset(amount);
+    let mut keyset = kg.generate_keyset(amount);
     keyset.sort_by(|a, b| a.0.cmp(&b.0));
 
     for (i, (_, val)) in keyset.iter_mut().enumerate() {
@@ -189,14 +173,13 @@ fn scan_on_node_type_sparse<KG: KeyGenerator>(amount: usize, node_tag: u8, margi
 
     check_node_tag_percentage(node_tag, margin, "insert", true, true, &tree);
 
-    let to_remove = check.len()/2;
+    let to_remove = check.len() / 2;
 
     for _ in 0..to_remove {
         let index = fastrand::usize(..remaining.len());
         tree.remove(remaining[index].0.as_slice());
         remaining.remove(index);
     }
-
 
     for lower in 0..check.len() {
         let mut index = 0;
@@ -207,7 +190,7 @@ fn scan_on_node_type_sparse<KG: KeyGenerator>(amount: usize, node_tag: u8, margi
         // if I keep it persistent to iterations, for some reason it will lose track sometimes
         // the runtime of this test changes from O(n*n/2) to O(n*n) (not even really), so it doesnt matter
         let mut remaining_index: usize = 0;
-        tree.scan(check[lower].0.as_slice(),|key, val| {
+        tree.scan(check[lower].0.as_slice(), |key, val| {
             if val.len() != 4 {
                 panic!("A scanned value was not long enough");
             }
@@ -238,24 +221,27 @@ fn scan_on_node_type_sparse<KG: KeyGenerator>(amount: usize, node_tag: u8, margi
     }
 
     let mut counter = 0;
-    tree.scan(b"".as_slice(), |_,_| {counter+=1; false});
+    tree.scan(b"".as_slice(), |_, _| {
+        counter += 1;
+        false
+    });
     assert_eq!(remaining.len(), counter, "A scan over an empty slice does not catch all values.");
 }
 
 #[test]
-fn test_scan_sparse_hash_leaf (){
+fn test_scan_sparse_hash_leaf() {
     fastrand::seed(5510);
-    scan_on_node_type_sparse::<BadHeadsKeyset>(5000, 252, 0.7);
+    scan_on_node_type_sparse(&BadHeadsKeyset, 5000, 252, 0.7);
 }
 
 #[test]
-fn test_scan_sparse_basic_leaf (){
+fn test_scan_sparse_basic_leaf() {
     fastrand::seed(5510);
-    scan_on_node_type_sparse::<GoodHeadsKeyset>(5000, 251, 0.7);
+    scan_on_node_type_sparse(&GoodHeadsKeyset, 5000, 251, 0.7);
 }
 
 #[test]
-fn test_scan_sparse_dense_leaf (){
+fn test_scan_sparse_dense_leaf() {
     fastrand::seed(5510);
-    scan_on_node_type_sparse::<DenseKeyset::<10000>>(10000, 253, 0.50);
+    scan_on_node_type_sparse(&DenseKeyset { length: 10000 }, 10000, 253, 0.50);
 }
