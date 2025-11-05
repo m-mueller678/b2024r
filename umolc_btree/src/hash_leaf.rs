@@ -12,7 +12,7 @@ use std::fmt::{Debug, Display, Formatter};
 use std::vec::Vec;
 use std::mem::{offset_of, MaybeUninit};
 use std::ops::Range;
-use std::sync::atomic::{AtomicU8, Ordering};
+use crate::sync::{AtomicU8, Ordering};  // adapted for loom
 use umolc::{o_project, BufferManager, OPtr, OlcErrorHandler, PageId};
 use crate::basic_node::BasicLeaf;
 use crate::hash_leaf::PromoteError::{Capacity, Keys, ValueLen};

@@ -8,6 +8,7 @@ radium = { git = "https://github.com/Vayion/radium" }
 bytemuck = { version = "1.19.0",features = ["derive","zeroable_atomics"] }
 libc = "0.2.161"
 memmap2="0.9.5"
+loom = "0.7.2"
 
 [features]
 track-thread-locks=[]

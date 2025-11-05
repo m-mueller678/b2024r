@@ -10,6 +10,7 @@ mod key_source;
 mod node;
 mod tree;
 mod util;
+mod sync;
 
 pub use node::Page;
 pub use tree::Tree;

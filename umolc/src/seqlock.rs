@@ -1,7 +1,7 @@
 use crate::{OlcVersion, OptimisticError};
 use bytemuck::Zeroable;
-use std::sync::atomic::Ordering::{Acquire, Relaxed, Release};
-use std::sync::atomic::{fence, AtomicU64};
+use crate::sync::{Acquire, Relaxed, Release}; // adapted for loom
+use crate::sync::{fence, AtomicU64}; // adapted for loom
 
 #[derive(Zeroable)]
 pub struct SeqLock(AtomicU64);

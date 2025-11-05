@@ -147,7 +147,7 @@ pub trait HeapNode: ToFromPageExt + Debug {
         h.bump = dst_bump as u16;
         self.validate();
     }
-
+    
     fn heap_info_mut(&mut self) -> &mut HeapNodeInfo;
     fn heap_info(&self) -> &HeapNodeInfo;
 

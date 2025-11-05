@@ -9,10 +9,10 @@ use bstr::{BStr, BString};
 use bytemuck::Zeroable;
 use indxvec::Printing;
 use itertools::Itertools;
-use std::cell::Cell;
+use crate::sync::Cell; // adapted for loom
 use std::fmt::{Debug, Display, Formatter};
 use std::mem::{offset_of, MaybeUninit};
-use std::sync::atomic::{AtomicU8, Ordering};
+use crate::sync::{AtomicU8, Ordering};  // adapted for loom
 use std::usize;
 use umolc::{o_project, BufferManager, OPtr, OlcErrorHandler, PageId};
 

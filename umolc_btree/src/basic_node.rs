@@ -10,7 +10,7 @@ use itertools::Itertools;
 use std::fmt::{Debug, Formatter};
 use std::mem::{offset_of, size_of, MaybeUninit};
 use std::ops::Range;
-use std::sync::atomic::{AtomicU8, Ordering};
+use crate::sync::{AtomicU8, Ordering};  // adapted for loom
 use umolc::{o_project, BufferManager, OPtr, OlcErrorHandler, PageId};
 use crate::fully_dense_leaf::FullyDenseLeaf;
 use crate::hash_leaf::HashLeaf;

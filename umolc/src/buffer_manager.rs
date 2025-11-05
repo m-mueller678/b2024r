@@ -4,10 +4,10 @@ use crate::{
     OptimisticGuard, PageId, UnwindOlcEh,
 };
 use bytemuck::Zeroable;
-use std::cell::UnsafeCell;
+use crate::sync::UnsafeCell; // adapted for loom
 use std::mem::{forget, MaybeUninit};
 use std::ops::{Deref, DerefMut};
-use std::sync::Mutex;
+use crate::sync::Mutex; // adapted for loom
 
 pub struct SimpleBm<P> {
     pages: Box<[UnsafeCell<P>]>,

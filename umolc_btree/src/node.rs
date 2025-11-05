@@ -10,7 +10,7 @@ use static_assertions::const_assert_eq;
 use std::{assert, fmt};
 use std::fmt::{Debug, Formatter};
 use std::mem::{swap, transmute, MaybeUninit};
-use std::sync::atomic::{AtomicU8, Ordering};
+use crate::sync::{AtomicU8, Ordering};  // adapted for loom
 use umolc::{
     o_project, BufferManager, BufferManagerExt, BufferManagerGuard, ExclusiveGuard, OPtr, OlcErrorHandler, PageId,
 };

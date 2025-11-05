@@ -14,6 +14,7 @@ mod buffer_manager;
 mod o_ptr;
 mod optimistic_error;
 mod seqlock;
+mod sync;
 
 pub use buffer_manager::*;
 pub use optimistic_error::{PanicOlcEh, UnwindOlcEh};

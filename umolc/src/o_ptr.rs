@@ -2,14 +2,14 @@ use crate::optimistic_error::OlcErrorHandler;
 use bytemuck::Pod;
 use radium::marker::Atomic;
 use radium::Radium;
-use std::cell::UnsafeCell;
+use crate::sync::UnsafeCell; // adapted for loom
 use std::cmp::Ordering;
 use std::ffi::c_void;
 use std::marker::PhantomData;
 use std::mem::MaybeUninit;
 use std::ptr::slice_from_raw_parts;
 use std::slice::SliceIndex;
-use std::sync::atomic::Ordering::Relaxed;
+use crate::sync::Relaxed; // adapted for loom
 
 impl<T: ?Sized, O: OlcErrorHandler> Copy for OPtr<'_, T, O> {}
 impl<T: ?Sized, O: OlcErrorHandler> Clone for OPtr<'_, T, O> {

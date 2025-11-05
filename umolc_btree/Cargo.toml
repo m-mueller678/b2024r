@@ -15,6 +15,7 @@ indxvec = "1.9.6"
 crc32fast = "1.4.2"
 arrayvec = "0.7.6"
 fastrand = "2"
+loom = "0.7.2"
 
 [dev-dependencies]
 dev_utils = {path = "../dev_utils"}

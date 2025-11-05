@@ -6,7 +6,7 @@ use crate::{define_node, MAX_KEY_SIZE, MAX_VAL_SIZE};
 use std::fmt::{Debug, Formatter};
 use std::marker::PhantomData;
 use std::mem::{size_of, MaybeUninit};
-use std::sync::atomic::{AtomicU8, Ordering};
+use crate::sync::{AtomicU8, Ordering};  // adapted for loom
 use bstr::BStr;
 use umolc::{
     o_project, BufferManageGuardUpgrade, BufferManager, BufferManagerExt, BufferManagerGuard, ExclusiveGuard, OPtr,
