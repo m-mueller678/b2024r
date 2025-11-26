@@ -3,20 +3,18 @@ extern crate core;
 pub mod keyset_generator;
 pub mod tree_utils;
 
-mod sync;
-
 use minstant::Instant;
 use rand::distributions::{Distribution, Uniform};
 use rand::rngs::SmallRng;
 use rand::{Rng, SeedableRng};
 use rayon::prelude::*;
 use serde_json::{Map, Value};
-use crate::sync::Cell; // adapted for loom
+use std::cell::Cell;
 use std::collections::HashSet;
 use std::hash::{DefaultHasher, Hash, Hasher};
 use std::ops::{Range, RangeInclusive};
-use crate::sync::{Mutex, Once}; // adapted for loom
-use crate::sync::LocalKey; // adapted for loom
+use std::sync::{Mutex, Once};
+use std::thread::LocalKey;
 use std::time::Duration;
 pub use {serde_json, zipf};
 
