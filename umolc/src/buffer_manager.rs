@@ -21,8 +21,11 @@ impl<P: Zeroable> SimpleBm<P> {
     pub fn new(capacity: usize) -> Self {
         unsafe {
             SimpleBm {
-                pages: Box::<[MaybeUninit<_>]>::assume_init(Box::new_zeroed_slice(capacity)),
+                pages: Box::<[MaybeUninit<_>]>::assume_init(Box::new_zeroed_slice(capacity)),                
+                #[cfg(not(loom))]
                 locks: Box::<[MaybeUninit<_>]>::assume_init(Box::new_zeroed_slice(capacity)),
+                #[cfg(loom)]
+                locks: { (0..capacity).map(|_| SeqLock::new()).collect() },
                 free_list: Mutex::new((0..capacity).collect()),
             }
         }

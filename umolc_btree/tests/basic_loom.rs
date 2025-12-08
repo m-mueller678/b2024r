@@ -1,4 +1,5 @@
 use loom::thread;
+use loom::thread::yield_now;
 use loom::sync::Arc;
 
 use dev_utils::keyset_generator::{GoodHeadsKeyset, KeyGenerator};
@@ -90,7 +91,7 @@ fn simple_insert() {
     let amount = 4;
     let threads = 2;
 
-    loom::model(move || {
+    loom::model(move || {          
         let bm: &'static SimpleBm<Page> = Box::leak(Box::new(SimpleBm::<Page>::new(amount * threads as usize)));
         let tree = Arc::new(Tree::new(bm));
 

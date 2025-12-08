@@ -3,8 +3,10 @@ use bytemuck::Zeroable;
 use crate::sync::{Acquire, Relaxed, Release}; // adapted for loom
 use crate::sync::{fence, AtomicU64}; // adapted for loom
 
-#[derive(Zeroable)]
+// #[derive(Zeroable)]
 pub struct SeqLock(AtomicU64);
+
+unsafe impl Zeroable for SeqLock {}
 
 const COUNT_BITS: u32 = 10;
 const COUNT_MASK: u64 = (1 << COUNT_BITS) - 1;
@@ -85,7 +87,10 @@ impl SeqLock {
 
     fn wait(&self) {
         //TODO
+        #[cfg(not(loom))]
         std::thread::yield_now();
+        #[cfg(loom)]
+        loom::thread::yield_now();
     }
 
     /// returns version before locking

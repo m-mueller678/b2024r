@@ -3,6 +3,7 @@
 // #TODO this type need to be adjusted to be used in its loom counterpart
 #[cfg(loom)]
 pub(crate) use std::sync::atomic::AtomicU8;
+// ----------------------------------------------------------------------
 #[cfg(loom)]
 pub(crate) use loom::sync::atomic::Ordering;
 #[cfg(loom)]

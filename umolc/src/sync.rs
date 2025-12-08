@@ -8,9 +8,10 @@ pub(crate) use loom::sync::atomic::Ordering::{Acquire, Relaxed, Release};
 pub(crate) use loom::sync::atomic::fence;
 // #TODO these types need to be adjusted to be used in their loom counterparts
 #[cfg(loom)]
-pub(crate) use std::sync::atomic::AtomicU64;
+pub(crate) use loom::sync::atomic::AtomicU64;
 #[cfg(loom)]
 pub(crate) use std::cell::UnsafeCell;
+// ---------------------------------------------------------------------------
 
 #[cfg(not(loom))]
 pub(crate) use std::sync::Mutex;
