@@ -21,10 +21,14 @@ impl<P: Zeroable> SimpleBm<P> {
     pub fn new(capacity: usize) -> Self {
         unsafe {
             SimpleBm {
-                pages: Box::<[MaybeUninit<_>]>::assume_init(Box::new_zeroed_slice(capacity)),                
+                #[cfg(not(loom))]
+                pages: Box::<[MaybeUninit<_>]>::assume_init(Box::new_zeroed_slice(capacity)),
+                #[cfg(loom)] // correct initialization needed for loom
+                pages: {(0..capacity).map(|_| UnsafeCell::new(unsafe {std::mem::zeroed()})).collect()},
+
                 #[cfg(not(loom))]
                 locks: Box::<[MaybeUninit<_>]>::assume_init(Box::new_zeroed_slice(capacity)),
-                #[cfg(loom)]
+                #[cfg(loom)] // correct initialization needed for loom
                 locks: { (0..capacity).map(|_| SeqLock::new()).collect() },
                 free_list: Mutex::new((0..capacity).collect()),
             }
@@ -41,6 +45,7 @@ impl<'bm, P> CommonSeqLockBM<'bm> for &'bm SimpleBm<P> {
         debug_assert!(address >= start);
         debug_assert!(address < start + size_of::<P>() * self.pages.len());
         let offset = address - start;
+        // #[cfg(not(loom))]
         assert_eq!(offset % size_of::<P>(), 0);
         PageId { x: (offset / size_of::<P>()) as u64 }
     }
@@ -98,12 +103,18 @@ pub struct SimpleGuardS<'bm, BM: CommonSeqLockBM<'bm>> {
 impl<'bm, BM: CommonSeqLockBM<'bm>> BufferManagerGuard<'bm, BM> for SimpleGuardS<'bm, BM> {
     fn acquire_wait(bm: BM, page_id: PageId) -> Self {
         let Ok(_) = bm.lock(page_id).lock_shared(());
-        SimpleGuardS { bm, ptr: unsafe { &*bm.page(page_id).get() } }
+        // #[cfg(not(loom))]
+        return SimpleGuardS { bm, ptr: unsafe { &*bm.page(page_id).get() } };
+        // #[cfg(loom)]  // loom needs to dereference UnsafeCells with the function with()
+        // return SimpleGuardS { bm, ptr: bm.page(page_id).with(|p| unsafe { &*p }) };
     }
 
     fn acquire_wait_version(bm: BM, page_id: PageId, v: OlcVersion) -> Option<Self> {
         bm.lock(page_id).lock_shared(v).ok()?;
-        Some(SimpleGuardS { bm, ptr: unsafe { &*bm.page(page_id).get() } })
+        // #[cfg(not(loom))]
+        return Some(SimpleGuardS { bm, ptr: unsafe { &*bm.page(page_id).get() } });
+        // #[cfg(loom)] // loom needs to dereference UnsafeCells with the function with()
+        // return Some(SimpleGuardS { bm, ptr: bm.page(page_id).with(|p| unsafe { &*p }) });
     }
 
     fn release(self) -> OlcVersion {
@@ -138,12 +149,18 @@ pub struct SimpleGuardX<'bm, BM: CommonSeqLockBM<'bm>> {
 impl<'bm, BM: CommonSeqLockBM<'bm>> BufferManagerGuard<'bm, BM> for SimpleGuardX<'bm, BM> {
     fn acquire_wait(bm: BM, page_id: PageId) -> Self {
         let Ok(_version) = bm.lock(page_id).lock_exclusive(());
-        SimpleGuardX { bm, ptr: unsafe { &mut *bm.page(page_id).get() }, written: false }
+        // #[cfg(not(loom))]
+        return SimpleGuardX { bm, ptr: unsafe { &mut *bm.page(page_id).get() }, written: false };
+        // #[cfg(loom)] // loom needs to dereference UnsafeCells with the function with()
+        // return SimpleGuardX { bm, ptr: bm.page(page_id).with_mut(|p| unsafe { &mut *p }), written: false };
     }
 
     fn acquire_wait_version(bm: BM, page_id: PageId, version: OlcVersion) -> Option<Self> {
         bm.lock(page_id).lock_exclusive(version).ok()?;
-        Some(SimpleGuardX { bm, ptr: unsafe { &mut *bm.page(page_id).get() }, written: false })
+        // #[cfg(not(loom))]
+        return Some(SimpleGuardX { bm, ptr: unsafe { &mut *bm.page(page_id).get() }, written: false });
+        // #[cfg(loom)] // loom needs to dereference UnsafeCells with the function with()
+        // return Some(SimpleGuardX { bm, ptr: bm.page(page_id).with_mut(|p| unsafe { &mut *p }), written: false });
     }
 
     fn release(self) -> OlcVersion {
@@ -196,7 +213,10 @@ impl<'bm, BM: CommonSeqLockBM<'bm>> BufferManager<'bm> for BM {
 
     fn alloc(self) -> Self::GuardX {
         let pid = self.alloc();
-        SimpleGuardX { bm: self, ptr: unsafe { &mut *self.page(pid).get() }, written: false }
+        // #[cfg(not(loom))]
+        return SimpleGuardX { bm: self, ptr: unsafe { &mut *self.page(pid).get() }, written: false };
+        // #[cfg(loom)] // loom needs to dereference UnsafeCells with the function with()
+        // return SimpleGuardX { bm: self, ptr: self.page(pid).with_mut(|p| unsafe { &mut *p }), written: false };
     }
 }
 
@@ -204,7 +224,10 @@ impl<'bm, BM: CommonSeqLockBM<'bm>> BufferManageGuardUpgrade<'bm, BM, SimpleGuar
     fn upgrade(self) -> SimpleGuardS<'bm, BM> {
         let pid = self.bm.pid_from_address(self.ptr.to_raw().addr());
         BM::OlcEH::optmistic_fail_check(self.bm.lock(pid).lock_shared(self.version));
+        // #[cfg(not(loom))]
         let ret = SimpleGuardS { bm: self.bm, ptr: unsafe { &*self.bm.page(pid).get() } };
+        // #[cfg(loom)] // loom needs to dereference UnsafeCells with the function with()
+        // let ret = SimpleGuardS { bm: self.bm, ptr: self.bm.page(pid).with(|p| unsafe { &*p }) };
         self.release_unchecked();
         ret
     }
@@ -214,7 +237,10 @@ impl<'bm, BM: CommonSeqLockBM<'bm>> BufferManageGuardUpgrade<'bm, BM, SimpleGuar
     fn upgrade(self) -> SimpleGuardX<'bm, BM> {
         let pid = self.bm.pid_from_address(self.ptr.to_raw().addr());
         BM::OlcEH::optmistic_fail_check(self.bm.lock(pid).lock_exclusive(self.version));
+        // #[cfg(not(loom))]
         let ret = SimpleGuardX { bm: self.bm, ptr: unsafe { &mut *self.bm.page(pid).get() }, written: false };
+        // #[cfg(loom)] // loom needs to dereference UnsafeCells with the function with()
+        // let ret = SimpleGuardX { bm: self.bm, ptr: self.bm.page(pid).with_mut(|p| unsafe { &mut *p }), written: false };
         self.release_unchecked();
         ret
     }
@@ -258,8 +284,8 @@ impl<'bm, BM: CommonSeqLockBM<'bm>> Drop for SimpleGuardS<'bm, BM> {
 
 impl<'bm, BM: CommonSeqLockBM<'bm>> Drop for SimpleGuardX<'bm, BM> {
     fn drop(&mut self) {
-        if BM::OlcEH::is_unwinding() {
-            assert!(!self.written);
+        if BM::OlcEH::is_unwinding() {        
+            assert!(!self.written);            
         }
         self.bm.lock(self.page_id()).unlock_exclusive();
     }
@@ -268,12 +294,18 @@ impl<'bm, BM: CommonSeqLockBM<'bm>> Drop for SimpleGuardX<'bm, BM> {
 impl<'bm, BM: CommonSeqLockBM<'bm>> BufferManagerGuard<'bm, BM> for SimpleGuardO<'bm, BM> {
     fn acquire_wait(bm: BM, page_id: PageId) -> Self {
         let Ok(version) = bm.lock(page_id).lock_optimistic(());
-        SimpleGuardO { bm, ptr: unsafe { OPtr::from_raw(bm.page(page_id).get()) }, version }
+        // #[cfg(not(loom))]
+        return SimpleGuardO { bm, ptr: unsafe { OPtr::from_raw(bm.page(page_id).get()) }, version };
+        // #[cfg(loom)]
+        // return SimpleGuardO { bm, ptr: bm.page(page_id).with(|p| unsafe { OPtr::from_raw(p) }), version };
     }
 
     fn acquire_wait_version(bm: BM, page_id: PageId, version: OlcVersion) -> Option<Self> {
         bm.lock(page_id).lock_optimistic(version).ok()?;
-        Some(SimpleGuardO { bm, ptr: unsafe { OPtr::from_raw(bm.page(page_id).get()) }, version })
+        // #[cfg(not(loom))]
+        return Some(SimpleGuardO { bm, ptr: unsafe { OPtr::from_raw(bm.page(page_id).get()) }, version });
+        // #[cfg(loom)]
+        // return Some(SimpleGuardO { bm, ptr: bm.page(page_id).with(|p| unsafe { OPtr::from_raw(p) }), version });
     }
 
     fn release(self) -> OlcVersion {
