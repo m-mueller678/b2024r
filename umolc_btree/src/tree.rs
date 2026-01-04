@@ -352,9 +352,9 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> Tree<'bm, BM> {
         }
         path.push(node);
         path
-    }    
+    }
 
-    // this needed to be seeded because it was a source of nondeterminism
+    // this needed to be seeded because it was a source of non-determinism
     fn decrease_scan_counter(&self, mut node: BM::GuardO) -> BM::GuardO{
         #[cfg(loom)]
         fastrand::seed(111111);
@@ -367,8 +367,10 @@ impl<'bm, BM: BufferManager<'bm, Page = Page>> Tree<'bm, BM> {
         node
     }
 
-
+    // this needed to be seeded because it was a source of non-determinism
     fn increase_scan_counter(&self, mut node: BM::GuardO) -> BM::GuardO{
+        #[cfg(loom)]
+        fastrand::seed(111111);
         if fastrand::u8(..100) < 15 {
             node.o_ptr().increase_scan_counter();
 

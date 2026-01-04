@@ -32,8 +32,7 @@ pub const PAGE_SIZE: usize = 4096;
 
 const NODE_TAIL_SIZE: usize = PAGE_SIZE - size_of::<CommonNodeHead>();
 
-// replaced #[derive(Debug, Zeroable)] with #[derive(Debug)]
-#[derive(Debug)]
+#[derive(Debug, Zeroable)]
 #[repr(C)]
 pub struct CommonNodeHead {
     pub tag: u8,
@@ -43,9 +42,6 @@ pub struct CommonNodeHead {
     pub lower_fence_len: u16,
     pub upper_fence_len: u16,
 }
-
-// have to replace the derive(Zeroable) with this manual Zeroable, as looms atomics don't support it
-unsafe impl Zeroable for CommonNodeHead {}
 
 const NODE_UNSAFE_CELL_HEAD: usize = 2;
 
